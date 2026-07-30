@@ -1,0 +1,39 @@
+# Variables d'environnement
+.env
+.env.local
+.env.production
+.env.development
+.env.test
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+
+# Django
+media/
+staticfiles/
+
+# Node.js / React
+node_modules/
+dist/
+build/
+
+# VS Code
+.vscode/
+
+# JetBrains
+.idea/
+
+# Système
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
