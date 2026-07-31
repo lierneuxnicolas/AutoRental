@@ -8,6 +8,7 @@ from .auth import (
 	TokenRefreshView,
 	VerifyEmailView,
 )
+from .documents import ClientDocumentDetailView, ClientDocumentListCreateView
 from .profile import ClientProfileMeView, ClientProfileProgressView
 
 __all__ = [
@@ -19,6 +20,8 @@ __all__ = [
 	"LogoutView",
 	"PasswordResetRequestView",
 	"PasswordResetConfirmView",
+	"ClientDocumentListCreateView",
+	"ClientDocumentDetailView",
 	"ClientProfileMeView",
 	"ClientProfileProgressView",
 ]
