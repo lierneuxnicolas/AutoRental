@@ -8,6 +8,7 @@ from .auth import (
 	TokenRefreshView,
 	VerifyEmailView,
 )
+from .profile import ClientProfileMeView
 
 __all__ = [
 	"RegisterView",
@@ -18,4 +19,5 @@ __all__ = [
 	"LogoutView",
 	"PasswordResetRequestView",
 	"PasswordResetConfirmView",
+	"ClientProfileMeView",
 ]
