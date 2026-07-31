@@ -6,7 +6,9 @@ from .email_verification import (
 	send_verification_email,
 	verify_email_verification_token,
 )
+from .document_review import reject_document, validate_document
 from .profile_progress import calculate_profile_progress
+from .profile_status import recalculate_profile_status
 from .registration import register_client_user
 
 __all__ = [
@@ -16,6 +18,9 @@ __all__ = [
 	"generate_email_verification_token",
 	"send_verification_email",
 	"verify_email_verification_token",
+	"validate_document",
+	"reject_document",
 	"calculate_profile_progress",
+	"recalculate_profile_status",
 	"register_client_user",
 ]

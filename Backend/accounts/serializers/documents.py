@@ -122,3 +122,79 @@ class ClientDocumentCreateSerializer(serializers.ModelSerializer):
             validated_by=None,
             is_active=True,
         )
+
+
+class ManagerClientDocumentListSerializer(serializers.ModelSerializer):
+    client = serializers.IntegerField(source="client.id", read_only=True)
+    client_email = serializers.EmailField(source="client.user.email", read_only=True)
+    client_first_name = serializers.CharField(source="client.user.first_name", read_only=True)
+    client_last_name = serializers.CharField(source="client.user.last_name", read_only=True)
+    validated_by_email = serializers.EmailField(source="validated_by.email", read_only=True, allow_null=True)
+
+    class Meta:
+        model = ClientDocument
+        fields = (
+            "id",
+            "client",
+            "client_email",
+            "client_first_name",
+            "client_last_name",
+            "document_type",
+            "document_number",
+            "expiration_date",
+            "status",
+            "is_active",
+            "uploaded_at",
+            "validated_at",
+            "validated_by_email",
+        )
+
+
+class ManagerClientDocumentDetailSerializer(serializers.ModelSerializer):
+    client = serializers.IntegerField(source="client.id", read_only=True)
+    client_email = serializers.EmailField(source="client.user.email", read_only=True)
+    client_first_name = serializers.CharField(source="client.user.first_name", read_only=True)
+    client_last_name = serializers.CharField(source="client.user.last_name", read_only=True)
+    validated_by = serializers.IntegerField(source="validated_by.id", read_only=True, allow_null=True)
+    validated_by_email = serializers.EmailField(source="validated_by.email", read_only=True, allow_null=True)
+    file = serializers.FileField(read_only=True)
+
+    class Meta:
+        model = ClientDocument
+        fields = (
+            "id",
+            "client",
+            "client_email",
+            "client_first_name",
+            "client_last_name",
+            "document_type",
+            "document_number",
+            "file",
+            "expiration_date",
+            "status",
+            "rejection_reason",
+            "uploaded_at",
+            "validated_at",
+            "validated_by",
+            "validated_by_email",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+
+
+class ManagerRejectDocumentSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=True, allow_blank=False, trim_whitespace=False)
+
+    def validate_reason(self, value):
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError("Le motif de refus est obligatoire.")
+
+        max_length = ClientDocument._meta.get_field("rejection_reason").max_length
+        if max_length is not None and len(cleaned) > max_length:
+            raise serializers.ValidationError(
+                f"Le motif de refus ne peut pas depasser {max_length} caracteres."
+            )
+
+        return cleaned

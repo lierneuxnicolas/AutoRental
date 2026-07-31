@@ -7,7 +7,13 @@ from .auth import (
 	RegisterSerializer,
 	VerifyEmailSerializer,
 )
-from .documents import ClientDocumentCreateSerializer, ClientDocumentReadSerializer
+from .documents import (
+	ClientDocumentCreateSerializer,
+	ClientDocumentReadSerializer,
+	ManagerClientDocumentDetailSerializer,
+	ManagerClientDocumentListSerializer,
+	ManagerRejectDocumentSerializer,
+)
 from .profile import ClientProfileMeSerializer, ClientProfileProgressSerializer
 
 __all__ = [
@@ -20,6 +26,9 @@ __all__ = [
 	"PasswordResetConfirmSerializer",
 	"ClientDocumentCreateSerializer",
 	"ClientDocumentReadSerializer",
+	"ManagerClientDocumentListSerializer",
+	"ManagerClientDocumentDetailSerializer",
+	"ManagerRejectDocumentSerializer",
 	"ClientProfileMeSerializer",
 	"ClientProfileProgressSerializer",
 ]
