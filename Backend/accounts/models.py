@@ -1,5 +1,7 @@
 from django.contrib.auth.models import AbstractUser, BaseUserManager, Group, Permission
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 
@@ -110,3 +112,53 @@ class User(AbstractUser):
 
 	def __str__(self) -> str:
 		return self.email
+
+
+class ClientProfile(models.Model):
+	class ProfileStatus(models.TextChoices):
+		INCOMPLET = "INCOMPLET", "Incomplet"
+		EN_ATTENTE = "EN_ATTENTE", "En attente"
+		VALIDE = "VALIDE", "Valide"
+		REFUSE = "REFUSE", "Refuse"
+		EXPIRE = "EXPIRE", "Expire"
+
+	user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="client_profile")
+	date_of_birth = models.DateField(null=True, blank=True)
+	address = models.TextField(blank=True)
+	profile_status = models.CharField(
+		max_length=20,
+		choices=ProfileStatus.choices,
+		default=ProfileStatus.INCOMPLET,
+	)
+	rejection_reason = models.TextField(blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		ordering = ["-updated_at", "id"]
+		indexes = [
+			models.Index(fields=["profile_status"], name="client_profile_status_idx"),
+			models.Index(fields=["created_at"], name="client_profile_created_idx"),
+			models.Index(fields=["updated_at"], name="client_profile_updated_idx"),
+		]
+
+	def clean(self):
+		super().clean()
+		if self.date_of_birth:
+			today = timezone.localdate()
+			if self.date_of_birth > today:
+				raise ValidationError({"date_of_birth": "La date de naissance ne peut pas etre dans le futur."})
+			oldest_allowed = today.replace(year=today.year - 120)
+			if self.date_of_birth < oldest_allowed:
+				raise ValidationError({"date_of_birth": "La date de naissance semble invalide."})
+
+	@property
+	def is_actionable(self) -> bool:
+		return self.profile_status in {
+			self.ProfileStatus.INCOMPLET,
+			self.ProfileStatus.EN_ATTENTE,
+			self.ProfileStatus.REFUSE,
+		}
+
+	def __str__(self) -> str:
+		return f"ClientProfile<{self.user.email}>"
