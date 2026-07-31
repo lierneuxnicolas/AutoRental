@@ -1,6 +1,7 @@
 from django.db import transaction
 
 from accounts.models import ClientProfile, Role, User
+from accounts.services.email_verification import send_verification_email
 from notifications.services import create_notification
 
 
@@ -36,5 +37,7 @@ def register_client_user(*, email, password, first_name, last_name, phone=""):
         title="Compte cree",
         message="Votre compte AutoRental a ete cree. Confirmez votre adresse e-mail.",
     )
+
+    transaction.on_commit(lambda: send_verification_email(user))
 
     return user

@@ -1,3 +1,3 @@
-from .auth import CurrentUserSerializer, RegisterSerializer
+from .auth import CurrentUserSerializer, RegisterSerializer, VerifyEmailSerializer
 
-__all__ = ["RegisterSerializer", "CurrentUserSerializer"]
+__all__ = ["RegisterSerializer", "CurrentUserSerializer", "VerifyEmailSerializer"]
