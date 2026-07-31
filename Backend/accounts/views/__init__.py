@@ -1,3 +1,19 @@
-from .auth import LoginView, LogoutView, MeView, RegisterView, VerifyEmailView
+from .auth import (
+	LoginView,
+	LogoutView,
+	MeView,
+	PasswordResetConfirmView,
+	PasswordResetRequestView,
+	RegisterView,
+	VerifyEmailView,
+)
 
-__all__ = ["RegisterView", "MeView", "VerifyEmailView", "LoginView", "LogoutView"]
+__all__ = [
+	"RegisterView",
+	"MeView",
+	"VerifyEmailView",
+	"LoginView",
+	"LogoutView",
+	"PasswordResetRequestView",
+	"PasswordResetConfirmView",
+]
