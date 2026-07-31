@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Role, User
+from .models import ClientDocument, ClientProfile, Role, User
 
 
 @admin.register(Role)
@@ -72,3 +72,55 @@ class CustomUserAdmin(UserAdmin):
 			},
 		),
 	)
+
+
+@admin.register(ClientProfile)
+class ClientProfileAdmin(admin.ModelAdmin):
+	list_display = (
+		"user",
+		"date_of_birth",
+		"profile_status",
+		"rejection_reason",
+		"created_at",
+		"updated_at",
+	)
+	search_fields = ("user__email", "user__first_name", "user__last_name")
+	list_filter = ("profile_status",)
+	ordering = ("-updated_at",)
+	list_select_related = ("user",)
+	readonly_fields = ("created_at", "updated_at")
+	autocomplete_fields = ("user",)
+	list_per_page = 25
+
+
+@admin.register(ClientDocument)
+class ClientDocumentAdmin(admin.ModelAdmin):
+	list_display = (
+		"client",
+		"document_type",
+		"document_number",
+		"status",
+		"expiration_date",
+		"is_active",
+		"uploaded_at",
+		"validated_at",
+		"validated_by",
+	)
+	search_fields = (
+		"client__user__email",
+		"client__user__first_name",
+		"client__user__last_name",
+		"document_number",
+	)
+	list_filter = (
+		"document_type",
+		"status",
+		"is_active",
+		"expiration_date",
+		"validated_by",
+	)
+	ordering = ("-uploaded_at",)
+	list_select_related = ("client", "client__user", "validated_by")
+	readonly_fields = ("uploaded_at", "created_at", "updated_at")
+	autocomplete_fields = ("client", "validated_by")
+	list_per_page = 25
