@@ -56,3 +56,7 @@ class CurrentUserSerializer(serializers.ModelSerializer):
         if obj.role is None:
             return None
         return obj.role.code
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    token = serializers.CharField(write_only=True)
