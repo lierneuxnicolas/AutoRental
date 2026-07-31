@@ -12,6 +12,10 @@ from accounts.views import (
     RegisterView,
     TokenRefreshView,
     VerifyEmailView,
+    ManagementClientDocumentDetailView,
+    ManagementClientDocumentListView,
+    ManagementClientDocumentRejectView,
+    ManagementClientDocumentValidateView,
 )
 
 app_name = "accounts"
@@ -34,6 +38,26 @@ urlpatterns = [
         "users/me/documents/<int:pk>/",
         ClientDocumentDetailView.as_view(),
         name="users-me-documents-detail",
+    ),
+    path(
+        "management/documents/",
+        ManagementClientDocumentListView.as_view(),
+        name="management-documents",
+    ),
+    path(
+        "management/documents/<int:pk>/",
+        ManagementClientDocumentDetailView.as_view(),
+        name="management-documents-detail",
+    ),
+    path(
+        "management/documents/<int:pk>/validate/",
+        ManagementClientDocumentValidateView.as_view(),
+        name="management-documents-validate",
+    ),
+    path(
+        "management/documents/<int:pk>/reject/",
+        ManagementClientDocumentRejectView.as_view(),
+        name="management-documents-reject",
     ),
     path("users/me/profile-progress/", ClientProfileProgressView.as_view(), name="users-me-profile-progress"),
 ]
