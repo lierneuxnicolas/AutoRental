@@ -1,6 +1,7 @@
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework import generics
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
@@ -38,8 +39,12 @@ class _ClientProfileMixin:
 
 class ClientDocumentListCreateView(_ClientProfileMixin, generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated, IsClient]
+    parser_classes = [MultiPartParser, FormParser]
+    queryset = ClientDocument.objects.none()
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return self.queryset
         return ClientDocument.objects.filter(client__user=self.request.user).select_related("client", "client__user")
 
     def get_serializer_class(self):
@@ -65,7 +70,7 @@ class ClientDocumentListCreateView(_ClientProfileMixin, generics.ListCreateAPIVi
 
     @extend_schema(
         tags=["Client Documents"],
-        request=ClientDocumentCreateSerializer,
+        request={"multipart/form-data": ClientDocumentCreateSerializer},
         responses={
             201: ClientDocumentReadSerializer,
             400: ErrorDetailResponseSerializer,
@@ -80,8 +85,11 @@ class ClientDocumentListCreateView(_ClientProfileMixin, generics.ListCreateAPIVi
 class ClientDocumentDetailView(generics.RetrieveAPIView):
     serializer_class = ClientDocumentReadSerializer
     permission_classes = [IsAuthenticated, IsClient]
+    queryset = ClientDocument.objects.none()
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return self.queryset
         return ClientDocument.objects.filter(client__user=self.request.user).select_related("client", "client__user")
 
     @extend_schema(
@@ -139,7 +147,7 @@ class ManagementClientDocumentListView(generics.ListAPIView):
         return queryset.order_by("-uploaded_at")
 
     @extend_schema(
-        tags=["Management Documents"],
+        tags=["Document Management"],
         responses={
             200: ManagerClientDocumentListSerializer(many=True),
             401: ErrorDetailResponseSerializer,
@@ -158,7 +166,7 @@ class ManagementClientDocumentDetailView(generics.RetrieveAPIView):
         return ClientDocument.objects.select_related("client", "client__user", "validated_by")
 
     @extend_schema(
-        tags=["Management Documents"],
+        tags=["Document Management"],
         responses={
             200: ManagerClientDocumentDetailSerializer,
             401: ErrorDetailResponseSerializer,
@@ -172,9 +180,11 @@ class ManagementClientDocumentDetailView(generics.RetrieveAPIView):
 
 class ManagementClientDocumentValidateView(APIView):
     permission_classes = [IsAuthenticated, IsManager]
+    serializer_class = ManagerClientDocumentDetailSerializer
 
     @extend_schema(
-        tags=["Management Documents"],
+        tags=["Document Management"],
+        request=None,
         responses={
             200: ManagerClientDocumentDetailSerializer,
             400: ErrorDetailResponseSerializer,
@@ -199,9 +209,10 @@ class ManagementClientDocumentValidateView(APIView):
 
 class ManagementClientDocumentRejectView(APIView):
     permission_classes = [IsAuthenticated, IsManager]
+    serializer_class = ManagerRejectDocumentSerializer
 
     @extend_schema(
-        tags=["Management Documents"],
+        tags=["Document Management"],
         request=ManagerRejectDocumentSerializer,
         responses={
             200: ManagerClientDocumentDetailSerializer,
