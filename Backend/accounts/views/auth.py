@@ -3,6 +3,8 @@ from django.core.mail import send_mail
 from django.db import transaction
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
+from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view, inline_serializer
+from rest_framework import serializers as drf_serializers
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -32,9 +34,58 @@ from django.contrib.auth.tokens import default_token_generator
 from notifications.services import create_notification
 
 
+MessageResponseSerializer = inline_serializer(
+    name="MessageResponse",
+    fields={"message": drf_serializers.CharField()},
+)
+
+ErrorDetailResponseSerializer = inline_serializer(
+    name="ErrorDetailResponse",
+    fields={"detail": drf_serializers.CharField()},
+)
+
+AuthUserResponseSerializer = inline_serializer(
+    name="AuthUserResponse",
+    fields={
+        "id": drf_serializers.IntegerField(),
+        "email": drf_serializers.EmailField(),
+        "first_name": drf_serializers.CharField(),
+        "last_name": drf_serializers.CharField(),
+        "role": drf_serializers.CharField(allow_null=True),
+        "email_verified": drf_serializers.BooleanField(),
+    },
+)
+
+RegisterResponseSerializer = inline_serializer(
+    name="RegisterResponse",
+    fields={
+        "message": drf_serializers.CharField(),
+        "user": AuthUserResponseSerializer,
+    },
+)
+
+LoginResponseSerializer = inline_serializer(
+    name="LoginResponse",
+    fields={
+        "access": drf_serializers.CharField(),
+        "refresh": drf_serializers.CharField(),
+        "user": AuthUserResponseSerializer,
+    },
+)
+
+
 class RegisterView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        tags=["Authentication"],
+        auth=[],
+        request=RegisterSerializer,
+        responses={
+            201: RegisterResponseSerializer,
+            400: OpenApiResponse(response=ErrorDetailResponseSerializer),
+        },
+    )
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -63,6 +114,13 @@ class RegisterView(APIView):
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=["Authentication"],
+        responses={
+            200: CurrentUserSerializer,
+            401: OpenApiResponse(response=ErrorDetailResponseSerializer),
+        },
+    )
     def get(self, request):
         serializer = CurrentUserSerializer(request.user)
         return Response(serializer.data)
@@ -71,6 +129,15 @@ class MeView(APIView):
 class VerifyEmailView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        tags=["Authentication"],
+        auth=[],
+        request=VerifyEmailSerializer,
+        responses={
+            200: MessageResponseSerializer,
+            400: OpenApiResponse(response=ErrorDetailResponseSerializer),
+        },
+    )
     def post(self, request):
         serializer = VerifyEmailSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -89,6 +156,17 @@ class VerifyEmailView(APIView):
         return Response({"message": "Adresse e-mail confirmee."}, status=status.HTTP_200_OK)
 
 
+@extend_schema_view(
+    post=extend_schema(
+        tags=["Authentication"],
+        auth=[],
+        request=LoginSerializer,
+        responses={
+            200: LoginResponseSerializer,
+            401: OpenApiResponse(response=ErrorDetailResponseSerializer),
+        },
+    )
+)
 class LoginView(TokenObtainPairView):
     permission_classes = [AllowAny]
     serializer_class = LoginSerializer
@@ -97,6 +175,15 @@ class LoginView(TokenObtainPairView):
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=["Authentication"],
+        request=LogoutSerializer,
+        responses={
+            205: MessageResponseSerializer,
+            400: OpenApiResponse(response=ErrorDetailResponseSerializer),
+            401: OpenApiResponse(response=ErrorDetailResponseSerializer),
+        },
+    )
     def post(self, request):
         serializer = LogoutSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -115,6 +202,12 @@ class LogoutView(APIView):
 class PasswordResetRequestView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        tags=["Authentication"],
+        auth=[],
+        request=PasswordResetRequestSerializer,
+        responses={200: MessageResponseSerializer},
+    )
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -152,6 +245,15 @@ class PasswordResetRequestView(APIView):
 class PasswordResetConfirmView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        tags=["Authentication"],
+        auth=[],
+        request=PasswordResetConfirmSerializer,
+        responses={
+            200: MessageResponseSerializer,
+            400: OpenApiResponse(response=ErrorDetailResponseSerializer),
+        },
+    )
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
