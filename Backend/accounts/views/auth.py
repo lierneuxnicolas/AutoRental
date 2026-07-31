@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView as SimpleJWTTokenRefreshView
 
 from accounts.serializers.auth import (
     CurrentUserSerializer,
@@ -71,6 +71,16 @@ LoginResponseSerializer = inline_serializer(
         "refresh": drf_serializers.CharField(),
         "user": AuthUserResponseSerializer,
     },
+)
+
+TokenRefreshRequestSerializer = inline_serializer(
+    name="TokenRefreshRequest",
+    fields={"refresh": drf_serializers.CharField()},
+)
+
+TokenRefreshResponseSerializer = inline_serializer(
+    name="TokenRefreshResponse",
+    fields={"access": drf_serializers.CharField()},
 )
 
 
@@ -170,6 +180,21 @@ class VerifyEmailView(APIView):
 class LoginView(TokenObtainPairView):
     permission_classes = [AllowAny]
     serializer_class = LoginSerializer
+
+
+@extend_schema_view(
+    post=extend_schema(
+        tags=["Authentication"],
+        auth=[],
+        request=TokenRefreshRequestSerializer,
+        responses={
+            200: TokenRefreshResponseSerializer,
+            401: OpenApiResponse(response=ErrorDetailResponseSerializer),
+        },
+    )
+)
+class TokenRefreshView(SimpleJWTTokenRefreshView):
+    permission_classes = [AllowAny]
 
 
 class LogoutView(APIView):

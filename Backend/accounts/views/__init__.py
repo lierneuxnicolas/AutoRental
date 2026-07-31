@@ -5,6 +5,7 @@ from .auth import (
 	PasswordResetConfirmView,
 	PasswordResetRequestView,
 	RegisterView,
+	TokenRefreshView,
 	VerifyEmailView,
 )
 
@@ -13,6 +14,7 @@ __all__ = [
 	"MeView",
 	"VerifyEmailView",
 	"LoginView",
+	"TokenRefreshView",
 	"LogoutView",
 	"PasswordResetRequestView",
 	"PasswordResetConfirmView",
