@@ -66,3 +66,24 @@ class IsManagerOrAdministrator(BasePermission):
 		return _user_has_active_role(user, Role.Code.GESTIONNAIRE_COMPTABLE) or _user_has_active_role(
 			user, Role.Code.ADMINISTRATEUR
 		)
+
+
+class IsReservationOwner(_RolePermission):
+	"""Allow access only when Reservation.client.user matches request.user."""
+
+	role_code = Role.Code.CLIENT
+	message = "Vous ne pouvez acceder qu'a vos propres reservations."
+
+	def has_permission(self, request, view):
+		return super().has_permission(request, view)
+
+	def has_object_permission(self, request, view, obj):
+		if not super().has_permission(request, view):
+			return False
+		client = getattr(obj, "client", None)
+		if client is None:
+			return False
+		owner = getattr(client, "user", None)
+		if owner is None:
+			return False
+		return owner == request.user
