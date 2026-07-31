@@ -1,5 +1,7 @@
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from accounts.models import User
 
@@ -60,3 +62,35 @@ class CurrentUserSerializer(serializers.ModelSerializer):
 
 class VerifyEmailSerializer(serializers.Serializer):
     token = serializers.CharField(write_only=True)
+
+
+class LoginSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        email = attrs.get(self.username_field, "")
+        attrs[self.username_field] = email.strip().lower()
+
+        try:
+            data = super().validate(attrs)
+        except AuthenticationFailed as exc:
+            raise AuthenticationFailed("Identifiants invalides.") from exc
+
+        user = self.user
+        if not user.is_active:
+            raise AuthenticationFailed("Ce compte est desactive.")
+
+        if not user.email_verified and not user.is_superuser:
+            raise AuthenticationFailed("Confirmez votre adresse e-mail avant de vous connecter.")
+
+        data["user"] = {
+            "id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": user.role.code if user.role else None,
+            "email_verified": user.email_verified,
+        }
+        return data
+
+
+class LogoutSerializer(serializers.Serializer):
+    refresh = serializers.CharField(required=True, write_only=True)
