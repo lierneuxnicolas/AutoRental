@@ -1,6 +1,7 @@
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_decode
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -56,7 +57,8 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             "date_joined",
         )
 
-    def get_role(self, obj):
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_role(self, obj) -> str | None:
         if obj.role is None:
             return None
         return obj.role.code
