@@ -1,6 +1,6 @@
 from django.contrib.auth.models import AbstractUser, BaseUserManager, Group, Permission
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -202,17 +202,10 @@ class ClientDocument(models.Model):
 	class Meta:
 		ordering = ["-created_at", "id"]
 		indexes = [
-			models.Index(fields=["client", "document_type"], name="client_doc_type_idx"),
+			models.Index(fields=["client", "document_type", "is_active"], name="client_doc_active_type_idx"),
 			models.Index(fields=["status"], name="client_doc_status_idx"),
 			models.Index(fields=["expiration_date"], name="client_doc_exp_idx"),
 			models.Index(fields=["is_active"], name="client_doc_active_idx"),
-		]
-		constraints = [
-			models.UniqueConstraint(
-				fields=["client", "document_type"],
-				condition=models.Q(is_active=True),
-				name="uniq_active_doc_per_client_type",
-			),
 		]
 
 	def clean(self):
@@ -231,6 +224,23 @@ class ClientDocument(models.Model):
 			raise ValidationError(
 				{"validated_by": "Le validateur doit avoir le role GESTIONNAIRE_COMPTABLE."}
 			)
+
+	def save(self, *args, **kwargs):
+		with transaction.atomic():
+			if self.is_active and self.client_id and self.document_type:
+				active_qs = (
+					ClientDocument.objects.select_for_update()
+					.filter(
+						client_id=self.client_id,
+						document_type=self.document_type,
+						is_active=True,
+					)
+				)
+				if self.pk:
+					active_qs = active_qs.exclude(pk=self.pk)
+				active_qs.update(is_active=False)
+
+			super().save(*args, **kwargs)
 
 	def __str__(self) -> str:
 		return f"{self.document_type} - {self.client.user.email}"
