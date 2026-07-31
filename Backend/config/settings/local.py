@@ -1,6 +1,8 @@
+import os
+
 from .base import *  # noqa: F401,F403
 
-DEBUG = True
+DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in ("true", "1", "yes")
 
 ALLOWED_HOSTS = [
     "127.0.0.1",
