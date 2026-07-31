@@ -14,6 +14,22 @@ def _user_has_active_role(user, role_code):
 	return role.code == role_code
 
 
+def _object_assigned_to_request_user(obj, request):
+	assigned_to = getattr(obj, "assigned_to", None)
+	if assigned_to is None:
+		return False
+	return assigned_to == request.user
+
+
+def _is_mechanic_intervention(obj):
+	intervention_type = getattr(obj, "type", None)
+	if intervention_type is None:
+		intervention_type = getattr(obj, "intervention_type", None)
+	if intervention_type is None:
+		return True
+	return str(intervention_type).upper() == "MECANIQUE"
+
+
 class _RolePermission(BasePermission):
 	role_code = None
 	message = "Cette action n'est pas autorisee."
@@ -87,3 +103,35 @@ class IsReservationOwner(_RolePermission):
 		if owner is None:
 			return False
 		return owner == request.user
+
+
+class IsAssignedMechanic(_RolePermission):
+	"""DRF object permissions do not filter list views automatically; use a queryset like Intervention.objects.filter(assigned_to=request.user). Contract attendu: Intervention.assigned_to."""
+
+	role_code = Role.Code.MECANICIEN
+	message = "Cette intervention ne vous est pas attribuee ou n'est pas une intervention mecanique autorisee."
+
+	def has_permission(self, request, view):
+		return super().has_permission(request, view)
+
+	def has_object_permission(self, request, view, obj):
+		if not super().has_permission(request, view):
+			return False
+		if not _object_assigned_to_request_user(obj, request):
+			return False
+		return _is_mechanic_intervention(obj)
+
+
+class IsAssignedCleaner(_RolePermission):
+	"""DRF object permissions do not filter list views automatically; use a queryset like Intervention.objects.filter(assigned_to=request.user). Contract attendu: Intervention.assigned_to."""
+
+	role_code = Role.Code.NETTOYEUR
+	message = "Cette intervention de nettoyage ne vous est pas attribuee."
+
+	def has_permission(self, request, view):
+		return super().has_permission(request, view)
+
+	def has_object_permission(self, request, view, obj):
+		if not super().has_permission(request, view):
+			return False
+		return _object_assigned_to_request_user(obj, request)
