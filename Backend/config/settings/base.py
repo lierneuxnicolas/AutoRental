@@ -33,6 +33,10 @@ EMAIL_VERIFICATION_MAX_AGE = int(
     os.getenv("EMAIL_VERIFICATION_MAX_AGE", "86400")
 )
 
+CLIENT_DOCUMENT_MAX_SIZE = int(
+    os.getenv("CLIENT_DOCUMENT_MAX_SIZE", str(10 * 1024 * 1024))
+)
+
 
 # Application definition
 

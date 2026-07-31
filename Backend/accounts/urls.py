@@ -1,6 +1,8 @@
 from django.urls import path
 
 from accounts.views import (
+    ClientDocumentDetailView,
+    ClientDocumentListCreateView,
     ClientProfileProgressView,
     LoginView,
     LogoutView,
@@ -27,5 +29,11 @@ urlpatterns = [
         name="auth-password-reset-confirm",
     ),
     path("auth/me/", MeView.as_view(), name="auth-me"),
+    path("users/me/documents/", ClientDocumentListCreateView.as_view(), name="users-me-documents"),
+    path(
+        "users/me/documents/<int:pk>/",
+        ClientDocumentDetailView.as_view(),
+        name="users-me-documents-detail",
+    ),
     path("users/me/profile-progress/", ClientProfileProgressView.as_view(), name="users-me-profile-progress"),
 ]
