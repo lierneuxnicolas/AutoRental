@@ -28,11 +28,6 @@ load_dotenv(BASE_DIR.parent / ".env")
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = "django-insecure-$(-#6+46uurw@&^pe$#n^9hshh)jh0%rou1#q7kb5w%ezi@ers"
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-ALLOWED_HOSTS = []
-
 
 # Application definition
 
