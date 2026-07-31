@@ -1,4 +1,6 @@
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -94,3 +96,53 @@ class LoginSerializer(TokenObtainPairSerializer):
 
 class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField(required=True, write_only=True)
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField(required=True)
+    token = serializers.CharField(required=True)
+    new_password = serializers.CharField(write_only=True, required=True, style={"input_type": "password"})
+    new_password_confirm = serializers.CharField(
+        write_only=True,
+        required=True,
+        style={"input_type": "password"},
+    )
+
+    default_error_messages = {
+        "invalid_link": "Lien de reinitialisation invalide ou expire.",
+    }
+
+    def validate(self, attrs):
+        password = attrs.get("new_password")
+        password_confirm = attrs.get("new_password_confirm")
+        if password != password_confirm:
+            raise serializers.ValidationError(
+                {"new_password_confirm": "Les mots de passe ne correspondent pas."}
+            )
+
+        uid = attrs.get("uid")
+        token = attrs.get("token")
+
+        try:
+            user_id = urlsafe_base64_decode(uid).decode()
+        except (TypeError, ValueError, OverflowError, UnicodeDecodeError):
+            self.fail("invalid_link")
+
+        user = User.objects.filter(pk=user_id).first()
+        if user is None:
+            self.fail("invalid_link")
+
+        if not default_token_generator.check_token(user, token):
+            self.fail("invalid_link")
+
+        validate_password(password, user=user)
+
+        attrs["user"] = user
+        return attrs

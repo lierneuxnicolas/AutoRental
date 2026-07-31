@@ -19,7 +19,15 @@ from django.contrib import admin
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from accounts.views import LoginView, LogoutView, MeView, RegisterView, VerifyEmailView
+from accounts.views import (
+    LoginView,
+    LogoutView,
+    MeView,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
+    RegisterView,
+    VerifyEmailView,
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -27,6 +35,12 @@ urlpatterns = [
     path("api/v1/auth/login/", LoginView.as_view(), name="auth-login"),
     path("api/v1/auth/token/refresh/", TokenRefreshView.as_view(), name="auth-token-refresh"),
     path("api/v1/auth/logout/", LogoutView.as_view(), name="auth-logout"),
+    path("api/v1/auth/password-reset/", PasswordResetRequestView.as_view(), name="auth-password-reset"),
+    path(
+        "api/v1/auth/password-reset/confirm/",
+        PasswordResetConfirmView.as_view(),
+        name="auth-password-reset-confirm",
+    ),
     path("api/v1/auth/me/", MeView.as_view(), name="auth-me"),
     path("api/v1/auth/verify-email/", VerifyEmailView.as_view(), name="auth-verify-email"),
 ]

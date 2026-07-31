@@ -1,3 +1,8 @@
+from django.conf import settings
+from django.core.mail import send_mail
+from django.db import transaction
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -10,9 +15,12 @@ from accounts.serializers.auth import (
     CurrentUserSerializer,
     LoginSerializer,
     LogoutSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
     RegisterSerializer,
     VerifyEmailSerializer,
 )
+from accounts.models import User
 from accounts.services.email_verification import (
     AlreadyUsedEmailVerificationToken,
     ExpiredEmailVerificationToken,
@@ -20,6 +28,8 @@ from accounts.services.email_verification import (
     verify_email_verification_token,
 )
 from accounts.services.registration import RegistrationError, register_client_user
+from django.contrib.auth.tokens import default_token_generator
+from notifications.services import create_notification
 
 
 class RegisterView(APIView):
@@ -100,3 +110,63 @@ class LogoutView(APIView):
             return Response({"detail": "Refresh token invalide."}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({"message": "Deconnexion reussie."}, status=status.HTTP_205_RESET_CONTENT)
+
+
+class PasswordResetRequestView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+        user = User.objects.filter(email__iexact=email, is_active=True).first()
+
+        if user is not None:
+            uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            frontend_url = getattr(settings, "FRONTEND_URL", "") or ""
+            reset_url = f"{frontend_url.rstrip('/')}/reset-password?uid={uidb64}&token={token}"
+
+            def _send_reset_email():
+                send_mail(
+                    subject="Reinitialisation de votre mot de passe AutoRental",
+                    message=(
+                        "Vous avez demande la reinitialisation de votre mot de passe.\n\n"
+                        "Si vous etes a l'origine de cette demande, ouvrez ce lien :\n"
+                        f"{reset_url}\n"
+                    ),
+                    from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+                    recipient_list=[user.email],
+                    fail_silently=False,
+                )
+
+            transaction.on_commit(_send_reset_email)
+
+        return Response(
+            {"message": "Si un compte correspond a cette adresse, un e-mail a ete envoye."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.validated_data["user"]
+        new_password = serializer.validated_data["new_password"]
+
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+
+        create_notification(
+            user=user,
+            notification_type="PASSWORD_CHANGED",
+            title="Mot de passe modifie",
+            message="Le mot de passe de votre compte AutoRental a ete reinitialise.",
+        )
+
+        return Response({"message": "Mot de passe reinitialise."}, status=status.HTTP_200_OK)
