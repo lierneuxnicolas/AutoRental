@@ -2,8 +2,17 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
 
-from accounts.serializers.auth import CurrentUserSerializer, RegisterSerializer, VerifyEmailSerializer
+from accounts.serializers.auth import (
+    CurrentUserSerializer,
+    LoginSerializer,
+    LogoutSerializer,
+    RegisterSerializer,
+    VerifyEmailSerializer,
+)
 from accounts.services.email_verification import (
     AlreadyUsedEmailVerificationToken,
     ExpiredEmailVerificationToken,
@@ -68,3 +77,26 @@ class VerifyEmailView(APIView):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({"message": "Adresse e-mail confirmee."}, status=status.HTTP_200_OK)
+
+
+class LoginView(TokenObtainPairView):
+    permission_classes = [AllowAny]
+    serializer_class = LoginSerializer
+
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = LogoutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        refresh_token = serializer.validated_data["refresh"]
+
+        try:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+        except TokenError:
+            return Response({"detail": "Refresh token invalide."}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({"message": "Deconnexion reussie."}, status=status.HTTP_205_RESET_CONTENT)
