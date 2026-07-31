@@ -100,3 +100,12 @@ class ClientProfileMeSerializer(serializers.ModelSerializer):
                 instance.save(update_fields=profile_changed_fields)
 
         return instance
+
+
+class ClientProfileProgressSerializer(serializers.Serializer):
+    percentage = serializers.IntegerField(min_value=0, max_value=100)
+    account_created = serializers.BooleanField()
+    email_verified = serializers.BooleanField()
+    personal_information_complete = serializers.BooleanField()
+    identity_card_valid = serializers.BooleanField()
+    driving_license_valid = serializers.BooleanField()

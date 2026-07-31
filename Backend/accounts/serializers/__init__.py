@@ -7,7 +7,7 @@ from .auth import (
 	RegisterSerializer,
 	VerifyEmailSerializer,
 )
-from .profile import ClientProfileMeSerializer
+from .profile import ClientProfileMeSerializer, ClientProfileProgressSerializer
 
 __all__ = [
 	"RegisterSerializer",
@@ -18,4 +18,5 @@ __all__ = [
 	"PasswordResetRequestSerializer",
 	"PasswordResetConfirmSerializer",
 	"ClientProfileMeSerializer",
+	"ClientProfileProgressSerializer",
 ]
