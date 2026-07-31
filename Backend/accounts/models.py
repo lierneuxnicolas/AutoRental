@@ -162,3 +162,75 @@ class ClientProfile(models.Model):
 
 	def __str__(self) -> str:
 		return f"ClientProfile<{self.user.email}>"
+
+
+class ClientDocument(models.Model):
+	class DocumentType(models.TextChoices):
+		CARTE_IDENTITE = "CARTE_IDENTITE", "Carte d'identite"
+		PERMIS_CONDUIRE = "PERMIS_CONDUIRE", "Permis de conduire"
+
+	class Status(models.TextChoices):
+		EN_ATTENTE = "EN_ATTENTE", "En attente"
+		VALIDE = "VALIDE", "Valide"
+		REFUSE = "REFUSE", "Refuse"
+		EXPIRE = "EXPIRE", "Expire"
+
+	client = models.ForeignKey(
+		ClientProfile,
+		on_delete=models.CASCADE,
+		related_name="documents",
+	)
+	document_type = models.CharField(max_length=30, choices=DocumentType.choices)
+	document_number = models.CharField(max_length=120)
+	file = models.FileField(upload_to="client_documents/")
+	expiration_date = models.DateField(null=True, blank=True)
+	status = models.CharField(max_length=20, choices=Status.choices, default=Status.EN_ATTENTE)
+	rejection_reason = models.TextField(blank=True)
+	uploaded_at = models.DateTimeField(auto_now_add=True)
+	validated_at = models.DateTimeField(null=True, blank=True)
+	validated_by = models.ForeignKey(
+		User,
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name="validated_documents",
+	)
+	is_active = models.BooleanField(default=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		ordering = ["-created_at", "id"]
+		indexes = [
+			models.Index(fields=["client", "document_type"], name="client_doc_type_idx"),
+			models.Index(fields=["status"], name="client_doc_status_idx"),
+			models.Index(fields=["expiration_date"], name="client_doc_exp_idx"),
+			models.Index(fields=["is_active"], name="client_doc_active_idx"),
+		]
+		constraints = [
+			models.UniqueConstraint(
+				fields=["client", "document_type"],
+				condition=models.Q(is_active=True),
+				name="uniq_active_doc_per_client_type",
+			),
+		]
+
+	def clean(self):
+		super().clean()
+		today = timezone.localdate()
+		if self.expiration_date and self.expiration_date < today:
+			raise ValidationError({"expiration_date": "La date d'expiration ne peut pas etre depassee."})
+
+		if self.validated_at and self.validated_at.date() > today:
+			raise ValidationError({"validated_at": "La date de validation ne peut pas etre dans le futur."})
+
+		if self.validated_by and (
+			not self.validated_by.role
+			or self.validated_by.role.code != Role.Code.GESTIONNAIRE_COMPTABLE
+		):
+			raise ValidationError(
+				{"validated_by": "Le validateur doit avoir le role GESTIONNAIRE_COMPTABLE."}
+			)
+
+	def __str__(self) -> str:
+		return f"{self.document_type} - {self.client.user.email}"
