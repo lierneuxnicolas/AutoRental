@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from vehicles.models import Parking, Vehicle, VehicleCategory
@@ -61,6 +62,7 @@ class VehiclePublicSerializer(serializers.ModelSerializer):
 			return False
 		return bool(space.is_active and parking.is_active)
 
+	@extend_schema_field(VehiclePhotoPublicSerializer(allow_null=True))
 	def get_main_photo(self, obj: Vehicle):
 		primary = next((photo for photo in obj.photos.all() if photo.is_primary), None)
 		if primary is None:
@@ -69,20 +71,24 @@ class VehiclePublicSerializer(serializers.ModelSerializer):
 			return None
 		return VehiclePhotoPublicSerializer(primary, context=self.context).data
 
+	@extend_schema_field(VehiclePhotoPublicSerializer(many=True))
 	def get_photos(self, obj: Vehicle):
 		photos = list(obj.photos.all())
 		return VehiclePhotoPublicSerializer(photos, many=True, context=self.context).data
 
+	@extend_schema_field(serializers.CharField(allow_null=True))
 	def get_parking_name(self, obj: Vehicle):
 		if not self._can_expose_exact_location(obj):
 			return None
 		return obj.parking_space.parking.name
 
+	@extend_schema_field(serializers.CharField(allow_null=True))
 	def get_parking_address(self, obj: Vehicle):
 		if not self._can_expose_exact_location(obj):
 			return None
 		return obj.parking_space.parking.address
 
+	@extend_schema_field(serializers.CharField(allow_null=True))
 	def get_parking_space_number(self, obj: Vehicle):
 		if not self._can_expose_exact_location(obj):
 			return None
