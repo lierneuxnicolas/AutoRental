@@ -14,15 +14,17 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from accounts.models import Role
+from accounts.models import ClientProfile, Role
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehiclePhoto
 from vehicles.services import (
 	AvailabilityValidationError,
-	BLOCKING_RESERVATION_STATUSES,
 	calculate_duration_hours,
+	get_available_vehicles,
+	get_blocking_reservation_statuses,
 	is_vehicle_available,
 	validate_availability_period,
 )
+from reservations.models import Reservation
 
 
 def _create_test_image_file(name="vehicle.jpg", image_format="JPEG", content_type="image/jpeg"):
@@ -564,9 +566,9 @@ class _FakeReservationQuerySet:
 				continue
 			if "status__in" in kwargs and reservation.get("status") not in kwargs["status__in"]:
 				continue
-			if "start__lt" in kwargs and not (reservation.get("start") < kwargs["start__lt"]):
+			if "start_at__lt" in kwargs and not (reservation.get("start") < kwargs["start_at__lt"]):
 				continue
-			if "end__gt" in kwargs and not (reservation.get("end") > kwargs["end__gt"]):
+			if "end_at__gt" in kwargs and not (reservation.get("end") > kwargs["end_at__gt"]):
 				continue
 			filtered.append(reservation)
 		return _FakeReservationQuerySet(filtered)
@@ -587,6 +589,8 @@ class AvailabilityOverlapAndStatusTests(VehicleTestDataMixin, TestCase):
 			"vehicle_id": (vehicle or self.vehicle_active).id,
 			"start": start,
 			"end": end,
+			"start_at": start,
+			"end_at": end,
 			"status": status,
 		}
 
@@ -669,7 +673,7 @@ class AvailabilityOverlapAndStatusTests(VehicleTestDataMixin, TestCase):
 
 	def test_blocking_reservation_statuses_block_availability(self):
 		start, end = self._period()
-		for status_value in BLOCKING_RESERVATION_STATUSES:
+		for status_value in get_blocking_reservation_statuses():
 			with self.subTest(status=status_value):
 				reservation_queryset = _FakeReservationQuerySet(
 					[
@@ -689,6 +693,27 @@ class AvailabilityOverlapAndStatusTests(VehicleTestDataMixin, TestCase):
 				)
 
 				self.assertFalse(available)
+
+	def test_en_attente_caution_does_not_block_availability(self):
+		start, end = self._period()
+		reservation_queryset = _FakeReservationQuerySet(
+			[
+				self._reservation(
+					start=start + timedelta(minutes=10),
+					end=end - timedelta(minutes=10),
+					status=Reservation.Status.EN_ATTENTE_CAUTION,
+				)
+			]
+		)
+
+		available = is_vehicle_available(
+			vehicle=self.vehicle_active,
+			start=start,
+			end=end,
+			reservation_queryset=reservation_queryset,
+		)
+
+		self.assertTrue(available)
 
 	def test_non_blocking_reservation_statuses_do_not_block_availability(self):
 		non_blocking_statuses = ["BROUILLON", "ANNULEE", "TERMINEE", "PAIEMENT_ECHOUE"]
@@ -1000,10 +1025,108 @@ class VehicleAvailableEndpointTests(VehicleTestDataMixin, TestCase):
 		mocked_get_available_vehicles.assert_called_once()
 
 
-@unittest.skip("Integration avec reservations.Reservation a completer au point 39.")
-class AvailabilityIntegrationDeferredTests(TestCase):
-	def test_real_reservation_model_integration_deferred_to_point_39(self):
-		self.assertTrue(True)
+class AvailabilityIntegrationDeferredTests(VehicleTestDataMixin, TestCase):
+	def setUp(self):
+		super().setUp()
+		self.client_profile, _ = ClientProfile.objects.get_or_create(
+			user=self.client_user,
+			defaults={"profile_status": ClientProfile.ProfileStatus.VALIDE},
+		)
+
+	def _period(self):
+		start = timezone.now() + timedelta(days=1)
+		end = start + timedelta(hours=4)
+		return start, end
+
+	def _create_reservation(self, *, start_at, end_at, status):
+		return Reservation.objects.create(
+			client=self.client_profile,
+			vehicle=self.vehicle_active,
+			start_at=start_at,
+			end_at=end_at,
+			status=status,
+			rental_amount="100.00",
+			deposit_amount="200.00",
+			confirmed_at=start_at if status in {Reservation.Status.CONFIRMEE, Reservation.Status.EN_COURS} else None,
+			cancelled_at=start_at if status == Reservation.Status.ANNULEE else None,
+			cancellation_reason="Annulee" if status == Reservation.Status.ANNULEE else "",
+		)
+
+	def _is_available_with_real_reservations(self, start, end):
+		return is_vehicle_available(
+			vehicle=self.vehicle_active,
+			start=start,
+			end=end,
+		)
+
+	def _available_vehicle_ids_with_real_reservations(self, start, end):
+		queryset = get_available_vehicles(start=start, end=end)
+		return set(queryset.values_list("id", flat=True))
+
+	def test_real_reservation_model_integration(self):
+		start, end = self._period()
+
+		self._create_reservation(
+			start_at=start + timedelta(minutes=5),
+			end_at=end - timedelta(minutes=5),
+			status=Reservation.Status.CONFIRMEE,
+		)
+		self.assertFalse(self._is_available_with_real_reservations(start, end))
+		self.assertNotIn(self.vehicle_active.id, self._available_vehicle_ids_with_real_reservations(start, end))
+
+		Reservation.objects.all().delete()
+		self._create_reservation(
+			start_at=start + timedelta(minutes=5),
+			end_at=end - timedelta(minutes=5),
+			status=Reservation.Status.EN_COURS,
+		)
+		self.assertFalse(self._is_available_with_real_reservations(start, end))
+		self.assertNotIn(self.vehicle_active.id, self._available_vehicle_ids_with_real_reservations(start, end))
+
+		Reservation.objects.all().delete()
+		self._create_reservation(
+			start_at=start + timedelta(minutes=5),
+			end_at=end - timedelta(minutes=5),
+			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+		)
+		self.assertFalse(self._is_available_with_real_reservations(start, end))
+		self.assertNotIn(self.vehicle_active.id, self._available_vehicle_ids_with_real_reservations(start, end))
+
+		Reservation.objects.all().delete()
+		self._create_reservation(
+			start_at=start + timedelta(minutes=5),
+			end_at=end - timedelta(minutes=5),
+			status=Reservation.Status.BROUILLON,
+		)
+		self.assertTrue(self._is_available_with_real_reservations(start, end))
+		self.assertIn(self.vehicle_active.id, self._available_vehicle_ids_with_real_reservations(start, end))
+
+		Reservation.objects.all().delete()
+		self._create_reservation(
+			start_at=start + timedelta(minutes=5),
+			end_at=end - timedelta(minutes=5),
+			status=Reservation.Status.ANNULEE,
+		)
+		self.assertTrue(self._is_available_with_real_reservations(start, end))
+		self.assertIn(self.vehicle_active.id, self._available_vehicle_ids_with_real_reservations(start, end))
+
+		Reservation.objects.all().delete()
+		self._create_reservation(
+			start_at=start - timedelta(hours=1),
+			end_at=start,
+			status=Reservation.Status.CONFIRMEE,
+		)
+		self.assertTrue(self._is_available_with_real_reservations(start, end))
+		self.assertIn(self.vehicle_active.id, self._available_vehicle_ids_with_real_reservations(start, end))
+
+		Reservation.objects.all().delete()
+		self._create_reservation(
+			start_at=end,
+			end_at=end + timedelta(hours=1),
+			status=Reservation.Status.CONFIRMEE,
+		)
+		self.assertTrue(self._is_available_with_real_reservations(start, end))
+		self.assertIn(self.vehicle_active.id, self._available_vehicle_ids_with_real_reservations(start, end))
 
 
 @override_settings(VEHICLE_PHOTO_MAX_SIZE=1024)
