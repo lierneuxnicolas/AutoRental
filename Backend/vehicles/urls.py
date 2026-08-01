@@ -5,6 +5,8 @@ from vehicles.views import (
 	VehicleManagementCreateView,
 	VehicleManagementStatusUpdateView,
 	VehicleManagementUpdateView,
+	VehiclePhotoCreateView,
+	VehiclePhotoDeleteView,
 	VehicleCategoryPublicListView,
 	VehiclePublicDetailView,
 	VehiclePublicListView,
@@ -21,6 +23,16 @@ urlpatterns = [
 		"management/vehicles/<int:id>/status/",
 		VehicleManagementStatusUpdateView.as_view(),
 		name="management-vehicles-status-update",
+	),
+	path(
+		"management/vehicles/<int:id>/photos/",
+		VehiclePhotoCreateView.as_view(),
+		name="management-vehicles-photos-create",
+	),
+	path(
+		"management/vehicles/<int:id>/photos/<int:photo_id>/",
+		VehiclePhotoDeleteView.as_view(),
+		name="management-vehicles-photos-delete",
 	),
 	path(
 		"vehicle-categories/",

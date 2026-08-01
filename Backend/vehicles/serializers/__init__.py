@@ -1,5 +1,6 @@
 from .public import ParkingPublicSerializer, VehicleCategoryPublicSerializer, VehiclePublicSerializer
 from .management import VehicleManagementWriteSerializer, VehicleStatusUpdateSerializer
+from .photos import VehiclePhotoCreateSerializer, VehiclePhotoReadSerializer
 
 __all__ = [
 	"VehiclePublicSerializer",
@@ -7,4 +8,6 @@ __all__ = [
 	"ParkingPublicSerializer",
 	"VehicleManagementWriteSerializer",
 	"VehicleStatusUpdateSerializer",
+	"VehiclePhotoCreateSerializer",
+	"VehiclePhotoReadSerializer",
 ]

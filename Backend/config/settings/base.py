@@ -37,6 +37,10 @@ CLIENT_DOCUMENT_MAX_SIZE = int(
     os.getenv("CLIENT_DOCUMENT_MAX_SIZE", str(10 * 1024 * 1024))
 )
 
+VEHICLE_PHOTO_MAX_SIZE = int(
+    os.getenv("VEHICLE_PHOTO_MAX_SIZE", str(10 * 1024 * 1024))
+)
+
 
 # Application definition
 
