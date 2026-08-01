@@ -38,12 +38,22 @@ class MeEndpointTests(APITestCase):
         response = self.client.get(self.me_url)
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
+    def test_me_accepts_authenticated_user(self):
+        self.authenticate()
+
+        response = self.client.get(self.me_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
     def test_me_returns_expected_user_data_without_password(self):
         self.authenticate()
         response = self.client.get(self.me_url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["email"], "me@example.com")
+        self.assertEqual(response.data["first_name"], "Me")
+        self.assertEqual(response.data["last_name"], "Endpoint")
+        self.assertEqual(response.data["phone"], "0102030405")
         self.assertEqual(response.data["role"], Role.Code.CLIENT)
         self.assertIn("id", response.data)
         self.assertNotIn("password", response.data)

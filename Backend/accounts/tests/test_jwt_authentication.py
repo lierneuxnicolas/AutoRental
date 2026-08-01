@@ -1,13 +1,20 @@
 from django.contrib.auth import get_user_model
+from django.core import mail
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from accounts.models import Role
+from accounts.services.email_verification import generate_email_verification_token
 
 from .utils import ensure_roles
 
 
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    FRONTEND_URL="http://localhost:3000",
+)
 class JwtAuthenticationTests(APITestCase):
     def setUp(self):
         self.roles = ensure_roles()
@@ -50,6 +57,56 @@ class JwtAuthenticationTests(APITestCase):
     def login_confirmed_user(self):
         payload = {"email": "confirmed@example.com", "password": "StrongPass123!"}
         return self.client.post(self.login_url, payload, format="json")
+
+    def test_login_success_after_email_verification_workflow(self):
+        registration_url = reverse("accounts:auth-register")
+        registration_payload = {
+            "email": "workflow@example.com",
+            "password": "StrongPass123!",
+            "password_confirm": "StrongPass123!",
+            "first_name": "Workflow",
+            "last_name": "User",
+            "phone": "0102030408",
+        }
+
+        with self.captureOnCommitCallbacks(execute=True):
+            registration_response = self.client.post(
+                registration_url,
+                registration_payload,
+                format="json",
+            )
+
+        self.assertEqual(registration_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(mail.outbox), 1)
+
+        login_before_verification = self.client.post(
+            self.login_url,
+            {"email": "workflow@example.com", "password": "StrongPass123!"},
+            format="json",
+        )
+        self.assertEqual(login_before_verification.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        user_model = get_user_model()
+        workflow_user = user_model.objects.get(email="workflow@example.com")
+        token = generate_email_verification_token(workflow_user)
+        verification_url = reverse("accounts:auth-verify-email")
+        verification_response = self.client.post(
+            verification_url,
+            {"token": token},
+            format="json",
+        )
+        self.assertEqual(verification_response.status_code, status.HTTP_200_OK)
+
+        login_after_verification = self.client.post(
+            self.login_url,
+            {"email": "workflow@example.com", "password": "StrongPass123!"},
+            format="json",
+        )
+
+        self.assertEqual(login_after_verification.status_code, status.HTTP_200_OK)
+        self.assertIn("access", login_after_verification.data)
+        self.assertIn("refresh", login_after_verification.data)
+        self.assertEqual(login_after_verification.data["user"]["email"], "workflow@example.com")
 
     def test_login_success_returns_access_refresh_and_user_structure(self):
         response = self.login_confirmed_user()

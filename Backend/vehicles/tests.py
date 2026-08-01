@@ -1,4 +1,6 @@
 from io import BytesIO
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from PIL import Image
 from django.contrib.auth import get_user_model
@@ -6,11 +8,17 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from accounts.models import Role
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehiclePhoto
+from vehicles.services import (
+	AvailabilityValidationError,
+	calculate_duration_hours,
+	validate_availability_period,
+)
 
 
 def _create_test_image_file(name="vehicle.jpg", image_format="JPEG", content_type="image/jpeg"):
@@ -420,6 +428,125 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		response = self.client_api.patch(url, {"status": Vehicle.Status.DISPONIBLE}, format="json")
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertIn("status", response.data)
+
+
+@override_settings(USE_TZ=True, TIME_ZONE="Europe/Brussels")
+class AvailabilityServiceTests(TestCase):
+	def test_validate_period_rejects_missing_start(self):
+		start = None
+		end = timezone.now() + timedelta(hours=2)
+
+		with self.assertRaises(AvailabilityValidationError) as context:
+			validate_availability_period(start=start, end=end)
+
+		self.assertEqual(context.exception.code, "START_REQUIRED")
+
+	def test_validate_period_rejects_missing_end(self):
+		start = timezone.now() + timedelta(hours=1)
+
+		with self.assertRaises(AvailabilityValidationError) as context:
+			validate_availability_period(start=start, end=None)
+
+		self.assertEqual(context.exception.code, "END_REQUIRED")
+
+	def test_validate_period_rejects_invalid_start(self):
+		end = timezone.now() + timedelta(hours=2)
+
+		with self.assertRaises(AvailabilityValidationError) as context:
+			validate_availability_period(start="2026-01-01", end=end)
+
+		self.assertEqual(context.exception.code, "INVALID_START")
+
+	def test_validate_period_rejects_invalid_end(self):
+		start = timezone.now() + timedelta(hours=1)
+
+		with self.assertRaises(AvailabilityValidationError) as context:
+			validate_availability_period(start=start, end="2026-01-01")
+
+		self.assertEqual(context.exception.code, "INVALID_END")
+
+	def test_validate_period_rejects_end_equal_start(self):
+		start = timezone.now() + timedelta(hours=1)
+
+		with self.assertRaises(AvailabilityValidationError) as context:
+			validate_availability_period(start=start, end=start)
+
+		self.assertEqual(context.exception.code, "END_BEFORE_START")
+
+	def test_validate_period_rejects_end_before_start(self):
+		start = timezone.now() + timedelta(hours=2)
+		end = start - timedelta(minutes=15)
+
+		with self.assertRaises(AvailabilityValidationError) as context:
+			validate_availability_period(start=start, end=end)
+
+		self.assertEqual(context.exception.code, "END_BEFORE_START")
+
+	def test_validate_period_rejects_start_in_past(self):
+		start = timezone.now() - timedelta(minutes=1)
+		end = timezone.now() + timedelta(hours=1)
+
+		with self.assertRaises(AvailabilityValidationError) as context:
+			validate_availability_period(start=start, end=end)
+
+		self.assertEqual(context.exception.code, "START_IN_PAST")
+
+	def test_validate_period_rejects_negative_minimum_hours(self):
+		start = timezone.now() + timedelta(hours=1)
+		end = start + timedelta(hours=2)
+
+		with self.assertRaises(AvailabilityValidationError) as context:
+			validate_availability_period(start=start, end=end, minimum_hours=-1)
+
+		self.assertEqual(context.exception.code, "INVALID_MINIMUM_HOURS")
+
+	def test_validate_period_rejects_too_short_duration(self):
+		start = timezone.now() + timedelta(hours=1)
+		end = start + timedelta(minutes=30)
+
+		with self.assertRaises(AvailabilityValidationError) as context:
+			validate_availability_period(start=start, end=end, minimum_hours=1)
+
+		self.assertEqual(context.exception.code, "DURATION_TOO_SHORT")
+
+	def test_validate_period_returns_normalized_period_for_valid_data(self):
+		start = timezone.now() + timedelta(hours=1)
+		end = start + timedelta(hours=2, minutes=30)
+
+		result = validate_availability_period(start=start, end=end, minimum_hours=2)
+
+		self.assertEqual(result["start"], start)
+		self.assertEqual(result["end"], end)
+		self.assertEqual(result["duration_hours"], 2.5)
+
+	def test_calculate_duration_hours_returns_exact_fractional_hours(self):
+		start = timezone.now() + timedelta(hours=1)
+		end = start + timedelta(hours=1, minutes=15)
+
+		duration = calculate_duration_hours(start, end)
+
+		self.assertEqual(duration, 1.25)
+
+	def test_validate_period_normalizes_naive_datetimes_when_timezone_support_is_enabled(self):
+		start = datetime(2030, 1, 1, 10, 0, 0)
+		end = datetime(2030, 1, 1, 12, 30, 0)
+
+		result = validate_availability_period(start=start, end=end, minimum_hours=2)
+
+		self.assertTrue(timezone.is_aware(result["start"]))
+		self.assertTrue(timezone.is_aware(result["end"]))
+		self.assertEqual(result["duration_hours"], 2.5)
+
+	def test_validate_period_accepts_timezone_aware_datetimes(self):
+		brussels = ZoneInfo("Europe/Brussels")
+		start = datetime.now(brussels) + timedelta(hours=1)
+		end = start + timedelta(hours=3)
+
+		result = validate_availability_period(start=start, end=end, minimum_hours=2)
+
+		self.assertEqual(result["start"], start)
+		self.assertEqual(result["end"], end)
+		self.assertEqual(result["duration_hours"], 3.0)
 
 
 @override_settings(VEHICLE_PHOTO_MAX_SIZE=1024)

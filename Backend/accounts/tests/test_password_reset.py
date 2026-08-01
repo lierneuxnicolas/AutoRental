@@ -56,6 +56,8 @@ class PasswordResetTests(APITestCase):
             response.data,
             {"message": "Si un compte correspond a cette adresse, un e-mail a ete envoye."},
         )
+        self.assertNotIn("user", response.data)
+        self.assertNotIn("detail", response.data)
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn("/reset-password?uid=", mail.outbox[0].body)
         self.assertIn("&token=", mail.outbox[0].body)
