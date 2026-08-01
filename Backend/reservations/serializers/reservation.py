@@ -77,3 +77,62 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
 
 class ReservationCreateResponseSerializer(ReservationListDetailSerializer):
     pass
+
+
+# ==============================================================================
+# Serializers pour l'annulation (point 39E)
+# ==============================================================================
+
+
+ALLOWED_CANCEL_FIELDS = {"reason"}
+FORBIDDEN_CANCEL_FIELDS = {
+    "id",
+    "reference",
+    "vehicle",
+    "client",
+    "start_at",
+    "end_at",
+    "status",
+    "rental_amount",
+    "deposit_amount",
+    "confirmed_at",
+    "cancelled_at",
+    "cancellation_reason",
+}
+
+
+class ReservationCancelRequestSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=True, allow_blank=False)
+
+    def validate_reason(self, value):
+        """Valide le motif d'annulation."""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Le motif d'annulation ne peut pas être vide ou seulement des espaces.")
+        if len(value.strip()) > 1000:
+            raise serializers.ValidationError("Le motif d'annulation ne doit pas dépasser 1000 caractères.")
+        return value.strip()
+
+    def to_internal_value(self, data):
+        if hasattr(data, "keys"):
+            keys = set(data.keys())
+            forbidden_provided = sorted(keys & FORBIDDEN_CANCEL_FIELDS)
+            if forbidden_provided:
+                raise serializers.ValidationError(
+                    {field: ["Ce champ est géré par le backend."] for field in forbidden_provided}
+                )
+
+            unexpected_fields = sorted(keys - ALLOWED_CANCEL_FIELDS)
+            if unexpected_fields:
+                raise serializers.ValidationError(
+                    {field: ["Ce champ n'est pas autorisé."] for field in unexpected_fields}
+                )
+
+        return super().to_internal_value(data)
+
+
+class ReservationCancelResponseSerializer(serializers.Serializer):
+    message = serializers.SerializerMethodField()
+    reservation = ReservationListDetailSerializer()
+
+    def get_message(self, obj):
+        return "Réservation annulée."
