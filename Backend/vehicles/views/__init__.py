@@ -9,6 +9,7 @@ from .management import (
 	VehicleManagementStatusUpdateView,
 	VehicleManagementUpdateView,
 )
+from .photos import VehiclePhotoCreateView, VehiclePhotoDeleteView
 
 __all__ = [
 	"VehiclePublicListView",
@@ -18,4 +19,6 @@ __all__ = [
 	"VehicleManagementCreateView",
 	"VehicleManagementUpdateView",
 	"VehicleManagementStatusUpdateView",
+	"VehiclePhotoCreateView",
+	"VehiclePhotoDeleteView",
 ]
