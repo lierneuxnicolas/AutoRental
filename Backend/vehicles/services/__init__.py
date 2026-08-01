@@ -1,8 +1,8 @@
 from .availability import (
     AvailabilityValidationError,
-    BLOCKING_RESERVATION_STATUSES,
     BOOKABLE_VEHICLE_STATUSES,
     calculate_duration_hours,
+    get_blocking_reservation_statuses,
     get_available_vehicles,
     is_vehicle_available,
     validate_availability_period,
@@ -10,9 +10,9 @@ from .availability import (
 
 __all__ = [
     "AvailabilityValidationError",
-    "BLOCKING_RESERVATION_STATUSES",
     "BOOKABLE_VEHICLE_STATUSES",
     "calculate_duration_hours",
+    "get_blocking_reservation_statuses",
     "get_available_vehicles",
     "is_vehicle_available",
     "validate_availability_period",

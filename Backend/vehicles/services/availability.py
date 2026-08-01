@@ -24,15 +24,6 @@ def _raise_validation_error(code, message):
     raise AvailabilityValidationError(code=code, message=message)
 
 
-# Temporary reservation statuses that block vehicle availability until the
-# Reservation model exists and can be synchronized at point 39.
-BLOCKING_RESERVATION_STATUSES = (
-    "EN_ATTENTE_PAIEMENT",
-    "CONFIRMEE",
-    "EN_COURS",
-)
-
-
 BOOKABLE_VEHICLE_STATUSES = (Vehicle.Status.DISPONIBLE,)
 
 
@@ -80,17 +71,48 @@ def _get_reservation_model():
         reservation_model = apps.get_model("reservations", "Reservation")
     except LookupError as exc:
         raise ImproperlyConfigured(
-            "The reservations.Reservation model is required for vehicle availability search. "
-            "Inject reservation_queryset until the model exists."
+            "The reservations.Reservation model is required for vehicle availability search."
         ) from exc
 
     if reservation_model is None:
         raise ImproperlyConfigured(
-            "The reservations.Reservation model is required for vehicle availability search. "
-            "Inject reservation_queryset until the model exists."
+            "The reservations.Reservation model is required for vehicle availability search."
         )
 
     return reservation_model
+
+
+def _get_reservation_statuses():
+    """Return the Reservation statuses used by availability checks.
+
+    Decision for point 39B:
+    - BROUILLON does not block.
+    - EN_ATTENTE_CAUTION does not block yet because there is no hold expiry.
+    - EN_ATTENTE_PAIEMENT blocks temporarily.
+    - CONFIRMEE and EN_COURS block.
+    - All other statuses do not block.
+    """
+
+    reservation_model = _get_reservation_model()
+    return (
+        reservation_model.Status.EN_ATTENTE_PAIEMENT,
+        reservation_model.Status.CONFIRMEE,
+        reservation_model.Status.EN_COURS,
+    )
+
+
+def get_blocking_reservation_statuses():
+    """Return blocking reservation statuses for availability filtering.
+
+    Decision for point 39B:
+    - BROUILLON does not block.
+    - EN_ATTENTE_CAUTION does not block yet because there is no hold expiry.
+    - EN_ATTENTE_PAIEMENT blocks temporarily.
+    - CONFIRMEE and EN_COURS block.
+    - All other statuses do not block.
+    """
+
+    return _get_reservation_statuses()
 
 
 def _get_reservation_queryset(*, reservation_queryset=None):
@@ -99,7 +121,7 @@ def _get_reservation_queryset(*, reservation_queryset=None):
     return _get_reservation_model().objects.all()
 
 
-def _build_conflict_filter(*, start, end):
+def _build_conflict_filter(*, start, end, reservation_queryset=None):
     """Return the strict overlap predicate for blocking reservations.
 
     existing_start < requested_end AND existing_end > requested_start
@@ -108,9 +130,9 @@ def _build_conflict_filter(*, start, end):
     """
 
     return {
-        "status__in": BLOCKING_RESERVATION_STATUSES,
-        "start__lt": end,
-        "end__gt": start,
+        "status__in": get_blocking_reservation_statuses(),
+        "start_at__lt": end,
+        "end_at__gt": start,
     }
 
 
@@ -148,7 +170,11 @@ def is_vehicle_available(*, vehicle, start, end, reservation_queryset=None) -> b
 
     conflict_exists = reservation_queryset.filter(
         vehicle_id=vehicle.pk,
-        **_build_conflict_filter(start=period["start"], end=period["end"]),
+        **_build_conflict_filter(
+            start=period["start"],
+            end=period["end"],
+            reservation_queryset=reservation_queryset,
+        ),
     ).exists()
 
     return (
@@ -180,7 +206,11 @@ def get_available_vehicles(*, start, end, base_queryset=None, reservation_querys
 
     conflicting_reservations = reservation_queryset.filter(
         vehicle_id=OuterRef("pk"),
-        **_build_conflict_filter(start=period["start"], end=period["end"]),
+        **_build_conflict_filter(
+            start=period["start"],
+            end=period["end"],
+            reservation_queryset=reservation_queryset,
+        ),
     )
 
     return queryset.annotate(
