@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from vehicles.models import Brand, Parking, ParkingSpace, VehicleCategory
+from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehiclePhoto
 
 
 @admin.register(Brand)
@@ -42,3 +42,30 @@ class ParkingSpaceAdmin(admin.ModelAdmin):
 	list_filter = ("is_active", "parking")
 	ordering = ("parking__name", "number")
 	list_select_related = ("parking",)
+
+
+@admin.register(Vehicle)
+class VehicleAdmin(admin.ModelAdmin):
+	list_display = (
+		"registration_number",
+		"brand",
+		"model_name",
+		"category",
+		"status",
+		"parking_space",
+		"is_active",
+		"updated_at",
+	)
+	search_fields = ("registration_number", "model_name", "brand__name")
+	list_filter = ("status", "is_active", "brand", "category")
+	ordering = ("registration_number",)
+	list_select_related = ("brand", "category", "parking_space", "parking_space__parking")
+
+
+@admin.register(VehiclePhoto)
+class VehiclePhotoAdmin(admin.ModelAdmin):
+	list_display = ("vehicle", "is_primary", "position", "created_at")
+	search_fields = ("vehicle__registration_number", "caption")
+	list_filter = ("is_primary",)
+	ordering = ("-is_primary", "position", "created_at")
+	list_select_related = ("vehicle",)
