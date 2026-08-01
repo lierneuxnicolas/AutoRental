@@ -1,5 +1,7 @@
 from io import BytesIO
+import unittest
 from datetime import datetime, timedelta
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from PIL import Image
@@ -16,7 +18,9 @@ from accounts.models import Role
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehiclePhoto
 from vehicles.services import (
 	AvailabilityValidationError,
+	BLOCKING_RESERVATION_STATUSES,
 	calculate_duration_hours,
+	is_vehicle_available,
 	validate_availability_period,
 )
 
@@ -547,6 +551,459 @@ class AvailabilityServiceTests(TestCase):
 		self.assertEqual(result["start"], start)
 		self.assertEqual(result["end"], end)
 		self.assertEqual(result["duration_hours"], 3.0)
+
+
+class _FakeReservationQuerySet:
+	def __init__(self, reservations):
+		self._reservations = list(reservations)
+
+	def filter(self, **kwargs):
+		filtered = []
+		for reservation in self._reservations:
+			if "vehicle_id" in kwargs and reservation.get("vehicle_id") != kwargs["vehicle_id"]:
+				continue
+			if "status__in" in kwargs and reservation.get("status") not in kwargs["status__in"]:
+				continue
+			if "start__lt" in kwargs and not (reservation.get("start") < kwargs["start__lt"]):
+				continue
+			if "end__gt" in kwargs and not (reservation.get("end") > kwargs["end__gt"]):
+				continue
+			filtered.append(reservation)
+		return _FakeReservationQuerySet(filtered)
+
+	def exists(self):
+		return bool(self._reservations)
+
+
+@override_settings(USE_TZ=True, TIME_ZONE="Europe/Brussels")
+class AvailabilityOverlapAndStatusTests(VehicleTestDataMixin, TestCase):
+	def _period(self):
+		start = timezone.now() + timedelta(days=1)
+		end = start + timedelta(hours=4)
+		return start, end
+
+	def _reservation(self, *, start, end, status="CONFIRMEE", vehicle=None):
+		return {
+			"vehicle_id": (vehicle or self.vehicle_active).id,
+			"start": start,
+			"end": end,
+			"status": status,
+		}
+
+	def _is_available(self, reservations, *, start=None, end=None):
+		if start is None or end is None:
+			start, end = self._period()
+		reservation_queryset = _FakeReservationQuerySet(reservations)
+		return is_vehicle_available(
+			vehicle=self.vehicle_active,
+			start=start,
+			end=end,
+			reservation_queryset=reservation_queryset,
+		)
+
+	def test_overlap_total_blocks_vehicle(self):
+		start, end = self._period()
+		reservations = [
+			self._reservation(
+				start=start + timedelta(minutes=30),
+				end=end - timedelta(minutes=30),
+			)
+		]
+
+		self.assertFalse(self._is_available(reservations))
+
+	def test_overlap_at_beginning_blocks_vehicle(self):
+		start, _ = self._period()
+		reservations = [
+			self._reservation(
+				start=start - timedelta(hours=2),
+				end=start + timedelta(minutes=30),
+			)
+		]
+
+		self.assertFalse(self._is_available(reservations))
+
+	def test_overlap_at_end_blocks_vehicle(self):
+		start, end = self._period()
+		reservations = [
+			self._reservation(
+				start=end - timedelta(minutes=30),
+				end=end + timedelta(hours=2),
+			)
+		]
+
+		self.assertFalse(self._is_available(reservations))
+
+	def test_encompassing_reservation_blocks_vehicle(self):
+		start, end = self._period()
+		reservations = [
+			self._reservation(
+				start=start - timedelta(hours=2),
+				end=end + timedelta(hours=2),
+			)
+		]
+
+		self.assertFalse(self._is_available(reservations))
+
+	def test_left_edge_touching_does_not_overlap(self):
+		start, _ = self._period()
+		reservations = [
+			self._reservation(
+				start=start - timedelta(hours=2),
+				end=start,
+			)
+		]
+
+		self.assertTrue(self._is_available(reservations))
+
+	def test_right_edge_touching_does_not_overlap(self):
+		start, end = self._period()
+		reservations = [
+			self._reservation(
+				start=end,
+				end=end + timedelta(hours=2),
+			)
+		]
+
+		self.assertTrue(self._is_available(reservations, start=start, end=end))
+
+	def test_blocking_reservation_statuses_block_availability(self):
+		start, end = self._period()
+		for status_value in BLOCKING_RESERVATION_STATUSES:
+			with self.subTest(status=status_value):
+				reservation_queryset = _FakeReservationQuerySet(
+					[
+						self._reservation(
+							start=start + timedelta(minutes=10),
+							end=end - timedelta(minutes=10),
+							status=status_value,
+						)
+					]
+				)
+
+				available = is_vehicle_available(
+					vehicle=self.vehicle_active,
+					start=start,
+					end=end,
+					reservation_queryset=reservation_queryset,
+				)
+
+				self.assertFalse(available)
+
+	def test_non_blocking_reservation_statuses_do_not_block_availability(self):
+		non_blocking_statuses = ["BROUILLON", "ANNULEE", "TERMINEE", "PAIEMENT_ECHOUE"]
+		start, end = self._period()
+		for status_value in non_blocking_statuses:
+			with self.subTest(status=status_value):
+				reservation_queryset = _FakeReservationQuerySet(
+					[
+						self._reservation(
+							start=start + timedelta(minutes=10),
+							end=end - timedelta(minutes=10),
+							status=status_value,
+						)
+					]
+				)
+
+				available = is_vehicle_available(
+					vehicle=self.vehicle_active,
+					start=start,
+					end=end,
+					reservation_queryset=reservation_queryset,
+				)
+
+				self.assertTrue(available)
+
+	def test_only_disponible_vehicle_status_is_bookable(self):
+		non_bookable_statuses = [
+			Vehicle.Status.RESERVE,
+			Vehicle.Status.LOUE,
+			Vehicle.Status.A_CONTROLER,
+			Vehicle.Status.MAINTENANCE,
+			Vehicle.Status.NETTOYAGE,
+			Vehicle.Status.ACCIDENTE,
+			Vehicle.Status.INDISPONIBLE,
+		]
+		start, end = self._period()
+		reservation_queryset = _FakeReservationQuerySet([])
+
+		available = is_vehicle_available(
+			vehicle=self.vehicle_active,
+			start=start,
+			end=end,
+			reservation_queryset=reservation_queryset,
+		)
+		self.assertTrue(available)
+
+		for index, status_value in enumerate(non_bookable_statuses, start=1):
+			with self.subTest(status=status_value):
+				space = ParkingSpace.objects.create(
+					parking=self.parking_active,
+					number=f"S-{index}",
+					is_active=True,
+				)
+				vehicle = Vehicle.objects.create(
+					brand=self.brand_active,
+					category=self.category_active,
+					parking_space=space,
+					registration_number=f"ST-{index:03d}-TS",
+					model_name=f"Status {index}",
+					year=2024,
+					color="Black",
+					energy_type="Hybrid",
+					transmission="Auto",
+					seats=5,
+					doors=5,
+					mileage=100,
+					status=status_value,
+					is_active=True,
+				)
+
+				is_available = is_vehicle_available(
+					vehicle=vehicle,
+					start=start,
+					end=end,
+					reservation_queryset=reservation_queryset,
+				)
+
+				self.assertFalse(is_available)
+
+
+@override_settings(USE_TZ=True, TIME_ZONE="Europe/Brussels")
+class VehicleAvailableEndpointTests(VehicleTestDataMixin, TestCase):
+	@classmethod
+	def setUpTestData(cls):
+		super().setUpTestData()
+		cls.category_min_4h = VehicleCategory.objects.create(
+			name="SUV Min 4h",
+			description="Categorie avec minimum 4h",
+			daily_rate="79.99",
+			hourly_rate="14.99",
+			minimum_deposit="400.00",
+			minimum_rental_hours=4,
+			is_active=True,
+		)
+		cls.space_a4 = ParkingSpace.objects.create(parking=cls.parking_active, number="A4", is_active=True)
+		cls.space_a5 = ParkingSpace.objects.create(parking=cls.parking_active, number="A5", is_active=True)
+		cls.space_a6 = ParkingSpace.objects.create(parking=cls.parking_active, number="A6", is_active=True)
+		cls.vehicle_min_4h = Vehicle.objects.create(
+			brand=cls.brand_active,
+			category=cls.category_min_4h,
+			parking_space=cls.space_a4,
+			registration_number="DD-444-DD",
+			model_name="RAV4",
+			year=2024,
+			color="Green",
+			energy_type="Hybrid",
+			transmission="Auto",
+			seats=5,
+			doors=5,
+			mileage=5000,
+			status=Vehicle.Status.DISPONIBLE,
+			description="Vehicule min 4h",
+			is_active=True,
+		)
+		cls.vehicle_inactive_category = Vehicle.objects.create(
+			brand=cls.brand_active,
+			category=cls.category_inactive,
+			parking_space=cls.space_a5,
+			registration_number="EE-555-EE",
+			model_name="Inactive Cat",
+			year=2022,
+			color="Silver",
+			energy_type="Essence",
+			transmission="Manual",
+			seats=5,
+			doors=5,
+			mileage=18000,
+			status=Vehicle.Status.DISPONIBLE,
+			description="Categorie inactive",
+			is_active=True,
+		)
+		cls.vehicle_reserved = Vehicle.objects.create(
+			brand=cls.brand_active,
+			category=cls.category_active,
+			parking_space=cls.space_a6,
+			registration_number="FF-666-FF",
+			model_name="Reserved",
+			year=2021,
+			color="Red",
+			energy_type="Diesel",
+			transmission="Manual",
+			seats=5,
+			doors=5,
+			mileage=22000,
+			status=Vehicle.Status.RESERVE,
+			description="Vehicule reserve",
+			is_active=True,
+		)
+
+	def setUp(self):
+		self.client_api = APIClient()
+
+	def _availability_params(self, *, start=None, end=None):
+		start_dt = start or (timezone.now() + timedelta(days=1, hours=1))
+		end_dt = end or (start_dt + timedelta(hours=3))
+		return {
+			"start": start_dt.isoformat(),
+			"end": end_dt.isoformat(),
+		}
+
+	def _fake_get_available_vehicles(self, *, start, end, base_queryset=None, reservation_queryset=None):
+		self.assertIsNotNone(base_queryset)
+		return base_queryset.filter(status=Vehicle.Status.DISPONIBLE)
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_is_public(self, mocked_get_available_vehicles):
+		mocked_get_available_vehicles.side_effect = self._fake_get_available_vehicles
+
+		response = self.client_api.get("/api/v1/vehicles/available/", self._availability_params())
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_returns_paginated_response(self, mocked_get_available_vehicles):
+		mocked_get_available_vehicles.side_effect = self._fake_get_available_vehicles
+
+		response = self.client_api.get("/api/v1/vehicles/available/", self._availability_params())
+
+		self.assertIn("count", response.data)
+		self.assertIn("results", response.data)
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_returns_only_expected_public_vehicles(self, mocked_get_available_vehicles):
+		mocked_get_available_vehicles.side_effect = self._fake_get_available_vehicles
+		start_dt = timezone.now() + timedelta(days=1)
+		end_dt = start_dt + timedelta(hours=5)  # > 4h to satisfy vehicle_min_4h
+
+		response = self.client_api.get("/api/v1/vehicles/available/", self._availability_params(start=start_dt, end=end_dt))
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+		returned_ids = {item["id"] for item in response.data["results"]}
+		self.assertIn(self.vehicle_active.id, returned_ids)
+		self.assertIn(self.vehicle_min_4h.id, returned_ids)
+		self.assertNotIn(self.vehicle_inactive.id, returned_ids)
+		self.assertNotIn(self.vehicle_inactive_category.id, returned_ids)
+		self.assertNotIn(self.vehicle_reserved.id, returned_ids)
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_filters_by_category_minimum_rental_hours(self, mocked_get_available_vehicles):
+		mocked_get_available_vehicles.side_effect = self._fake_get_available_vehicles
+		start_dt = timezone.now() + timedelta(days=1)
+		end_dt = start_dt + timedelta(hours=2)
+
+		response = self.client_api.get(
+			"/api/v1/vehicles/available/",
+			self._availability_params(start=start_dt, end=end_dt),
+		)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+		returned_ids = {item["id"] for item in response.data["results"]}
+		self.assertIn(self.vehicle_active.id, returned_ids)
+		self.assertNotIn(self.vehicle_min_4h.id, returned_ids)
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_returns_400_for_missing_start(self, mocked_get_available_vehicles):
+		response = self.client_api.get(
+			"/api/v1/vehicles/available/",
+			{"end": (timezone.now() + timedelta(days=1, hours=2)).isoformat()},
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("start", response.data)
+		mocked_get_available_vehicles.assert_not_called()
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_returns_400_for_missing_end(self, mocked_get_available_vehicles):
+		response = self.client_api.get(
+			"/api/v1/vehicles/available/",
+			{"start": (timezone.now() + timedelta(days=1, hours=1)).isoformat()},
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("end", response.data)
+		mocked_get_available_vehicles.assert_not_called()
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_returns_400_for_invalid_datetime_format(self, mocked_get_available_vehicles):
+		response = self.client_api.get(
+			"/api/v1/vehicles/available/",
+			{"start": "not-a-date", "end": "still-not-a-date"},
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("start", response.data)
+		self.assertIn("end", response.data)
+		mocked_get_available_vehicles.assert_not_called()
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_returns_400_for_end_before_start(self, mocked_get_available_vehicles):
+		start_dt = timezone.now() + timedelta(days=1, hours=2)
+		end_dt = start_dt - timedelta(minutes=10)
+
+		response = self.client_api.get(
+			"/api/v1/vehicles/available/",
+			self._availability_params(start=start_dt, end=end_dt),
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("end", response.data)
+		mocked_get_available_vehicles.assert_not_called()
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_returns_400_for_start_in_past(self, mocked_get_available_vehicles):
+		start_dt = timezone.now() - timedelta(minutes=30)
+		end_dt = timezone.now() + timedelta(hours=1)
+
+		response = self.client_api.get(
+			"/api/v1/vehicles/available/",
+			self._availability_params(start=start_dt, end=end_dt),
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("start", response.data)
+		mocked_get_available_vehicles.assert_not_called()
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_returns_400_for_too_short_duration(self, mocked_get_available_vehicles):
+		start_dt = timezone.now() + timedelta(days=1)
+		end_dt = start_dt + timedelta(minutes=30)
+
+		response = self.client_api.get(
+			"/api/v1/vehicles/available/",
+			self._availability_params(start=start_dt, end=end_dt),
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("end", response.data)
+		mocked_get_available_vehicles.assert_not_called()
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_hides_confidential_fields(self, mocked_get_available_vehicles):
+		mocked_get_available_vehicles.side_effect = self._fake_get_available_vehicles
+
+		response = self.client_api.get("/api/v1/vehicles/available/", self._availability_params())
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+		first_item = response.data["results"][0]
+		for field in ["mileage", "registration_number", "created_at", "updated_at"]:
+			self.assertNotIn(field, first_item)
+
+	@patch("vehicles.views.public.get_available_vehicles")
+	def test_available_endpoint_uses_service_once_and_avoids_n_plus_one(self, mocked_get_available_vehicles):
+		mocked_get_available_vehicles.side_effect = self._fake_get_available_vehicles
+
+		with self.assertNumQueries(4):  # min_rental_hours, COUNT, SELECT vehicles, prefetch photos
+			response = self.client_api.get("/api/v1/vehicles/available/", self._availability_params())
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		mocked_get_available_vehicles.assert_called_once()
+
+
+@unittest.skip("Integration avec reservations.Reservation a completer au point 39.")
+class AvailabilityIntegrationDeferredTests(TestCase):
+	def test_real_reservation_model_integration_deferred_to_point_39(self):
+		self.assertTrue(True)
 
 
 @override_settings(VEHICLE_PHOTO_MAX_SIZE=1024)
