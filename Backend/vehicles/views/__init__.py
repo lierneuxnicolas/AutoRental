@@ -1,5 +1,6 @@
 from .public import (
 	ParkingPublicListView,
+	VehicleAvailablePublicListView,
 	VehicleCategoryPublicListView,
 	VehiclePublicDetailView,
 	VehiclePublicListView,
@@ -13,6 +14,7 @@ from .photos import VehiclePhotoCreateView, VehiclePhotoDeleteView
 
 __all__ = [
 	"VehiclePublicListView",
+	"VehicleAvailablePublicListView",
 	"VehiclePublicDetailView",
 	"VehicleCategoryPublicListView",
 	"ParkingPublicListView",

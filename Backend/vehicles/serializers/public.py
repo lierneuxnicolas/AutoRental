@@ -1,7 +1,8 @@
-from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.utils import extend_schema_field, extend_schema_serializer
 from rest_framework import serializers
 
 from vehicles.models import Parking, Vehicle, VehicleCategory
+from vehicles.services import AvailabilityValidationError, validate_availability_period
 
 
 class VehiclePhotoPublicSerializer(serializers.Serializer):
@@ -9,6 +10,45 @@ class VehiclePhotoPublicSerializer(serializers.Serializer):
 	file = serializers.ImageField(read_only=True)
 	caption = serializers.CharField(read_only=True)
 	position = serializers.IntegerField(read_only=True)
+
+
+@extend_schema_serializer(
+	examples=[
+		{
+			"start": "2030-01-01T10:00:00+01:00",
+			"end": "2030-01-01T13:00:00+01:00",
+		}
+	]
+)
+class VehicleAvailabilityQuerySerializer(serializers.Serializer):
+	start = serializers.DateTimeField(
+		error_messages={
+			"required": "Le parametre start est obligatoire.",
+			"invalid": "Le parametre start doit etre un datetime ISO 8601 valide.",
+		}
+	)
+	end = serializers.DateTimeField(
+		error_messages={
+			"required": "Le parametre end est obligatoire.",
+			"invalid": "Le parametre end doit etre un datetime ISO 8601 valide.",
+		}
+	)
+
+	def validate(self, attrs):
+		minimum_hours = self.context.get("minimum_hours")
+		try:
+			period = validate_availability_period(
+				start=attrs["start"],
+				end=attrs["end"],
+				minimum_hours=minimum_hours,
+			)
+		except AvailabilityValidationError as exc:
+			if exc.code in {"END_BEFORE_START", "DURATION_TOO_SHORT"}:
+				raise serializers.ValidationError({"end": [str(exc)]})
+			if exc.code == "START_IN_PAST":
+				raise serializers.ValidationError({"start": [str(exc)]})
+			raise serializers.ValidationError({"non_field_errors": [str(exc)]})
+		return period
 
 
 class VehiclePublicSerializer(serializers.ModelSerializer):
