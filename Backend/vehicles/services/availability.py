@@ -115,7 +115,33 @@ def _build_conflict_filter(*, start, end):
 
 
 def is_vehicle_available(*, vehicle, start, end, reservation_queryset=None) -> bool:
-    """Return whether a single vehicle is available for the requested period."""
+    """Return whether a single vehicle is available for the requested period.
+
+    This function is the single source of truth for the overlap rule and MUST
+    be called at every step where availability must be confirmed:
+
+    1. Reservation creation (point 39) — optimistic check before writing the
+       Reservation row.
+    2. Before creating a PaymentIntent (point 41) — confirm the vehicle is
+       still available before charging the customer.
+    3. Stripe webhook (point 42) — re-verify inside an atomic transaction
+       before marking the reservation CONFIRMEE.
+
+    Concurrency
+    -----------
+    This check alone does NOT protect against two simultaneous payments for the
+    same vehicle.  Each call site that writes data MUST wrap the check inside a
+    database transaction and lock the relevant row first::
+
+        with transaction.atomic():
+            vehicle = Vehicle.objects.select_for_update().get(pk=vehicle_id)
+            if not is_vehicle_available(vehicle=vehicle, start=start, end=end):
+                raise ConflictError(...)
+            Reservation.objects.create(...)
+
+    The Stripe webhook must additionally be idempotent (ignore duplicate
+    events for the same payment_intent_id).
+    """
 
     period = validate_availability_period(start=start, end=end)
     reservation_queryset = _get_reservation_queryset(reservation_queryset=reservation_queryset)

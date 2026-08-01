@@ -62,7 +62,13 @@ class VehiclePublicListView(generics.ListAPIView):
 
 
 class VehicleAvailablePublicListView(VehiclePublicListView):
-	"""Public availability search.
+	"""Public availability search — indicative results only.
+
+	This endpoint does NOT lock any vehicle, does NOT create a reservation, and
+	does NOT guarantee that a vehicle returned here will still be available at
+	payment time.  Availability is re-verified at reservation creation, before
+	PaymentIntent creation, and inside the Stripe webhook (see
+	vehicles.services.availability.is_vehicle_available).
 
 	Minimum duration strategy: validate once against the lowest minimum rental
 	hours among active categories, then keep only categories compatible with the
