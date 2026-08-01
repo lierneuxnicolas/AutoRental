@@ -51,6 +51,7 @@ class VehiclePublicDetailView(generics.RetrieveAPIView):
 	permission_classes = [AllowAny]
 	serializer_class = VehiclePublicSerializer
 	lookup_field = "id"
+	lookup_url_kwarg = "pk"
 
 	def get_queryset(self):
 		if getattr(self, "swagger_fake_view", False):

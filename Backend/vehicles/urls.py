@@ -16,21 +16,21 @@ app_name = "vehicles"
 
 urlpatterns = [
 	path("vehicles/", VehiclePublicListView.as_view(), name="public-vehicles-list"),
-	path("vehicles/<int:id>/", VehiclePublicDetailView.as_view(), name="public-vehicles-detail"),
+	path("vehicles/<int:pk>/", VehiclePublicDetailView.as_view(), name="public-vehicles-detail"),
 	path("management/vehicles/", VehicleManagementCreateView.as_view(), name="management-vehicles-create"),
-	path("management/vehicles/<int:id>/", VehicleManagementUpdateView.as_view(), name="management-vehicles-update"),
+	path("management/vehicles/<int:pk>/", VehicleManagementUpdateView.as_view(), name="management-vehicles-update"),
 	path(
-		"management/vehicles/<int:id>/status/",
+		"management/vehicles/<int:pk>/status/",
 		VehicleManagementStatusUpdateView.as_view(),
 		name="management-vehicles-status-update",
 	),
 	path(
-		"management/vehicles/<int:id>/photos/",
+		"management/vehicles/<int:pk>/photos/",
 		VehiclePhotoCreateView.as_view(),
 		name="management-vehicles-photos-create",
 	),
 	path(
-		"management/vehicles/<int:id>/photos/<int:photo_id>/",
+		"management/vehicles/<int:pk>/photos/<int:photo_id>/",
 		VehiclePhotoDeleteView.as_view(),
 		name="management-vehicles-photos-delete",
 	),

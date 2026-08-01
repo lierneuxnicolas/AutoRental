@@ -21,10 +21,10 @@ class VehiclePhotoCreateView(APIView):
 	permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
 	parser_classes = [MultiPartParser, FormParser]
 
-	def get_vehicle(self, id):
+	def get_vehicle(self, pk):
 		return get_object_or_404(
 			Vehicle.objects.select_related("brand", "category", "parking_space", "parking_space__parking"),
-			id=id,
+			id=pk,
 		)
 
 	@extend_schema(
@@ -38,8 +38,8 @@ class VehiclePhotoCreateView(APIView):
 			404: ErrorDetailResponseSerializer,
 		},
 	)
-	def post(self, request, id):
-		vehicle = self.get_vehicle(id)
+	def post(self, request, pk):
+		vehicle = self.get_vehicle(pk)
 		serializer = VehiclePhotoCreateSerializer(data=request.data, context={"vehicle": vehicle})
 		serializer.is_valid(raise_exception=True)
 		photo = serializer.save()
@@ -50,10 +50,10 @@ class VehiclePhotoCreateView(APIView):
 class VehiclePhotoDeleteView(APIView):
 	permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
 
-	def get_vehicle(self, id):
+	def get_vehicle(self, pk):
 		return get_object_or_404(
 			Vehicle.objects.select_related("brand", "category", "parking_space", "parking_space__parking"),
-			id=id,
+			id=pk,
 		)
 
 	@extend_schema(
@@ -65,8 +65,8 @@ class VehiclePhotoDeleteView(APIView):
 			404: ErrorDetailResponseSerializer,
 		},
 	)
-	def delete(self, request, id, photo_id):
-		vehicle = self.get_vehicle(id)
+	def delete(self, request, pk, photo_id):
+		vehicle = self.get_vehicle(pk)
 		photo = get_object_or_404(VehiclePhoto.objects.select_related("vehicle"), id=photo_id, vehicle=vehicle)
 
 		with transaction.atomic():

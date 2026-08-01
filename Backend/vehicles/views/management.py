@@ -45,6 +45,7 @@ class VehicleManagementUpdateView(generics.UpdateAPIView):
 	permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
 	serializer_class = VehicleManagementWriteSerializer
 	lookup_field = "id"
+	lookup_url_kwarg = "pk"
 	http_method_names = ["patch"]
 
 	def get_queryset(self):
@@ -75,10 +76,10 @@ class VehicleManagementUpdateView(generics.UpdateAPIView):
 class VehicleManagementStatusUpdateView(APIView):
 	permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
 
-	def get_vehicle(self, id):
+	def get_vehicle(self, pk):
 		return generics.get_object_or_404(
 			Vehicle.objects.select_related("brand", "category", "parking_space", "parking_space__parking"),
-			id=id,
+			id=pk,
 		)
 
 	@extend_schema(
@@ -92,8 +93,8 @@ class VehicleManagementStatusUpdateView(APIView):
 			404: ErrorDetailResponseSerializer,
 		},
 	)
-	def patch(self, request, id):
-		vehicle = self.get_vehicle(id)
+	def patch(self, request, pk):
+		vehicle = self.get_vehicle(pk)
 		serializer = VehicleStatusUpdateSerializer(data=request.data, context={"vehicle": vehicle})
 		serializer.is_valid(raise_exception=True)
 
