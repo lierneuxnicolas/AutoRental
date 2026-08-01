@@ -442,7 +442,7 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertIn("statut", response.data["detail"].lower())
 
-	@patch("reservations.views.is_vehicle_available", return_value=False)
+	@patch("reservations.views.pricing.is_vehicle_available", return_value=False)
 	def test_unavailable_vehicle_returns_400_and_indicative_message(self, mock_is_available):
 		response = self.client_api.post(self.url, self._payload(), format="json")
 
@@ -505,7 +505,7 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		self.assertIn("duree", response.data["detail"].lower())
 
 	@patch(
-		"reservations.views.calculate_price_simulation",
+		"reservations.views.pricing.calculate_price_simulation",
 		side_effect=PricingError("PRICING_NOT_CONFIGURED", "Aucun tarif n'est configure pour cette categorie."),
 	)
 	def test_category_without_valid_pricing_returns_400(self, mock_pricing):
@@ -516,7 +516,7 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		mock_pricing.assert_called_once()
 
 	def test_anti_manipulation_rejects_amount_and_rate_fields(self):
-		with patch("reservations.views.calculate_price_simulation") as mock_pricing:
+		with patch("reservations.views.pricing.calculate_price_simulation") as mock_pricing:
 			response = self.client_api.post(
 				self.url,
 				self._payload(
@@ -537,7 +537,7 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		self.assertIn("total_amount", response.data)
 		mock_pricing.assert_not_called()
 
-	@patch("reservations.views.is_vehicle_available", return_value=True)
+	@patch("reservations.views.pricing.is_vehicle_available", return_value=True)
 	def test_endpoint_calls_availability_service(self, mock_is_available):
 		response = self.client_api.post(self.url, self._payload(), format="json")
 
