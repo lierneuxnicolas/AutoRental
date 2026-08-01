@@ -52,8 +52,8 @@ def _calculate_duration_hours(*, start_at, end_at) -> Decimal:
     duration = validated_period["end"] - validated_period["start"]
     duration_hours = (
         (Decimal(duration.days) * HOURS_PER_DAY)
-        + Decimal(duration.seconds) / HOURS_PER_DAY
-        + Decimal(duration.microseconds) / (HOURS_PER_DAY * Decimal("3600"))
+        + Decimal(duration.seconds) / Decimal("3600")
+        + Decimal(duration.microseconds) / Decimal("3600000000")
     )
     return duration_hours
 
