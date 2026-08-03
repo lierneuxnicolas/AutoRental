@@ -1,5 +1,16 @@
 from django.contrib import admin
-from interventions.models import LockingLog, VehicleAccess
+from interventions.models import (
+	Intervention,
+	LockingLog,
+	TechnicalInspection,
+	TechnicalPhoto,
+	VehicleAccess,
+)
+
+
+class TechnicalPhotoInline(admin.TabularInline):
+	model = TechnicalPhoto
+	extra = 1
 
 
 @admin.register(VehicleAccess)
@@ -61,3 +72,56 @@ class LockingLogAdmin(admin.ModelAdmin):
 
 	def has_delete_permission(self, request, obj=None):
 		return False
+
+
+@admin.register(Intervention)
+class InterventionAdmin(admin.ModelAdmin):
+	list_display = (
+		"reference",
+		"intervention_type",
+		"status",
+		"vehicle",
+		"reservation",
+		"assigned_to",
+		"created_by",
+		"started_at",
+		"completed_at",
+		"created_at",
+	)
+	list_filter = ("intervention_type", "status", "created_at")
+	search_fields = (
+		"reference",
+		"vehicle__registration_number",
+		"reservation__reference",
+		"assigned_to__email",
+		"created_by__email",
+	)
+	autocomplete_fields = ("reservation", "vehicle", "assigned_to", "created_by", "inspection")
+
+
+@admin.register(TechnicalInspection)
+class TechnicalInspectionAdmin(admin.ModelAdmin):
+	list_display = (
+		"id",
+		"intervention",
+		"vehicle",
+		"mileage",
+		"energy_level_percent",
+		"created_at",
+	)
+	list_filter = ("created_at",)
+	search_fields = (
+		"intervention__reference",
+		"vehicle__registration_number",
+		"observations",
+	)
+	autocomplete_fields = ("intervention", "vehicle")
+	inlines = [TechnicalPhotoInline]
+
+
+@admin.register(TechnicalPhoto)
+class TechnicalPhotoAdmin(admin.ModelAdmin):
+	list_display = ("id", "technical_inspection", "caption", "created_at")
+	list_filter = ("created_at",)
+	search_fields = ("caption", "technical_inspection__intervention__reference")
+	autocomplete_fields = ("technical_inspection",)
