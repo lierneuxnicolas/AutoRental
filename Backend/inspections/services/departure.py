@@ -9,8 +9,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from inspections.models import Inspection, InspectionPhoto
+from notifications.services import create_notification
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
+from vehicles.models import Vehicle
 
 
 MANDATORY_PHOTO_TYPES = [
@@ -122,6 +124,193 @@ def _assert_no_existing_initial_inspection(reservation: Reservation) -> None:
             "INSPECTION_ALREADY_EXISTS",
             "Une inspection INITIAL existe deja pour cette reservation.",
         )
+
+
+def _assert_initial_inspection_can_be_completed(*, inspection: Inspection) -> None:
+    if inspection.inspection_type != Inspection.Type.INITIAL:
+        _raise_departure_error(
+            "INVALID_INSPECTION_TYPE",
+            "Seule une inspection INITIAL peut etre cloturee via cet endpoint.",
+            details={"inspection_type": inspection.inspection_type},
+        )
+
+    if inspection.status == Inspection.Status.TERMINE:
+        _raise_departure_error(
+            "INSPECTION_ALREADY_COMPLETED",
+            "Cette inspection est deja terminee.",
+        )
+
+
+def _assert_mandatory_photos_present(*, inspection: Inspection) -> None:
+    existing_types = set(
+        inspection.photos.filter(photo_type__in=MANDATORY_PHOTO_TYPES).values_list("photo_type", flat=True)
+    )
+    missing_photo_types = [photo_type for photo_type in MANDATORY_PHOTO_TYPES if photo_type not in existing_types]
+    if missing_photo_types:
+        _raise_departure_error(
+            "MISSING_MANDATORY_PHOTOS",
+            "Les six photos obligatoires doivent etre presentes avant la cloture.",
+            details={"missing_photo_types": missing_photo_types},
+        )
+
+
+def _assert_measurements(*, inspection: Inspection, vehicle, mileage: int, energy_level_percent: int) -> None:
+    if mileage is None:
+        _raise_departure_error("MILEAGE_REQUIRED", "Le kilometrage est obligatoire.")
+
+    if mileage < vehicle.mileage:
+        _raise_departure_error(
+            "INVALID_MILEAGE",
+            "Le kilometrage ne peut pas etre inferieur au kilometrage connu du vehicule.",
+            details={"vehicle_mileage": vehicle.mileage, "provided_mileage": mileage},
+        )
+
+    if energy_level_percent is None:
+        _raise_departure_error("ENERGY_LEVEL_REQUIRED", "Le niveau d'energie est obligatoire.")
+
+    if not 0 <= energy_level_percent <= 100:
+        _raise_departure_error(
+            "INVALID_ENERGY_LEVEL",
+            "Le niveau d'energie doit etre compris entre 0 et 100.",
+            details={"provided_energy_level_percent": energy_level_percent},
+        )
+
+    if inspection.has_critical_issue:
+        _raise_departure_error(
+            "CRITICAL_ISSUE_UNRESOLVED",
+            "Une inspection avec probleme critique ne peut pas etre cloturee.",
+        )
+
+    unresolved_critical_damage_exists = inspection.damages.filter(
+        severity=inspection.damages.model.Severity.CRITIQUE,
+    ).exclude(
+        status__in=[inspection.damages.model.Status.RESOLU, inspection.damages.model.Status.REJETE]
+    ).exists()
+    if unresolved_critical_damage_exists:
+        _raise_departure_error(
+            "CRITICAL_DAMAGE_UNRESOLVED",
+            "Un dommage critique non traite bloque la cloture de l'inspection.",
+        )
+
+
+def _notify_once(*, user, notification_type: str, title: str, message: str, related_object_type: str, related_object_id: int):
+    existing = user.notifications.filter(
+        notification_type=notification_type,
+        message=message,
+        related_object_type=related_object_type,
+        related_object_id=related_object_id,
+    ).exists()
+    if existing:
+        return None
+
+    return create_notification(
+        user=user,
+        notification_type=notification_type,
+        title=title,
+        message=message,
+        related_object_type=related_object_type,
+        related_object_id=related_object_id,
+    )
+
+
+def _mark_vehicle_access_ready(*, inspection: Inspection) -> None:
+    """Integration hook for future vehicle unlock/activation after successful departure completion."""
+
+
+def complete_departure_inspection(
+    *,
+    inspection: Inspection,
+    requested_by,
+    mileage: int,
+    energy_level_percent: int,
+    comments: str = "",
+) -> Inspection:
+    with transaction.atomic():
+        inspection_locked = (
+            Inspection.objects.select_for_update()
+            .select_related(
+                "reservation",
+                "reservation__client",
+                "reservation__client__user",
+                "reservation__vehicle",
+                "reservation__vehicle__brand",
+                "reservation__vehicle__category",
+                "completed_by",
+            )
+            .get(pk=inspection.pk)
+        )
+        reservation_locked = (
+            Reservation.objects.select_for_update()
+            .select_related("client", "client__user", "vehicle", "vehicle__brand", "vehicle__category")
+            .get(pk=inspection_locked.reservation_id)
+        )
+        vehicle_locked = Vehicle.objects.select_for_update().get(pk=reservation_locked.vehicle_id)
+
+        _assert_request_context(reservation=reservation_locked, requested_by=requested_by)
+        _assert_initial_inspection_can_be_completed(inspection=inspection_locked)
+        _assert_reservation_is_ready(reservation_locked)
+        _assert_departure_window(reservation_locked)
+        _assert_mandatory_photos_present(inspection=inspection_locked)
+        _assert_measurements(
+            inspection=inspection_locked,
+            vehicle=vehicle_locked,
+            mileage=mileage,
+            energy_level_percent=energy_level_percent,
+        )
+
+        now = timezone.now()
+        cleaned_comments = (comments or "").strip()
+
+        inspection_locked.status = Inspection.Status.TERMINE
+        inspection_locked.completed_at = now
+        inspection_locked.completed_by = requested_by
+        inspection_locked.mileage = mileage
+        inspection_locked.energy_level_percent = energy_level_percent
+        inspection_locked.comments = cleaned_comments
+        inspection_locked.save(
+            update_fields=[
+                "status",
+                "completed_at",
+                "completed_by",
+                "mileage",
+                "energy_level_percent",
+                "comments",
+                "updated_at",
+            ]
+        )
+
+        reservation_locked.status = Reservation.Status.EN_COURS
+        reservation_locked.save(update_fields=["status", "updated_at"])
+
+        if mileage >= vehicle_locked.mileage:
+            vehicle_locked.mileage = mileage
+        vehicle_locked.status = Vehicle.Status.LOUE
+        vehicle_locked.save(update_fields=["status", "mileage", "updated_at"])
+
+        _mark_vehicle_access_ready(inspection=inspection_locked)
+
+        notification_message = (
+            f"L'inspection de depart pour la reservation {reservation_locked.reference} est terminee."
+        )
+        transaction.on_commit(
+            lambda: _notify_once(
+                user=reservation_locked.client.user,
+                notification_type="DEPARTURE_INSPECTION_COMPLETED",
+                title="Inspection de depart terminee",
+                message=notification_message,
+                related_object_type="Inspection",
+                related_object_id=inspection_locked.id,
+            )
+        )
+
+        inspection.status = inspection_locked.status
+        inspection.completed_at = inspection_locked.completed_at
+        inspection.completed_by = inspection_locked.completed_by
+        inspection.mileage = inspection_locked.mileage
+        inspection.energy_level_percent = inspection_locked.energy_level_percent
+        inspection.comments = inspection_locked.comments
+
+    return inspection
 
 
 def create_departure_inspection(*, reservation: Reservation, requested_by) -> Inspection:

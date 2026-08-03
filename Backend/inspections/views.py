@@ -20,6 +20,7 @@ from inspections.services.departure import (
 	MANDATORY_PHOTO_TYPES,
 	MISSING_FIELDS,
 	DepartureInspectionError,
+	complete_departure_inspection,
 	create_departure_inspection,
 )
 from reservations.models import Reservation
@@ -53,6 +54,12 @@ class DepartureInspectionResponseSerializer(serializers.Serializer):
 	inspection = InspectionSummarySerializer(read_only=True)
 	mandatory_photo_types = serializers.ListField(child=serializers.CharField(), read_only=True)
 	missing_fields = serializers.ListField(child=serializers.CharField(), read_only=True)
+
+
+class CompleteDepartureInspectionRequestSerializer(serializers.Serializer):
+	mileage = serializers.IntegerField(min_value=0)
+	energy_level_percent = serializers.IntegerField(min_value=0, max_value=100)
+	comments = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class DepartureInspectionCreateView(generics.GenericAPIView):
@@ -200,3 +207,65 @@ class InspectionDamageCreateView(generics.GenericAPIView):
 
 		response_serializer = InspectionDamageReadSerializer(damage, context={"request": request})
 		return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class DepartureInspectionCompleteView(generics.GenericAPIView):
+	permission_classes = [IsAuthenticated, IsClient, IsReservationOwner]
+	serializer_class = CompleteDepartureInspectionRequestSerializer
+	lookup_field = "id"
+	lookup_url_kwarg = "pk"
+
+	def get_queryset(self):
+		if getattr(self, "swagger_fake_view", False):
+			return Inspection.objects.none()
+
+		return Inspection.objects.select_related(
+			"reservation",
+			"reservation__client",
+			"reservation__client__user",
+			"reservation__vehicle",
+			"reservation__vehicle__brand",
+			"reservation__vehicle__category",
+		).filter(reservation__client__user=self.request.user)
+
+	def get_object(self):
+		queryset = self.get_queryset()
+		inspection = get_object_or_404(queryset, pk=self.kwargs[self.lookup_url_kwarg])
+		self.check_object_permissions(self.request, inspection.reservation)
+		return inspection
+
+	@extend_schema(
+		tags=["Inspections"],
+		description=(
+			"Cloture l'etat des lieux INITIAL de depart si toutes les preconditions metier sont satisfaites. "
+			"Le point d'integration d'acces vehicule est prepare, sans declencher de deverrouillage reel."
+		),
+		request=CompleteDepartureInspectionRequestSerializer,
+		responses={
+			200: InspectionSummarySerializer,
+			400: ErrorDetailResponseSerializer,
+			401: ErrorDetailResponseSerializer,
+			403: ErrorDetailResponseSerializer,
+			404: ErrorDetailResponseSerializer,
+		},
+	)
+	def post(self, request, *args, **kwargs):
+		inspection = self.get_object()
+		serializer = self.get_serializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+
+		try:
+			completed_inspection = complete_departure_inspection(
+				inspection=inspection,
+				requested_by=request.user,
+				mileage=serializer.validated_data["mileage"],
+				energy_level_percent=serializer.validated_data["energy_level_percent"],
+				comments=serializer.validated_data.get("comments", ""),
+			)
+		except DepartureInspectionError as exc:
+			detail = {"code": exc.code, "message": exc.message}
+			if exc.details:
+				detail["details"] = exc.details
+			return Response(detail, status=status.HTTP_400_BAD_REQUEST)
+
+		return Response(InspectionSummarySerializer(completed_inspection).data, status=status.HTTP_200_OK)
