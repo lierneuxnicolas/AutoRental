@@ -13,6 +13,7 @@ from accounts.models import Role
 from accounts.tests.utils import create_user, ensure_roles
 from accounts.models import ClientProfile
 from inspections.models import Damage, Inspection, InspectionPhoto
+from notifications.models import Notification
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory
@@ -383,3 +384,208 @@ class InspectionMediaUploadTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class DepartureInspectionCompletionTests(TestCase):
+    def setUp(self):
+        roles = ensure_roles()
+        self.client_user = create_user(
+            email="inspection-complete@example.com",
+            password="StrongPass123!",
+            role=roles[Role.Code.CLIENT],
+            email_verified=True,
+            is_active=True,
+        )
+        self.other_client_user = create_user(
+            email="inspection-complete-other@example.com",
+            password="StrongPass123!",
+            role=roles[Role.Code.CLIENT],
+            email_verified=True,
+            is_active=True,
+        )
+        ClientProfile.objects.create(user=self.client_user, profile_status=ClientProfile.ProfileStatus.VALIDE)
+        ClientProfile.objects.create(user=self.other_client_user, profile_status=ClientProfile.ProfileStatus.VALIDE)
+        self.api = APIClient()
+
+        brand = Brand.objects.create(name="Brand Z", is_active=True)
+        category = VehicleCategory.objects.create(
+            name="Category Z",
+            description="Test",
+            daily_rate=100,
+            hourly_rate=15,
+            minimum_deposit=300,
+            minimum_rental_hours=1,
+            is_active=True,
+        )
+        parking = Parking.objects.create(name="P3", address="Addr", capacity=10, is_active=True)
+        space = ParkingSpace.objects.create(parking=parking, number="C1", is_active=True)
+        self.vehicle = Vehicle.objects.create(
+            brand=brand,
+            category=category,
+            parking_space=space,
+            registration_number="CMP-001",
+            model_name="Model",
+            year=2024,
+            color="White",
+            energy_type="Hybrid",
+            transmission="Auto",
+            seats=5,
+            doors=5,
+            mileage=1000,
+            status=Vehicle.Status.DISPONIBLE,
+            is_active=True,
+        )
+        self.reservation = Reservation.objects.create(
+            client=self.client_user.client_profile,
+            vehicle=self.vehicle,
+            start_at=timezone.now() + timedelta(minutes=5),
+            end_at=timezone.now() + timedelta(hours=3),
+            status=Reservation.Status.CONFIRMEE,
+            confirmed_at=timezone.now() - timedelta(days=1),
+            rental_amount=120,
+            deposit_amount=300,
+        )
+        self.initial_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.INITIAL,
+            status=Inspection.Status.EN_COURS,
+        )
+        Deposit.objects.create(
+            reservation=self.reservation,
+            mode=Deposit.Mode.SIMULATED,
+            amount=self.reservation.deposit_amount,
+            currency="EUR",
+            status=Deposit.Status.AUTORISEE,
+            authorized_at=timezone.now(),
+        )
+        Payment.objects.create(
+            reservation=self.reservation,
+            provider=Payment.Provider.STRIPE,
+            amount=self.reservation.rental_amount,
+            currency="EUR",
+            status=Payment.Status.REUSSI,
+            succeeded_at=timezone.now(),
+        )
+
+        for photo_type in [
+            InspectionPhoto.PhotoType.AVANT,
+            InspectionPhoto.PhotoType.ARRIERE,
+            InspectionPhoto.PhotoType.COTE_GAUCHE,
+            InspectionPhoto.PhotoType.COTE_DROIT,
+            InspectionPhoto.PhotoType.INTERIEUR,
+            InspectionPhoto.PhotoType.TABLEAU_DE_BORD,
+        ]:
+            InspectionPhoto.objects.create(
+                inspection=self.initial_inspection,
+                photo_type=photo_type,
+                file=_create_test_image_file(f"{photo_type}.jpg", "JPEG", "image/jpeg"),
+                position=0,
+            )
+
+    def _complete_url(self, inspection_id):
+        return reverse("inspections:inspection-complete", kwargs={"pk": inspection_id})
+
+    def test_completes_initial_departure_inspection(self):
+        self.api.force_authenticate(self.client_user)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.api.post(
+                self._complete_url(self.initial_inspection.id),
+                {"mileage": 1200, "energy_level_percent": 80, "comments": "Pret pour le depart"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.initial_inspection.refresh_from_db()
+        self.reservation.refresh_from_db()
+        self.vehicle.refresh_from_db()
+        self.assertEqual(self.initial_inspection.status, Inspection.Status.TERMINE)
+        self.assertEqual(self.initial_inspection.completed_by, self.client_user)
+        self.assertEqual(self.initial_inspection.mileage, 1200)
+        self.assertEqual(self.initial_inspection.energy_level_percent, 80)
+        self.assertEqual(self.reservation.status, Reservation.Status.EN_COURS)
+        self.assertEqual(self.vehicle.status, Vehicle.Status.LOUE)
+        self.assertEqual(self.vehicle.mileage, 1200)
+        self.assertEqual(
+            Notification.objects.filter(
+                user=self.client_user,
+                notification_type="DEPARTURE_INSPECTION_COMPLETED",
+                related_object_type="Inspection",
+                related_object_id=self.initial_inspection.id,
+            ).count(),
+            1,
+        )
+
+    def test_refuses_second_completion_without_duplicate_notification(self):
+        self.api.force_authenticate(self.client_user)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            first_response = self.api.post(
+                self._complete_url(self.initial_inspection.id),
+                {"mileage": 1200, "energy_level_percent": 80},
+                format="json",
+            )
+
+        notifications_after_first = Notification.objects.filter(
+            user=self.client_user,
+            notification_type="DEPARTURE_INSPECTION_COMPLETED",
+            related_object_type="Inspection",
+            related_object_id=self.initial_inspection.id,
+        ).count()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            second_response = self.api.post(
+                self._complete_url(self.initial_inspection.id),
+                {"mileage": 1250, "energy_level_percent": 70},
+                format="json",
+            )
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(second_response.data["code"], "INSPECTION_ALREADY_COMPLETED")
+        self.assertEqual(
+            Notification.objects.filter(
+                user=self.client_user,
+                notification_type="DEPARTURE_INSPECTION_COMPLETED",
+                related_object_type="Inspection",
+                related_object_id=self.initial_inspection.id,
+            ).count(),
+            notifications_after_first,
+        )
+
+    def test_refuses_when_mandatory_photo_is_missing(self):
+        self.api.force_authenticate(self.client_user)
+        InspectionPhoto.objects.filter(
+            inspection=self.initial_inspection,
+            photo_type=InspectionPhoto.PhotoType.TABLEAU_DE_BORD,
+        ).delete()
+
+        response = self.api.post(
+            self._complete_url(self.initial_inspection.id),
+            {"mileage": 1200, "energy_level_percent": 80},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "MISSING_MANDATORY_PHOTOS")
+
+    def test_refuses_when_critical_damage_is_unresolved(self):
+        self.api.force_authenticate(self.client_user)
+        Damage.objects.create(
+            inspection=self.initial_inspection,
+            vehicle=self.vehicle,
+            reported_by=self.client_user,
+            description="Batterie critique",
+            severity=Damage.Severity.CRITIQUE,
+            location="Tableau de bord",
+            status=Damage.Status.A_ANALYSER,
+        )
+
+        response = self.api.post(
+            self._complete_url(self.initial_inspection.id),
+            {"mileage": 1200, "energy_level_percent": 80},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "CRITICAL_DAMAGE_UNRESOLVED")
