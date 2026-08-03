@@ -6,7 +6,12 @@ from rest_framework.response import Response
 
 from accounts.models import ClientProfile
 from accounts.permissions import IsClient, IsReservationOwner
-from payments.services import DepositAuthorizationError, authorize_deposit
+from payments.services import (
+    DepositAuthorizationError,
+    PaymentIntentError,
+    authorize_deposit,
+    create_or_reuse_payment_intent,
+)
 from reservations.models import Reservation
 from reservations.serializers.reservation import (
     ReservationCancelRequestSerializer,
@@ -16,6 +21,8 @@ from reservations.serializers.reservation import (
     ReservationDepositRequestSerializer,
     ReservationDepositResponseSerializer,
     ReservationListDetailSerializer,
+    ReservationPaymentIntentRequestSerializer,
+    ReservationPaymentIntentResponseSerializer,
 )
 from reservations.services import ReservationCreationError, create_draft_reservation
 from reservations.services.cancellation import CancellationError, cancel_reservation
@@ -338,4 +345,63 @@ class ReservationClientDepositAuthorizeView(generics.GenericAPIView):
         }
 
         response_serializer = ReservationDepositResponseSerializer(response_data)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class ReservationClientPaymentIntentView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsClient, IsReservationOwner]
+    serializer_class = ReservationPaymentIntentRequestSerializer
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return Reservation.objects.filter(client__user=self.request.user).select_related(
+            "client",
+            "client__user",
+            "vehicle",
+            "vehicle__brand",
+            "vehicle__category",
+        )
+
+    def get_object(self):
+        queryset = self.get_queryset()
+        reservation = get_object_or_404(queryset, pk=self.kwargs[self.lookup_url_kwarg])
+        self.check_object_permissions(self.request, reservation)
+        return reservation
+
+    @extend_schema(
+        tags=["Reservations"],
+        description=(
+            "Cree ou reutilise un PaymentIntent Stripe pour payer la location. "
+            "Le montant est toujours recalcule cote backend et la caution doit etre AUTORISEE."
+        ),
+        request=ReservationPaymentIntentRequestSerializer,
+        responses={
+            200: ReservationPaymentIntentResponseSerializer,
+            400: ErrorDetailResponseSerializer,
+            401: ErrorDetailResponseSerializer,
+            403: ErrorDetailResponseSerializer,
+            404: ErrorDetailResponseSerializer,
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        reservation = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = create_or_reuse_payment_intent(
+                reservation=reservation,
+                requested_by=request.user,
+            )
+        except PaymentIntentError as exc:
+            detail = {"code": exc.code, "message": exc.message}
+            if exc.details:
+                detail["details"] = exc.details
+            return Response(detail, status=status.HTTP_400_BAD_REQUEST)
+
+        response_serializer = ReservationPaymentIntentResponseSerializer(result)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
