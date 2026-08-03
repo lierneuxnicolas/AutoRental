@@ -48,7 +48,7 @@ class ReservationManagementVehicleSummarySerializer(serializers.Serializer):
     category = serializers.CharField(source="category.name", read_only=True)
     year = serializers.IntegerField(read_only=True)
     color = serializers.CharField(read_only=True)
-    registration_plate = serializers.CharField(read_only=True)
+    registration_plate = serializers.CharField(source="registration_number", read_only=True)
     energy_type = serializers.CharField(read_only=True)
     transmission = serializers.CharField(read_only=True)
     seats = serializers.IntegerField(read_only=True)

@@ -1,17 +1,35 @@
-from datetime import timedelta
+import inspect
+from datetime import date, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.apps import apps
+from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
+from django.db import IntegrityError
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
-from django.urls import reverse
+from django.urls import resolve, reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from accounts.models import ClientDocument, ClientProfile, Role
+from notifications.models import Notification
+from reservations.models import Reservation
 from reservations.services.pricing import PricingError, _quantize_amount, calculate_price_simulation
+from reservations.services.reservation_creation import create_draft_reservation
+from reservations.views import (
+	PriceSimulationView,
+	ReservationClientCancelView,
+	ReservationClientDetailView,
+	ReservationClientListCreateView,
+	ReservationManagementDetailView,
+	ReservationManagementListView,
+)
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory
 
 
@@ -583,3 +601,888 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 			any("join" in query["sql"].lower() and "vehicles_vehiclecategory" in query["sql"].lower() for query in ctx),
 			msg="La requete vehicule doit inclure la categorie via JOIN (select_related).",
 		)
+
+
+def _doc_file(name):
+	return SimpleUploadedFile(name, b"document", content_type="application/octet-stream")
+
+
+class ReservationTestDataMixin:
+	@classmethod
+	def setUpTestData(cls):
+		User = get_user_model()
+
+		cls.role_client = Role.objects.create(code=Role.Code.CLIENT, label="Client")
+		cls.role_manager = Role.objects.create(code=Role.Code.GESTIONNAIRE_COMPTABLE, label="Gestionnaire")
+		cls.role_admin = Role.objects.create(code=Role.Code.ADMINISTRATEUR, label="Administrateur")
+		cls.role_mechanic = Role.objects.create(code=Role.Code.MECANICIEN, label="Mecanicien")
+		cls.role_cleaner = Role.objects.create(code=Role.Code.NETTOYEUR, label="Nettoyeur")
+
+		cls.client_user_1 = User.objects.create_user(
+			email="client1@example.com",
+			password="Pass1234!",
+			first_name="Alice",
+			last_name="Client",
+			phone="0400000001",
+			role=cls.role_client,
+			email_verified=True,
+		)
+		cls.client_user_2 = User.objects.create_user(
+			email="client2@example.com",
+			password="Pass1234!",
+			first_name="Bob",
+			last_name="Client",
+			phone="0400000002",
+			role=cls.role_client,
+			email_verified=True,
+		)
+		cls.manager_user = User.objects.create_user(
+			email="manager.reservation@example.com",
+			password="Pass1234!",
+			first_name="Mina",
+			last_name="Manager",
+			phone="0400000003",
+			role=cls.role_manager,
+			email_verified=True,
+		)
+		cls.admin_user = User.objects.create_user(
+			email="admin.reservation@example.com",
+			password="Pass1234!",
+			first_name="Adam",
+			last_name="Admin",
+			phone="0400000004",
+			role=cls.role_admin,
+			email_verified=True,
+		)
+		cls.mechanic_user = User.objects.create_user(
+			email="mechanic.reservation@example.com",
+			password="Pass1234!",
+			first_name="Max",
+			last_name="Mechanic",
+			phone="0400000005",
+			role=cls.role_mechanic,
+			email_verified=True,
+		)
+		cls.cleaner_user = User.objects.create_user(
+			email="cleaner.reservation@example.com",
+			password="Pass1234!",
+			first_name="Nina",
+			last_name="Cleaner",
+			phone="0400000006",
+			role=cls.role_cleaner,
+			email_verified=True,
+		)
+
+		adult_birthdate = timezone.localdate() - timedelta(days=25 * 365)
+		cls.client_profile_1 = ClientProfile.objects.create(
+			user=cls.client_user_1,
+			date_of_birth=adult_birthdate,
+			address="Rue de la Reservation 1",
+			profile_status=ClientProfile.ProfileStatus.VALIDE,
+		)
+		cls.client_profile_2 = ClientProfile.objects.create(
+			user=cls.client_user_2,
+			date_of_birth=adult_birthdate,
+			address="Rue de la Reservation 2",
+			profile_status=ClientProfile.ProfileStatus.VALIDE,
+		)
+
+		cls.brand = Brand.objects.create(name="Brand Reservation", is_active=True)
+		cls.category = VehicleCategory.objects.create(
+			name="Category Reservation",
+			description="Categorie test reservation",
+			daily_rate=Decimal("100.00"),
+			hourly_rate=Decimal("20.00"),
+			minimum_deposit=Decimal("350.00"),
+			minimum_rental_hours=1,
+			is_active=True,
+		)
+		cls.parking = Parking.objects.create(
+			name="Parking Reservation",
+			address="Rue Parking 1",
+			latitude="50.850340",
+			longitude="4.351710",
+			capacity=30,
+			is_active=True,
+		)
+		cls.space_1 = ParkingSpace.objects.create(parking=cls.parking, number="R1", is_active=True)
+		cls.space_2 = ParkingSpace.objects.create(parking=cls.parking, number="R2", is_active=True)
+		cls.space_3 = ParkingSpace.objects.create(parking=cls.parking, number="R3", is_active=True)
+
+		cls.vehicle_available = Vehicle.objects.create(
+			brand=cls.brand,
+			category=cls.category,
+			parking_space=cls.space_1,
+			registration_number="RSV-001",
+			model_name="Model A",
+			year=2024,
+			color="Black",
+			energy_type="Hybrid",
+			transmission="Auto",
+			seats=5,
+			doors=5,
+			mileage=1500,
+			status=Vehicle.Status.DISPONIBLE,
+			is_active=True,
+		)
+		cls.vehicle_reserved = Vehicle.objects.create(
+			brand=cls.brand,
+			category=cls.category,
+			parking_space=cls.space_2,
+			registration_number="RSV-002",
+			model_name="Model B",
+			year=2024,
+			color="White",
+			energy_type="Hybrid",
+			transmission="Auto",
+			seats=5,
+			doors=5,
+			mileage=1700,
+			status=Vehicle.Status.RESERVE,
+			is_active=True,
+		)
+		cls.vehicle_inactive = Vehicle.objects.create(
+			brand=cls.brand,
+			category=cls.category,
+			parking_space=cls.space_3,
+			registration_number="RSV-003",
+			model_name="Model C",
+			year=2023,
+			color="Blue",
+			energy_type="Diesel",
+			transmission="Manual",
+			seats=5,
+			doors=5,
+			mileage=5000,
+			status=Vehicle.Status.DISPONIBLE,
+			is_active=False,
+		)
+
+		cls._create_valid_documents(cls.client_profile_1, suffix="1")
+		cls._create_valid_documents(cls.client_profile_2, suffix="2")
+
+	@classmethod
+	def _create_valid_documents(cls, profile, *, suffix="x"):
+		expiration = timezone.localdate() + timedelta(days=365)
+		ClientDocument.objects.create(
+			client=profile,
+			document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+			document_number=f"ID-{suffix}",
+			file=_doc_file(f"id-{suffix}.bin"),
+			expiration_date=expiration,
+			status=ClientDocument.Status.VALIDE,
+			is_active=True,
+		)
+		ClientDocument.objects.create(
+			client=profile,
+			document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+			document_number=f"LIC-{suffix}",
+			file=_doc_file(f"license-{suffix}.bin"),
+			expiration_date=expiration,
+			status=ClientDocument.Status.VALIDE,
+			is_active=True,
+		)
+
+	def _period(self, *, start_hours=6, duration_hours=4):
+		start_at = timezone.now() + timedelta(hours=start_hours)
+		end_at = start_at + timedelta(hours=duration_hours)
+		return start_at, end_at
+
+	def _optional_model_count(self, app_label, model_name):
+		try:
+			model = apps.get_model(app_label, model_name)
+		except LookupError:
+			return None
+		if model is None:
+			return None
+		return model.objects.count()
+
+	def _create_reservation(self, *, client=None, vehicle=None, status=Reservation.Status.BROUILLON, start_at=None, end_at=None):
+		start, end = (start_at, end_at) if start_at and end_at else self._period()
+		confirmed_at = start if status in Reservation.CONFIRMED_STATUSES else None
+		cancelled_at = timezone.now() if status == Reservation.Status.ANNULEE else None
+		cancellation_reason = "Annulee" if status == Reservation.Status.ANNULEE else ""
+		return Reservation.objects.create(
+			client=client or self.client_profile_1,
+			vehicle=vehicle or self.vehicle_available,
+			start_at=start,
+			end_at=end,
+			status=status,
+			rental_amount=Decimal("120.00"),
+			deposit_amount=Decimal("350.00"),
+			confirmed_at=confirmed_at,
+			cancelled_at=cancelled_at,
+			cancellation_reason=cancellation_reason,
+		)
+
+
+class ReservationRoutingTests(TestCase):
+	def test_client_urls_are_configured_and_cancel_route_is_resolved(self):
+		self.assertEqual(reverse("reservations:reservation-list-create"), "/api/v1/reservations/")
+		self.assertEqual(reverse("reservations:reservation-detail", kwargs={"pk": 1}), "/api/v1/reservations/1/")
+		self.assertEqual(reverse("reservations:reservation-cancel", kwargs={"pk": 1}), "/api/v1/reservations/1/cancel/")
+
+		self.assertIs(resolve("/api/v1/reservations/").func.view_class, ReservationClientListCreateView)
+		self.assertIs(resolve("/api/v1/reservations/1/").func.view_class, ReservationClientDetailView)
+		self.assertIs(resolve("/api/v1/reservations/1/cancel/").func.view_class, ReservationClientCancelView)
+
+	def test_management_urls_are_configured(self):
+		self.assertEqual(reverse("reservations:management-reservation-list"), "/api/v1/management/reservations/")
+		self.assertEqual(
+			reverse("reservations:management-reservation-detail", kwargs={"pk": 1}),
+			"/api/v1/management/reservations/1/",
+		)
+
+		self.assertIs(resolve("/api/v1/management/reservations/").func.view_class, ReservationManagementListView)
+		self.assertIs(resolve("/api/v1/management/reservations/1/").func.view_class, ReservationManagementDetailView)
+
+	def test_simulation_endpoint_is_not_broken(self):
+		self.assertEqual(reverse("reservations:price-simulation"), "/api/v1/simulations/")
+		self.assertIs(resolve("/api/v1/simulations/").func.view_class, PriceSimulationView)
+
+
+class ReservationModelTests(ReservationTestDataMixin, TestCase):
+	def test_reference_is_generated_automatically(self):
+		reservation = self._create_reservation()
+		self.assertTrue(reservation.reference.startswith(f"AR-{timezone.localdate().year}-"))
+
+	@patch("reservations.models.Reservation.generate_reference", return_value="AR-2099-DUPL0001")
+	def test_reference_must_be_unique(self, _mock_reference):
+		self._create_reservation()
+		with self.assertRaises(ValidationError):
+			self._create_reservation(
+				vehicle=self.vehicle_reserved,
+				start_at=timezone.now() + timedelta(days=2),
+				end_at=timezone.now() + timedelta(days=2, hours=3),
+			)
+
+	def test_status_choices_are_exact(self):
+		expected = {
+			"BROUILLON",
+			"EN_ATTENTE_CAUTION",
+			"EN_ATTENTE_PAIEMENT",
+			"CONFIRMEE",
+			"EN_COURS",
+			"A_CONTROLER",
+			"TERMINEE",
+			"ANNULEE",
+			"PAIEMENT_ECHOUE",
+		}
+		self.assertEqual({value for value, _ in Reservation.Status.choices}, expected)
+
+	def test_end_at_must_be_after_start_at(self):
+		start = timezone.now() + timedelta(hours=5)
+		with self.assertRaises(ValidationError):
+			Reservation.objects.create(
+				client=self.client_profile_1,
+				vehicle=self.vehicle_available,
+				start_at=start,
+				end_at=start,
+				status=Reservation.Status.BROUILLON,
+				rental_amount=Decimal("10.00"),
+				deposit_amount=Decimal("10.00"),
+			)
+
+	def test_amounts_must_be_non_negative(self):
+		start, end = self._period()
+		with self.assertRaises(ValidationError):
+			Reservation.objects.create(
+				client=self.client_profile_1,
+				vehicle=self.vehicle_available,
+				start_at=start,
+				end_at=end,
+				status=Reservation.Status.BROUILLON,
+				rental_amount=Decimal("-1.00"),
+				deposit_amount=Decimal("10.00"),
+			)
+
+		with self.assertRaises(ValidationError):
+			Reservation.objects.create(
+				client=self.client_profile_1,
+				vehicle=self.vehicle_available,
+				start_at=start,
+				end_at=end,
+				status=Reservation.Status.BROUILLON,
+				rental_amount=Decimal("10.00"),
+				deposit_amount=Decimal("-1.00"),
+			)
+
+	def test_cancellation_fields_consistency(self):
+		start, end = self._period()
+
+		with self.assertRaises(ValidationError):
+			Reservation.objects.create(
+				client=self.client_profile_1,
+				vehicle=self.vehicle_available,
+				start_at=start,
+				end_at=end,
+				status=Reservation.Status.ANNULEE,
+				rental_amount=Decimal("10.00"),
+				deposit_amount=Decimal("10.00"),
+				cancelled_at=None,
+				cancellation_reason="",
+			)
+
+		with self.assertRaises(ValidationError):
+			Reservation.objects.create(
+				client=self.client_profile_1,
+				vehicle=self.vehicle_available,
+				start_at=start,
+				end_at=end,
+				status=Reservation.Status.BROUILLON,
+				rental_amount=Decimal("10.00"),
+				deposit_amount=Decimal("10.00"),
+				cancelled_at=timezone.now(),
+			)
+
+	def test_str_returns_reference(self):
+		reservation = self._create_reservation()
+		self.assertEqual(str(reservation), reservation.reference)
+
+
+class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+		self.url = reverse("reservations:reservation-list-create")
+
+	def _payload(self, *, vehicle_id=None, start_at=None, end_at=None, **extra):
+		start, end = (start_at, end_at) if start_at and end_at else self._period()
+		data = {
+			"vehicle_id": vehicle_id if vehicle_id is not None else self.vehicle_available.id,
+			"start_at": start.isoformat(),
+			"end_at": end.isoformat(),
+		}
+		data.update(extra)
+		return data
+
+	def test_client_authentifie_valide_cree_un_brouillon(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		notif_before = Notification.objects.count()
+		payment_before = self._optional_model_count("payments", "Payment")
+		vehicle_status_before = self.vehicle_available.status
+
+		with self.captureOnCommitCallbacks(execute=True):
+			response = self.client_api.post(self.url, self._payload(), format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		reservation = Reservation.objects.get(pk=response.data["id"])
+		self.assertEqual(reservation.status, Reservation.Status.BROUILLON)
+		self.assertTrue(reservation.reference)
+		self.assertEqual(Notification.objects.count(), notif_before + 1)
+		self.assertTrue(
+			Notification.objects.filter(
+				notification_type="RESERVATION_DRAFT_CREATED",
+				related_object_id=reservation.id,
+			).exists()
+		)
+		self.vehicle_available.refresh_from_db()
+		self.assertEqual(self.vehicle_available.status, vehicle_status_before)
+		if payment_before is not None:
+			self.assertEqual(apps.get_model("payments", "Payment").objects.count(), payment_before)
+
+	def test_role_non_client_refuse(self):
+		self.client_api.force_authenticate(self.manager_user)
+		response = self.client_api.post(self.url, self._payload(), format="json")
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_client_sans_profil_refuse(self):
+		User = get_user_model()
+		user_without_profile = User.objects.create_user(
+			email="no-profile@example.com",
+			password="Pass1234!",
+			first_name="No",
+			last_name="Profile",
+			phone="0400000099",
+			role=self.role_client,
+			email_verified=True,
+		)
+		self.client_api.force_authenticate(user_without_profile)
+		response = self.client_api.post(self.url, self._payload(), format="json")
+		self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+	def test_email_non_confirme_refuse(self):
+		self.client_user_1.email_verified = False
+		self.client_user_1.save(update_fields=["email_verified"])
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self.url, self._payload(), format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "PROFILE_NOT_ELIGIBLE")
+		self.assertIn("EMAIL_NOT_VERIFIED", response.data.get("details", {}).get("eligibility_errors", []))
+
+	def test_profil_incomplet_refuse(self):
+		self.client_user_1.phone = ""
+		self.client_user_1.save(update_fields=["phone"])
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self.url, self._payload(), format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "PROFILE_NOT_ELIGIBLE")
+		self.assertIn("PROFILE_INCOMPLETE", response.data.get("details", {}).get("eligibility_errors", []))
+
+	def test_profil_refuse_refuse(self):
+		self.client_profile_1.profile_status = ClientProfile.ProfileStatus.REFUSE
+		self.client_profile_1.save(update_fields=["profile_status"])
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self.url, self._payload(), format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "PROFILE_NOT_ELIGIBLE")
+		self.assertIn("PROFILE_NOT_VALID", response.data.get("details", {}).get("eligibility_errors", []))
+
+	def test_moins_de_21_ans_refuse(self):
+		self.client_profile_1.date_of_birth = timezone.localdate() - timedelta(days=20 * 365)
+		self.client_profile_1.save(update_fields=["date_of_birth"])
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self.url, self._payload(), format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("UNDER_MINIMUM_AGE", response.data.get("details", {}).get("eligibility_errors", []))
+
+	def test_carte_absente_refuse(self):
+		ClientDocument.objects.filter(
+			client=self.client_profile_1,
+			document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+			is_active=True,
+		).delete()
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self.url, self._payload(), format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("IDENTITY_CARD_MISSING", response.data.get("details", {}).get("eligibility_errors", []))
+
+	def test_permis_absent_refuse(self):
+		ClientDocument.objects.filter(
+			client=self.client_profile_1,
+			document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+			is_active=True,
+		).delete()
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self.url, self._payload(), format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("DRIVING_LICENSE_MISSING", response.data.get("details", {}).get("eligibility_errors", []))
+
+	def test_carte_expiree_avant_fin_refuse(self):
+		start, end = self._period()
+		card = ClientDocument.objects.filter(
+			client=self.client_profile_1,
+			document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+			is_active=True,
+		).first()
+		card.expiration_date = end.date() - timedelta(days=1)
+		card.save(update_fields=["expiration_date"])
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(
+			self.url,
+			self._payload(start_at=start, end_at=end),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("IDENTITY_CARD_EXPIRES_TOO_SOON", response.data.get("details", {}).get("eligibility_errors", []))
+
+	def test_permis_expire_avant_fin_refuse(self):
+		start, end = self._period()
+		license_doc = ClientDocument.objects.filter(
+			client=self.client_profile_1,
+			document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+			is_active=True,
+		).first()
+		license_doc.expiration_date = end.date() - timedelta(days=1)
+		license_doc.save(update_fields=["expiration_date"])
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(
+			self.url,
+			self._payload(start_at=start, end_at=end),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("DRIVING_LICENSE_EXPIRES_TOO_SOON", response.data.get("details", {}).get("eligibility_errors", []))
+
+	def test_vehicule_inactif_refuse(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.post(self.url, self._payload(vehicle_id=self.vehicle_inactive.id), format="json")
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "VEHICLE_NOT_ACTIVE")
+
+	def test_vehicule_non_disponible_refuse(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.post(self.url, self._payload(vehicle_id=self.vehicle_reserved.id), format="json")
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "VEHICLE_NOT_BOOKABLE")
+
+	def test_periode_invalide_refuse(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		start = timezone.now() + timedelta(hours=10)
+		end = start - timedelta(hours=1)
+		response = self.client_api.post(
+			self.url,
+			self._payload(start_at=start, end_at=end),
+			format="json",
+		)
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "INVALID_PERIOD")
+
+	def test_vehicule_deja_reserve_refuse(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		start, end = self._period()
+		self._create_reservation(
+			client=self.client_profile_2,
+			vehicle=self.vehicle_available,
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start + timedelta(minutes=10),
+			end_at=end - timedelta(minutes=10),
+		)
+
+		response = self.client_api.post(
+			self.url,
+			self._payload(start_at=start, end_at=end),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "VEHICLE_UNAVAILABLE")
+
+	@patch(
+		"reservations.services.reservation_creation.calculate_price_simulation",
+		return_value=SimpleNamespace(
+			vehicle_id=999,
+			duration_hours=Decimal("4.00"),
+			rental_amount=Decimal("555.55"),
+			deposit_amount=Decimal("444.44"),
+			insurance_included=True,
+			total_amount=Decimal("555.55"),
+			pricing_method="MOCKED",
+		),
+	)
+	def test_tarif_est_recalcule_depuis_la_base(self, _mock_pricing):
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.post(self.url, self._payload(), format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		reservation = Reservation.objects.get(pk=response.data["id"])
+		self.assertEqual(reservation.rental_amount, Decimal("555.55"))
+		self.assertEqual(reservation.deposit_amount, Decimal("444.44"))
+
+	def test_faux_montant_frontend_refuse(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.post(
+			self.url,
+			self._payload(rental_amount="0.01", deposit_amount="0.01"),
+			format="json",
+		)
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("rental_amount", response.data)
+		self.assertIn("deposit_amount", response.data)
+
+
+class ReservationClientConsultationTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+		self.list_url = reverse("reservations:reservation-list-create")
+		self.owned_reservation = self._create_reservation(client=self.client_profile_1)
+		self.owned_reservation_2 = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+			start_at=timezone.now() + timedelta(days=2),
+			end_at=timezone.now() + timedelta(days=2, hours=3),
+		)
+		self.other_reservation = self._create_reservation(
+			client=self.client_profile_2,
+			start_at=timezone.now() + timedelta(days=3),
+			end_at=timezone.now() + timedelta(days=3, hours=3),
+		)
+
+	def test_liste_limitee_au_client(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.get(self.list_url)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		ids = {item["id"] for item in response.data["results"]}
+		self.assertIn(self.owned_reservation.id, ids)
+		self.assertIn(self.owned_reservation_2.id, ids)
+		self.assertNotIn(self.other_reservation.id, ids)
+
+	def test_detail_proprietaire(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		url = reverse("reservations:reservation-detail", kwargs={"pk": self.owned_reservation.id})
+		response = self.client_api.get(url)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["id"], self.owned_reservation.id)
+
+	def test_autre_client_obtient_404(self):
+		self.client_api.force_authenticate(self.client_user_2)
+		url = reverse("reservations:reservation-detail", kwargs={"pk": self.owned_reservation.id})
+		response = self.client_api.get(url)
+		self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+	def test_anonyme_refuse(self):
+		response = self.client_api.get(self.list_url)
+		self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+	def test_mecanicien_refuse(self):
+		self.client_api.force_authenticate(self.mechanic_user)
+		response = self.client_api.get(self.list_url)
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_filtre_par_statut(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.get(self.list_url, {"status": Reservation.Status.EN_ATTENTE_PAIEMENT})
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		ids = {item["id"] for item in response.data["results"]}
+		self.assertEqual(ids, {self.owned_reservation_2.id})
+
+	def test_pagination_active(self):
+		for idx in range(25):
+			self._create_reservation(
+				client=self.client_profile_1,
+				start_at=timezone.now() + timedelta(days=4 + idx),
+				end_at=timezone.now() + timedelta(days=4 + idx, hours=3),
+			)
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.get(self.list_url)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertIn("count", response.data)
+		self.assertIn("results", response.data)
+		self.assertEqual(len(response.data["results"]), 20)
+
+	def test_aucune_donnee_sensible(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.get(self.list_url)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		first = response.data["results"][0]
+		for forbidden_key in ["password", "document_number", "file", "iban", "card_number", "registration_number"]:
+			self.assertNotIn(forbidden_key, first)
+
+
+class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+
+	def test_proprietaire_peut_annuler_brouillon(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		notif_before = Notification.objects.count()
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url, {"reason": "Changement de plan"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
+		self.assertIsNotNone(reservation.cancelled_at)
+		self.assertEqual(Notification.objects.count(), notif_before + 1)
+		self.assertTrue(
+			Notification.objects.filter(
+				notification_type="RESERVATION_CANCELLED",
+				related_object_id=reservation.id,
+			).exists()
+		)
+
+	def test_motif_obligatoire(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url, {"reason": "   "}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("reason", response.data)
+
+	def test_autre_client_refuse(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_2)
+
+		response = self.client_api.post(url, {"reason": "Non proprietaire"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+	def test_reservation_deja_annulee_refusee(self):
+		reservation = self._create_reservation(status=Reservation.Status.ANNULEE)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url, {"reason": "Double annulation"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "ALREADY_CANCELLED")
+
+	def test_en_cours_refusee(self):
+		start = timezone.now() - timedelta(hours=1)
+		end = timezone.now() + timedelta(hours=2)
+		reservation = self._create_reservation(
+			status=Reservation.Status.EN_COURS,
+			start_at=start,
+			end_at=end,
+		)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url, {"reason": "Trop tard"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "CANNOT_CANCEL")
+
+	def test_terminee_refusee(self):
+		start = timezone.now() - timedelta(days=2)
+		end = timezone.now() - timedelta(days=1)
+		reservation = self._create_reservation(
+			status=Reservation.Status.TERMINEE,
+			start_at=start,
+			end_at=end,
+		)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url, {"reason": "Deja terminee"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "CANNOT_CANCEL")
+
+	def test_confirmee_future_annulable(self):
+		start = timezone.now() + timedelta(days=2)
+		end = start + timedelta(hours=3)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=end,
+		)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url, {"reason": "Empêchement"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
+
+	def test_confirmee_commencee_non_annulable(self):
+		start = timezone.now() - timedelta(minutes=10)
+		end = timezone.now() + timedelta(hours=2)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=end,
+		)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url, {"reason": "Debut depasse"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "CANNOT_CANCEL")
+
+	def test_aucun_remboursement_cree_a_ce_stade(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		payment_before = self._optional_model_count("payments", "Payment")
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url, {"reason": "Annulation simple"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		if payment_before is not None:
+			self.assertEqual(apps.get_model("payments", "Payment").objects.count(), payment_before)
+
+
+class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+		self.list_url = reverse("reservations:management-reservation-list")
+		self.reservation_client_1 = self._create_reservation(client=self.client_profile_1, vehicle=self.vehicle_available)
+		self.reservation_client_2 = self._create_reservation(
+			client=self.client_profile_2,
+			vehicle=self.vehicle_reserved,
+			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+			start_at=timezone.now() + timedelta(days=2),
+			end_at=timezone.now() + timedelta(days=2, hours=4),
+		)
+
+	def test_gestionnaire_voit_toutes_les_reservations(self):
+		self.client_api.force_authenticate(self.manager_user)
+		response = self.client_api.get(self.list_url)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		ids = {item["id"] for item in response.data["results"]}
+		self.assertIn(self.reservation_client_1.id, ids)
+		self.assertIn(self.reservation_client_2.id, ids)
+
+	def test_administrateur_autorise(self):
+		self.client_api.force_authenticate(self.admin_user)
+		response = self.client_api.get(self.list_url)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+	def test_client_refuse(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.get(self.list_url)
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_mecanicien_refuse(self):
+		self.client_api.force_authenticate(self.mechanic_user)
+		response = self.client_api.get(self.list_url)
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_nettoyeur_refuse(self):
+		self.client_api.force_authenticate(self.cleaner_user)
+		response = self.client_api.get(self.list_url)
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_recherche_par_reference_client_et_vehicule(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		by_reference = self.client_api.get(self.list_url, {"search": self.reservation_client_1.reference})
+		self.assertEqual(by_reference.status_code, status.HTTP_200_OK)
+		ids_reference = {item["id"] for item in by_reference.data["results"]}
+		self.assertIn(self.reservation_client_1.id, ids_reference)
+
+		by_client = self.client_api.get(self.list_url, {"search": self.client_user_2.email})
+		self.assertEqual(by_client.status_code, status.HTTP_200_OK)
+		ids_client = {item["id"] for item in by_client.data["results"]}
+		self.assertIn(self.reservation_client_2.id, ids_client)
+
+		by_vehicle = self.client_api.get(self.list_url, {"search": self.vehicle_reserved.registration_number})
+		self.assertEqual(by_vehicle.status_code, status.HTTP_200_OK)
+		ids_vehicle = {item["id"] for item in by_vehicle.data["results"]}
+		self.assertIn(self.reservation_client_2.id, ids_vehicle)
+
+	def test_aucune_donnee_documentaire_ou_bancaire_exposee(self):
+		self.client_api.force_authenticate(self.manager_user)
+		detail_url = reverse("reservations:management-reservation-detail", kwargs={"pk": self.reservation_client_1.id})
+		response = self.client_api.get(detail_url)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+		client_summary = response.data.get("client_summary", {})
+		self.assertIn("email", client_summary)
+		for forbidden_key in [
+			"password",
+			"document_number",
+			"file",
+			"validated_by",
+			"iban",
+			"bank_account",
+			"card_number",
+		]:
+			self.assertNotIn(forbidden_key, response.data)
+			self.assertNotIn(forbidden_key, client_summary)
+
+
+class ReservationConcurrencyAuditTests(TestCase):
+	def test_create_draft_reservation_uses_atomic_lock_and_rechecks_availability(self):
+		source = inspect.getsource(create_draft_reservation)
+
+		self.assertIn("with transaction.atomic():", source)
+		self.assertIn("select_for_update", source)
+		self.assertGreaterEqual(source.count("is_vehicle_available("), 2)
+
+		atomic_index = source.find("with transaction.atomic():")
+		last_availability_check_index = source.rfind("is_vehicle_available(")
+		self.assertGreater(last_availability_check_index, atomic_index)
