@@ -31,11 +31,13 @@ def register_client_user(*, email, password, first_name, last_name, phone=""):
         profile_status=ClientProfile.ProfileStatus.INCOMPLET,
     )
 
-    create_notification(
-        user=user,
-        notification_type="ACCOUNT_CREATED",
-        title="Compte cree",
-        message="Votre compte AutoRental a ete cree. Confirmez votre adresse e-mail.",
+    transaction.on_commit(
+        lambda: create_notification(
+            user=user,
+            notification_type="ACCOUNT_CREATED",
+            title="Compte cree",
+            message="Votre compte AutoRental a ete cree. Confirmez votre adresse e-mail.",
+        )
     )
 
     transaction.on_commit(lambda: send_verification_email(user))
