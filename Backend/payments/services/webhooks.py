@@ -23,6 +23,14 @@ SUPPORTED_STRIPE_EVENT_TYPES = {
     "payment_intent.canceled",
 }
 
+SENSITIVE_PAYLOAD_KEYS = {
+    "card_number",
+    "cvc",
+    "expiry",
+    "pin",
+    "secret_key",
+}
+
 
 class StripeWebhookProcessingError(ValueError):
     pass
@@ -104,10 +112,27 @@ def _notify_managers_once(*, notification_type: str, title: str, message: str, r
 
 def _event_to_payload(event: Any) -> dict[str, Any]:
     if hasattr(event, "to_dict_recursive"):
-        return event.to_dict_recursive()
+        payload = event.to_dict_recursive()
+        return _sanitize_payload(payload)
     if isinstance(event, dict):
-        return event
-    return dict(event)
+        return _sanitize_payload(event)
+    return _sanitize_payload(dict(event))
+
+
+def _sanitize_payload(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        sanitized: dict[str, Any] = {}
+        for key, value in payload.items():
+            key_text = str(key).strip().lower()
+            if key_text in SENSITIVE_PAYLOAD_KEYS:
+                continue
+            sanitized[key] = _sanitize_payload(value)
+        return sanitized
+
+    if isinstance(payload, list):
+        return [_sanitize_payload(item) for item in payload]
+
+    return payload
 
 
 def _get_object_metadata(payment_intent: dict[str, Any]) -> dict[str, Any]:

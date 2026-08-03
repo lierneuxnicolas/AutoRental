@@ -19,14 +19,17 @@ from rest_framework.test import APIClient
 
 from accounts.models import ClientDocument, ClientProfile, Role
 from notifications.models import Notification
+from payments.models import Deposit, Payment
 from reservations.models import Reservation
 from reservations.services.pricing import PricingError, _quantize_amount, calculate_price_simulation
 from reservations.services.reservation_creation import create_draft_reservation
 from reservations.views import (
 	PriceSimulationView,
 	ReservationClientCancelView,
+	ReservationClientDepositAuthorizeView,
 	ReservationClientDetailView,
 	ReservationClientListCreateView,
+	ReservationClientPaymentIntentView,
 	ReservationManagementDetailView,
 	ReservationManagementListView,
 )
@@ -820,10 +823,14 @@ class ReservationRoutingTests(TestCase):
 	def test_client_urls_are_configured_and_cancel_route_is_resolved(self):
 		self.assertEqual(reverse("reservations:reservation-list-create"), "/api/v1/reservations/")
 		self.assertEqual(reverse("reservations:reservation-detail", kwargs={"pk": 1}), "/api/v1/reservations/1/")
+		self.assertEqual(reverse("reservations:reservation-deposit-authorize", kwargs={"pk": 1}), "/api/v1/reservations/1/deposit/")
+		self.assertEqual(reverse("reservations:reservation-payment-intent", kwargs={"pk": 1}), "/api/v1/reservations/1/payment-intent/")
 		self.assertEqual(reverse("reservations:reservation-cancel", kwargs={"pk": 1}), "/api/v1/reservations/1/cancel/")
 
 		self.assertIs(resolve("/api/v1/reservations/").func.view_class, ReservationClientListCreateView)
 		self.assertIs(resolve("/api/v1/reservations/1/").func.view_class, ReservationClientDetailView)
+		self.assertIs(resolve("/api/v1/reservations/1/deposit/").func.view_class, ReservationClientDepositAuthorizeView)
+		self.assertIs(resolve("/api/v1/reservations/1/payment-intent/").func.view_class, ReservationClientPaymentIntentView)
 		self.assertIs(resolve("/api/v1/reservations/1/cancel/").func.view_class, ReservationClientCancelView)
 
 	def test_management_urls_are_configured(self):
@@ -1393,6 +1400,286 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		if payment_before is not None:
 			self.assertEqual(apps.get_model("payments", "Payment").objects.count(), payment_before)
+
+
+class ReservationDepositAuthorizationTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+
+	def _deposit_url(self, reservation_id):
+		return reverse("reservations:reservation-deposit-authorize", kwargs={"pk": reservation_id})
+
+	def test_simulated_mode_succeeds_and_does_not_store_card_number(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self._deposit_url(reservation.id), {"mode": "SIMULATED"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		deposit = Deposit.objects.get(reservation=reservation)
+		self.assertEqual(deposit.status, Deposit.Status.AUTORISEE)
+		self.assertEqual(deposit.mode, Deposit.Mode.SIMULATED)
+		self.assertEqual(reservation.status, Reservation.Status.EN_ATTENTE_PAIEMENT)
+		self.assertTrue(Notification.objects.filter(notification_type="DEPOSIT_AUTHORIZED", related_object_id=reservation.id).exists())
+
+		for forbidden_key in ["card_number", "cvc", "expiry", "pin", "secret_key"]:
+			self.assertNotIn(forbidden_key, response.data)
+			self.assertNotIn(forbidden_key, {field.name for field in Deposit._meta.get_fields()})
+
+	@patch("payments.services.deposits.stripe.PaymentIntent.create")
+	@patch("payments.services.deposits.stripe.PaymentIntent.modify")
+	def test_stripe_test_mode_is_mocked_and_returns_client_secret_only(self, mocked_modify, mocked_create):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self.client_api.force_authenticate(self.client_user_1)
+		mocked_create.return_value = SimpleNamespace(
+			id="pi_dep_123",
+			client_secret="dep_secret_123",
+			charges=SimpleNamespace(data=[]),
+		)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._deposit_url(reservation.id), {"mode": "STRIPE_TEST"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["client_secret"], "dep_secret_123")
+		self.assertEqual(response.data["stripe_payment_intent_id"], "pi_dep_123")
+		mocked_create.assert_called_once()
+		mocked_modify.assert_not_called()
+
+	def test_other_client_is_refused(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self.client_api.force_authenticate(self.client_user_2)
+
+		response = self.client_api.post(self._deposit_url(reservation.id), {"mode": "SIMULATED"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+	@patch(
+		"payments.services.deposits.calculate_price_simulation",
+		return_value=SimpleNamespace(
+			vehicle_id=999,
+			duration_hours=Decimal("4.00"),
+			rental_amount=Decimal("111.11"),
+			deposit_amount=Decimal("555.55"),
+			insurance_included=True,
+			total_amount=Decimal("111.11"),
+			pricing_method="MOCKED",
+		),
+	)
+	def test_deposit_amount_is_recalculated_server_side(self, _mock_pricing):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		reservation.deposit_amount = Decimal("0.00")
+		reservation.save(update_fields=["deposit_amount", "updated_at"])
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self._deposit_url(reservation.id), {"mode": "SIMULATED"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		deposit = Deposit.objects.get(reservation=reservation)
+		self.assertEqual(reservation.deposit_amount, Decimal("555.55"))
+		self.assertEqual(deposit.amount, Decimal("555.55"))
+
+	def test_double_request_is_idempotent(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		first = self.client_api.post(self._deposit_url(reservation.id), {"mode": "SIMULATED"}, format="json")
+		second = self.client_api.post(self._deposit_url(reservation.id), {"mode": "SIMULATED"}, format="json")
+
+		self.assertEqual(first.status_code, status.HTTP_200_OK)
+		self.assertEqual(second.status_code, status.HTTP_200_OK)
+		self.assertEqual(Deposit.objects.filter(reservation=reservation).count(), 1)
+		self.assertEqual(first.data["deposit_id"], second.data["deposit_id"])
+
+	@patch(
+		"payments.services.deposits.validate_client_for_reservation",
+		return_value=SimpleNamespace(is_eligible=False, errors=["PROFILE_NOT_VALID"]),
+	)
+	def test_invalid_profile_is_refused(self, _mock_eligibility):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self._deposit_url(reservation.id), {"mode": "SIMULATED"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "PROFILE_NOT_ELIGIBLE")
+
+
+class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+
+	def _payment_intent_url(self, reservation_id):
+		return reverse("reservations:reservation-payment-intent", kwargs={"pk": reservation_id})
+
+	def _create_authorized_deposit(self, reservation):
+		return Deposit.objects.create(
+			reservation=reservation,
+			mode=Deposit.Mode.SIMULATED,
+			amount=reservation.deposit_amount,
+			currency="EUR",
+			status=Deposit.Status.AUTORISEE,
+			authorized_at=timezone.now(),
+		)
+
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.modify")
+	def test_owner_is_authorized_and_only_client_secret_is_returned(self, mocked_modify, mocked_create):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		mocked_create.return_value = SimpleNamespace(
+			id="pi_pay_123",
+			status="requires_action",
+			client_secret="pi_secret_123",
+		)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(set(response.data.keys()), {"client_secret", "payment_id"})
+		self.assertEqual(response.data["client_secret"], "pi_secret_123")
+		payment = Payment.objects.get(pk=response.data["payment_id"])
+		self.assertEqual(payment.stripe_payment_intent_id, "pi_pay_123")
+		mocked_modify.assert_not_called()
+
+	def test_other_client_is_refused(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_2)
+
+		response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+	def test_missing_deposit_is_refused(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "DEPOSIT_NOT_AUTHORIZED")
+
+	@patch("payments.services.payment_intents.is_vehicle_available", return_value=False)
+	def test_availability_is_rechecked(self, _mock_is_available):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "RESERVATION_UNAVAILABLE")
+
+	@patch(
+		"payments.services.payment_intents.validate_client_for_reservation",
+		return_value=SimpleNamespace(is_eligible=False, errors=["PROFILE_NOT_VALID"]),
+	)
+	def test_profile_is_rechecked(self, _mock_eligibility):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "PROFILE_NOT_ELIGIBLE")
+
+	@patch(
+		"payments.services.payment_intents.calculate_price_simulation",
+		return_value=SimpleNamespace(
+			vehicle_id=999,
+			duration_hours=Decimal("4.00"),
+			rental_amount=Decimal("222.22"),
+			deposit_amount=Decimal("333.33"),
+			insurance_included=True,
+			total_amount=Decimal("222.22"),
+			pricing_method="MOCKED",
+		),
+	)
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_amount_is_recalculated_server_side(self, mocked_create, _mock_pricing):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		reservation.rental_amount = Decimal("10.00")
+		reservation.save(update_fields=["rental_amount", "updated_at"])
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		mocked_create.return_value = SimpleNamespace(
+			id="pi_pay_recalc",
+			status="requires_payment_method",
+			client_secret="secret_recalc",
+		)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		payment = Payment.objects.get(pk=response.data["payment_id"])
+		self.assertEqual(reservation.rental_amount, Decimal("222.22"))
+		self.assertEqual(payment.amount, Decimal("222.22"))
+
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.retrieve")
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_idempotency_key_is_sent_to_stripe(self, mocked_create, mocked_retrieve):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		mocked_retrieve.return_value = SimpleNamespace(status="canceled", client_secret=None)
+		mocked_create.return_value = SimpleNamespace(
+			id="pi_pay_idempo",
+			status="requires_confirmation",
+			client_secret="secret_idempo",
+		)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		kwargs = mocked_create.call_args.kwargs
+		expected_key = f"reservation-payment-{reservation.id}-8000"
+		self.assertEqual(kwargs["idempotency_key"], expected_key)
+
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.retrieve")
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_existing_payment_intent_is_reused(self, mocked_create, mocked_retrieve):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self._create_authorized_deposit(reservation)
+		pricing = calculate_price_simulation(
+			vehicle=reservation.vehicle,
+			start_at=reservation.start_at,
+			end_at=reservation.end_at,
+		)
+		expected_amount = pricing.rental_amount
+		existing = Payment.objects.create(
+			reservation=reservation,
+			provider=Payment.Provider.STRIPE,
+			amount=expected_amount,
+			currency="EUR",
+			status=Payment.Status.EN_ATTENTE,
+			stripe_payment_intent_id="pi_existing_123",
+		)
+		self.client_api.force_authenticate(self.client_user_1)
+		mocked_retrieve.return_value = SimpleNamespace(
+			id="pi_existing_123",
+			status="requires_payment_method",
+			client_secret="secret_existing",
+		)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["payment_id"], existing.id)
+		self.assertEqual(response.data["client_secret"], "secret_existing")
+		mocked_create.assert_not_called()
 
 
 class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase):
