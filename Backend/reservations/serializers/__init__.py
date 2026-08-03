@@ -10,6 +10,8 @@ from .reservation import (
 	ReservationCancelResponseSerializer,
 	ReservationCreateRequestSerializer,
 	ReservationCreateResponseSerializer,
+	ReservationDepositRequestSerializer,
+	ReservationDepositResponseSerializer,
 	ReservationListDetailSerializer,
 	ReservationVehicleSummarySerializer,
 )
@@ -24,6 +26,8 @@ __all__ = [
 	"ReservationVehicleSummarySerializer",
 	"ReservationCancelRequestSerializer",
 	"ReservationCancelResponseSerializer",
+	"ReservationDepositRequestSerializer",
+	"ReservationDepositResponseSerializer",
 	"ReservationManagementListSerializer",
 	"ReservationManagementDetailSerializer",
 	"ReservationManagementClientSummarySerializer",

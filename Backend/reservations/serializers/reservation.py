@@ -136,3 +136,49 @@ class ReservationCancelResponseSerializer(serializers.Serializer):
 
     def get_message(self, obj):
         return "Réservation annulée."
+
+
+ALLOWED_DEPOSIT_FIELDS = {"mode"}
+FORBIDDEN_DEPOSIT_FIELDS = {
+    "amount",
+    "currency",
+    "stripe_payment_intent_id",
+    "status",
+    "client_secret",
+}
+
+
+class ReservationDepositRequestSerializer(serializers.Serializer):
+    mode = serializers.ChoiceField(choices=["SIMULATED", "STRIPE_TEST"])
+
+    def to_internal_value(self, data):
+        if hasattr(data, "keys"):
+            keys = set(data.keys())
+            forbidden_provided = sorted(keys & FORBIDDEN_DEPOSIT_FIELDS)
+            if forbidden_provided:
+                raise serializers.ValidationError(
+                    {field: ["Ce champ est gere par le backend."] for field in forbidden_provided}
+                )
+
+            unexpected_fields = sorted(keys - ALLOWED_DEPOSIT_FIELDS)
+            if unexpected_fields:
+                raise serializers.ValidationError(
+                    {field: ["Ce champ n'est pas autorise."] for field in unexpected_fields}
+                )
+
+        return super().to_internal_value(data)
+
+
+class ReservationDepositResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(read_only=True)
+    reservation = ReservationListDetailSerializer(read_only=True)
+    deposit_id = serializers.IntegerField(read_only=True)
+    deposit_mode = serializers.CharField(read_only=True)
+    deposit_status = serializers.CharField(read_only=True)
+    deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    currency = serializers.CharField(read_only=True)
+    stripe_payment_intent_id = serializers.CharField(read_only=True, allow_null=True)
+    authorization_expires_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    authorized_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    client_secret = serializers.CharField(read_only=True, allow_null=True)
+    authorization_note = serializers.CharField(read_only=True)
