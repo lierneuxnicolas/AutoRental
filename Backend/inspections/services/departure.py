@@ -20,8 +20,6 @@ MANDATORY_PHOTO_TYPES = [
     InspectionPhoto.PhotoType.COTE_DROIT,
     InspectionPhoto.PhotoType.INTERIEUR,
     InspectionPhoto.PhotoType.TABLEAU_DE_BORD,
-    InspectionPhoto.PhotoType.DOMMAGE,
-    InspectionPhoto.PhotoType.AUTRE,
 ]
 
 MISSING_FIELDS = [
