@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from django.db import transaction
 
-from accounts.models import Role
+from accounts.models import Role, User
 from interventions.models import Intervention
 from notifications.services import create_notification
 
@@ -62,8 +62,13 @@ def _assert_assignee_role(*, intervention: Intervention, assigned_user) -> None:
         )
 
 
-def assign_intervention(*, intervention, assigned_user, manager):
+def _resolve_assigned_user(*, assigned_user_id: int):
+    return User.objects.filter(pk=assigned_user_id).first()
+
+
+def assign_intervention(*, intervention, assigned_user_id: int, manager):
     _assert_manager_role(manager=manager)
+    assigned_user = _resolve_assigned_user(assigned_user_id=assigned_user_id)
 
     with transaction.atomic():
         intervention_locked = Intervention.objects.select_for_update().get(pk=intervention.pk)
