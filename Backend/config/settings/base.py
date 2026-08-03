@@ -41,6 +41,10 @@ VEHICLE_PHOTO_MAX_SIZE = int(
     os.getenv("VEHICLE_PHOTO_MAX_SIZE", str(10 * 1024 * 1024))
 )
 
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
 
 # Application definition
 
