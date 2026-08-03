@@ -1,7 +1,9 @@
 from datetime import timedelta
 from io import BytesIO
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import DataError, IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -31,6 +33,129 @@ def _create_corrupted_image_file(name="broken.jpg", content_type="image/jpeg"):
     return SimpleUploadedFile(name, b"not-an-image", content_type=content_type)
 
 
+class InspectionModelConstraintsTests(TestCase):
+    def setUp(self):
+        roles = ensure_roles()
+        self.client_user = create_user(
+            email="inspection-models@example.com",
+            password="StrongPass123!",
+            role=roles[Role.Code.CLIENT],
+            email_verified=True,
+            is_active=True,
+        )
+        ClientProfile.objects.create(user=self.client_user, profile_status=ClientProfile.ProfileStatus.VALIDE)
+
+        brand = Brand.objects.create(name="Brand M", is_active=True)
+        category = VehicleCategory.objects.create(
+            name="Category M",
+            description="Test",
+            daily_rate=100,
+            hourly_rate=15,
+            minimum_deposit=300,
+            minimum_rental_hours=1,
+            is_active=True,
+        )
+        parking = Parking.objects.create(name="PM", address="Addr", capacity=10, is_active=True)
+        space = ParkingSpace.objects.create(parking=parking, number="M1", is_active=True)
+        vehicle = Vehicle.objects.create(
+            brand=brand,
+            category=category,
+            parking_space=space,
+            registration_number="MOD-001",
+            model_name="Model",
+            year=2024,
+            color="Black",
+            energy_type="Hybrid",
+            transmission="Auto",
+            seats=5,
+            doors=5,
+            mileage=1000,
+            status=Vehicle.Status.DISPONIBLE,
+            is_active=True,
+        )
+        now = timezone.now()
+        self.reservation = Reservation.objects.create(
+            client=self.client_user.client_profile,
+            vehicle=vehicle,
+            start_at=now + timedelta(hours=1),
+            end_at=now + timedelta(hours=4),
+            status=Reservation.Status.CONFIRMEE,
+            confirmed_at=now,
+            rental_amount=120,
+            deposit_amount=300,
+        )
+
+    def test_one_initial_max_per_reservation(self):
+        Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.INITIAL,
+            status=Inspection.Status.BROUILLON,
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Inspection.objects.create(
+                    reservation=self.reservation,
+                    inspection_type=Inspection.Type.INITIAL,
+                    status=Inspection.Status.BROUILLON,
+                )
+
+    def test_one_final_max_per_reservation(self):
+        Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.BROUILLON,
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Inspection.objects.create(
+                    reservation=self.reservation,
+                    inspection_type=Inspection.Type.FINAL,
+                    status=Inspection.Status.BROUILLON,
+                )
+
+    def test_inspection_type_must_be_exact_choice(self):
+        inspection = Inspection(
+            reservation=self.reservation,
+            inspection_type="WRONG_TYPE",
+            status=Inspection.Status.BROUILLON,
+        )
+
+        with self.assertRaisesMessage(Exception, "inspection_type"):
+            inspection.full_clean()
+
+    def test_energy_level_must_be_between_0_and_100(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Inspection.objects.create(
+                    reservation=self.reservation,
+                    inspection_type=Inspection.Type.INITIAL,
+                    status=Inspection.Status.BROUILLON,
+                    energy_level_percent=101,
+                )
+
+    def test_mileage_must_be_non_negative(self):
+        with self.assertRaises((IntegrityError, DataError)):
+            with transaction.atomic():
+                Inspection.objects.create(
+                    reservation=self.reservation,
+                    inspection_type=Inspection.Type.INITIAL,
+                    status=Inspection.Status.BROUILLON,
+                    mileage=-1,
+                )
+
+    def test_completed_at_requires_terminated_status(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Inspection.objects.create(
+                    reservation=self.reservation,
+                    inspection_type=Inspection.Type.INITIAL,
+                    status=Inspection.Status.EN_COURS,
+                    completed_at=timezone.now(),
+                )
+
+
 class DepartureInspectionTests(TestCase):
     def setUp(self):
         roles = ensure_roles()
@@ -41,7 +166,15 @@ class DepartureInspectionTests(TestCase):
             email_verified=True,
             is_active=True,
         )
+        self.other_client_user = create_user(
+            email="departure-other@example.com",
+            password="StrongPass123!",
+            role=roles[Role.Code.CLIENT],
+            email_verified=True,
+            is_active=True,
+        )
         ClientProfile.objects.create(user=self.client_user, profile_status=ClientProfile.ProfileStatus.VALIDE)
+        ClientProfile.objects.create(user=self.other_client_user, profile_status=ClientProfile.ProfileStatus.VALIDE)
         self.api = APIClient()
 
         self.brand = Brand.objects.create(name="Brand X", is_active=True)
@@ -154,6 +287,68 @@ class DepartureInspectionTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "TOO_EARLY")
+
+    def test_refuses_other_client_for_departure_creation(self):
+        reservation = self._reservation(start_at=timezone.now() + timedelta(minutes=5))
+        self._authorize(reservation)
+        self.api.force_authenticate(self.other_client_user)
+
+        with self.settings(
+            DEPARTURE_INSPECTION_EARLY_TOLERANCE_MINUTES=30,
+            DEPARTURE_INSPECTION_LATE_TOLERANCE_MINUTES=120,
+        ):
+            response = self.api.post(reverse("reservations:reservation-departure-inspection", kwargs={"pk": reservation.id}), {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_refuses_when_reservation_is_not_confirmed(self):
+        reservation = self._reservation(
+            start_at=timezone.now() + timedelta(minutes=5),
+            status=Reservation.Status.EN_COURS,
+        )
+        self._authorize(reservation)
+        self.api.force_authenticate(self.client_user)
+
+        with self.settings(
+            DEPARTURE_INSPECTION_EARLY_TOLERANCE_MINUTES=30,
+            DEPARTURE_INSPECTION_LATE_TOLERANCE_MINUTES=120,
+        ):
+            response = self.api.post(reverse("reservations:reservation-departure-inspection", kwargs={"pk": reservation.id}), {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "INVALID_RESERVATION_STATUS")
+
+    def test_accepts_departure_within_tolerance_window(self):
+        reservation = self._reservation(start_at=timezone.now() + timedelta(minutes=20))
+        self._authorize(reservation)
+        self.api.force_authenticate(self.client_user)
+
+        with self.settings(
+            DEPARTURE_INSPECTION_EARLY_TOLERANCE_MINUTES=30,
+            DEPARTURE_INSPECTION_LATE_TOLERANCE_MINUTES=120,
+        ):
+            response = self.api.post(reverse("reservations:reservation-departure-inspection", kwargs={"pk": reservation.id}), {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_refuses_when_departure_inspection_already_exists(self):
+        reservation = self._reservation(start_at=timezone.now() + timedelta(minutes=5))
+        self._authorize(reservation)
+        Inspection.objects.create(
+            reservation=reservation,
+            inspection_type=Inspection.Type.INITIAL,
+            status=Inspection.Status.BROUILLON,
+        )
+        self.api.force_authenticate(self.client_user)
+
+        with self.settings(
+            DEPARTURE_INSPECTION_EARLY_TOLERANCE_MINUTES=30,
+            DEPARTURE_INSPECTION_LATE_TOLERANCE_MINUTES=120,
+        ):
+            response = self.api.post(reverse("reservations:reservation-departure-inspection", kwargs={"pk": reservation.id}), {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "INSPECTION_ALREADY_EXISTS")
 
 
 class InspectionMediaUploadTests(TestCase):
@@ -271,6 +466,15 @@ class InspectionMediaUploadTests(TestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(response.data["file"].startswith("http"))
+
+    def test_add_png_photo(self):
+        self.api.force_authenticate(self.client_user)
+        response = self.api.post(
+            self._photo_url(self.initial_inspection.id),
+            {"file": _create_test_image_file("photo.png", "PNG", "image/png"), "photo_type": InspectionPhoto.PhotoType.COTE_GAUCHE},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
     def test_add_webp_photo(self):
         self.api.force_authenticate(self.client_user)
@@ -590,6 +794,45 @@ class DepartureInspectionCompletionTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "CRITICAL_DAMAGE_UNRESOLVED")
 
+    def test_refuses_when_mileage_is_missing(self):
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._complete_url(self.initial_inspection.id),
+            {"energy_level_percent": 80},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("mileage", response.data)
+
+    def test_refuses_when_energy_level_is_missing(self):
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._complete_url(self.initial_inspection.id),
+            {"mileage": 1200},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("energy_level_percent", response.data)
+
+    def test_refuses_when_critical_issue_flagged(self):
+        self.api.force_authenticate(self.client_user)
+        self.initial_inspection.has_critical_issue = True
+        self.initial_inspection.critical_issue_description = "Bruit moteur"
+        self.initial_inspection.save(update_fields=["has_critical_issue", "critical_issue_description", "updated_at"])
+
+        response = self.api.post(
+            self._complete_url(self.initial_inspection.id),
+            {"mileage": 1200, "energy_level_percent": 80},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "CRITICAL_ISSUE_UNRESOLVED")
+
 
 class ReturnInspectionFlowTests(TestCase):
     def setUp(self):
@@ -716,6 +959,25 @@ class ReturnInspectionFlowTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "INITIAL_INSPECTION_NOT_COMPLETED")
+
+    def test_refuses_final_creation_when_initial_missing(self):
+        self.initial_inspection.delete()
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(self._create_return_url(self.reservation.id), {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "INITIAL_INSPECTION_MISSING")
+
+    def test_refuses_final_creation_when_reservation_not_en_cours(self):
+        self.reservation.status = Reservation.Status.CONFIRMEE
+        self.reservation.save(update_fields=["status", "updated_at"])
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(self._create_return_url(self.reservation.id), {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "INVALID_RESERVATION_STATUS")
 
     def test_refuses_final_creation_when_already_exists(self):
         Inspection.objects.create(
@@ -891,3 +1153,59 @@ class ReturnInspectionFlowTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "DAMAGES_REQUIRED")
+
+    def test_allows_completion_when_issue_flagged_with_damage(self):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.EN_COURS,
+            has_critical_issue=True,
+            critical_issue_description="Impact visible",
+        )
+        self._create_required_photos(final_inspection)
+        Damage.objects.create(
+            inspection=final_inspection,
+            vehicle=self.vehicle,
+            reported_by=self.client_user,
+            description="Impact pare-chocs",
+            severity=Damage.Severity.MODERE,
+            location="Pare-chocs avant",
+        )
+        self.api.force_authenticate(self.client_user)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.api.post(
+                self._complete_url(final_inspection.id),
+                {"mileage": 1310, "energy_level_percent": 68},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch("inspections.services.return_inspection._integrate_intervention_for_major_or_critical_damage")
+    def test_major_damage_triggers_intervention_hook(self, mock_integrate):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.EN_COURS,
+        )
+        self._create_required_photos(final_inspection)
+        Damage.objects.create(
+            inspection=final_inspection,
+            vehicle=self.vehicle,
+            reported_by=self.client_user,
+            description="Choc important",
+            severity=Damage.Severity.MAJEUR,
+            location="Aile arriere",
+        )
+        self.api.force_authenticate(self.client_user)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.api.post(
+                self._complete_url(final_inspection.id),
+                {"mileage": 1320, "energy_level_percent": 65},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_integrate.assert_called_once()
