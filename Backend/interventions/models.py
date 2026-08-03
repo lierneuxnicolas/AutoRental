@@ -4,6 +4,181 @@ import re
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
+
+
+class Intervention(models.Model):
+	class Type(models.TextChoices):
+		MECANIQUE = "MECANIQUE", "Mecanique"
+		NETTOYAGE = "NETTOYAGE", "Nettoyage"
+
+	class Status(models.TextChoices):
+		A_ATTRIBUER = "A_ATTRIBUER", "A attribuer"
+		ATTRIBUEE = "ATTRIBUEE", "Attribuee"
+		EN_COURS = "EN_COURS", "En cours"
+		TERMINEE = "TERMINEE", "Terminee"
+		ANNULEE = "ANNULEE", "Annulee"
+
+	reservation = models.ForeignKey(
+		"reservations.Reservation",
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name="interventions",
+	)
+	vehicle = models.ForeignKey(
+		"vehicles.Vehicle",
+		on_delete=models.PROTECT,
+		related_name="interventions",
+	)
+	assigned_to = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name="assigned_interventions",
+	)
+	created_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.PROTECT,
+		related_name="created_interventions",
+	)
+	inspection = models.ForeignKey(
+		"inspections.Inspection",
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name="interventions",
+	)
+
+	reference = models.CharField(max_length=40, unique=True)
+	intervention_type = models.CharField(max_length=20, choices=Type.choices)
+	status = models.CharField(max_length=20, choices=Status.choices, default=Status.A_ATTRIBUER)
+	description = models.TextField(blank=True)
+	report = models.TextField(blank=True)
+	estimated_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+	final_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+	started_at = models.DateTimeField(null=True, blank=True)
+	completed_at = models.DateTimeField(null=True, blank=True)
+	cancelled_at = models.DateTimeField(null=True, blank=True)
+	cancellation_reason = models.TextField(blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		ordering = ["-created_at", "-id"]
+		indexes = [
+			models.Index(fields=["reference"], name="interv_reference_idx"),
+			models.Index(fields=["status"], name="interv_status_idx"),
+			models.Index(fields=["intervention_type"], name="interv_type_idx"),
+			models.Index(fields=["vehicle", "status"], name="interv_vehicle_status_idx"),
+			models.Index(fields=["assigned_to", "status"], name="interv_assignee_status_idx"),
+			models.Index(fields=["reservation"], name="interv_reservation_idx"),
+		]
+		constraints = [
+			models.CheckConstraint(
+				condition=Q(estimated_cost__gte=0) | Q(estimated_cost__isnull=True),
+				name="interv_estimated_cost_gte_0",
+			),
+			models.CheckConstraint(
+				condition=Q(final_cost__gte=0) | Q(final_cost__isnull=True),
+				name="interv_final_cost_gte_0",
+			),
+			models.CheckConstraint(
+				condition=Q(completed_at__isnull=True) | Q(status="TERMINEE"),
+				name="interv_completed_at_only_done",
+			),
+			models.CheckConstraint(
+				condition=Q(started_at__isnull=True) | Q(status="EN_COURS"),
+				name="interv_started_at_only_in_progress",
+			),
+			models.CheckConstraint(
+				condition=Q(status="A_ATTRIBUER") | Q(assigned_to__isnull=False),
+				name="interv_assigned_required_unless_to_assign",
+			),
+		]
+
+	def clean(self):
+		super().clean()
+
+		if self.created_by_id:
+			role_code = getattr(getattr(self.created_by, "role", None), "code", None)
+			if role_code != "GESTIONNAIRE_COMPTABLE":
+				raise ValidationError({"created_by": "Le createur doit avoir le role GESTIONNAIRE_COMPTABLE."})
+
+		if self.assigned_to_id:
+			assigned_role = getattr(getattr(self.assigned_to, "role", None), "code", None)
+			expected_role = "MECANICIEN" if self.intervention_type == self.Type.MECANIQUE else "NETTOYEUR"
+			if assigned_role != expected_role:
+				raise ValidationError(
+					{"assigned_to": f"Le role assigne doit etre {expected_role} pour ce type d'intervention."}
+				)
+
+	def save(self, *args, **kwargs):
+		self.full_clean()
+		super().save(*args, **kwargs)
+
+	def __str__(self) -> str:
+		return f"Intervention<{self.reference}:{self.status}>"
+
+
+class TechnicalInspection(models.Model):
+	intervention = models.ForeignKey(
+		Intervention,
+		on_delete=models.CASCADE,
+		related_name="technical_inspections",
+	)
+	vehicle = models.ForeignKey(
+		"vehicles.Vehicle",
+		on_delete=models.PROTECT,
+		related_name="technical_inspections",
+	)
+	mileage = models.PositiveIntegerField()
+	energy_level_percent = models.PositiveSmallIntegerField()
+	observations = models.TextField(blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		ordering = ["-created_at", "-id"]
+		indexes = [
+			models.Index(fields=["intervention"], name="tech_insp_intervention_idx"),
+			models.Index(fields=["vehicle"], name="tech_insp_vehicle_idx"),
+			models.Index(fields=["created_at"], name="tech_insp_created_at_idx"),
+		]
+		constraints = [
+			models.CheckConstraint(
+				condition=Q(mileage__gte=0),
+				name="tech_insp_mileage_gte_0",
+			),
+			models.CheckConstraint(
+				condition=Q(energy_level_percent__gte=0) & Q(energy_level_percent__lte=100),
+				name="tech_insp_energy_0_100",
+			),
+		]
+
+	def __str__(self) -> str:
+		return f"TechnicalInspection #{self.pk}"
+
+
+class TechnicalPhoto(models.Model):
+	technical_inspection = models.ForeignKey(
+		TechnicalInspection,
+		on_delete=models.CASCADE,
+		related_name="photos",
+	)
+	file = models.ImageField(upload_to="technical_inspections/photos/")
+	caption = models.CharField(max_length=255, blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		ordering = ["-created_at", "-id"]
+		indexes = [
+			models.Index(fields=["technical_inspection"], name="tech_photo_insp_idx"),
+			models.Index(fields=["created_at"], name="tech_photo_created_at_idx"),
+		]
+
+	def __str__(self) -> str:
+		return f"TechnicalPhoto #{self.pk}"
 
 
 class VehicleAccess(models.Model):
