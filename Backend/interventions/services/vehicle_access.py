@@ -104,6 +104,30 @@ def _assert_unlock_identity(*, requested_by) -> None:
         )
 
 
+def _assert_client_identity(*, requested_by, action_label: str) -> None:
+    if not requested_by or not getattr(requested_by, "is_authenticated", False):
+        _raise_vehicle_access_error(
+            "UNAUTHENTICATED",
+            "Authentification requise.",
+            http_status=401,
+        )
+
+    if not getattr(requested_by, "is_active", False):
+        _raise_vehicle_access_error(
+            "UNAUTHENTICATED",
+            "Compte utilisateur inactif.",
+            http_status=401,
+        )
+
+    role = getattr(requested_by, "role", None)
+    if role is None or role.code != Role.Code.CLIENT:
+        _raise_vehicle_access_error(
+            "INVALID_ROLE",
+            f"Seul un client peut declencher le {action_label} simule.",
+            http_status=403,
+        )
+
+
 def _assert_unlock_business_rules(
     *,
     reservation: Reservation,
@@ -260,6 +284,255 @@ def _log_unlock_failure(
             user_agent=user_agent,
             metadata={},
         )
+
+
+def _log_lock_failure(
+    *,
+    reservation,
+    vehicle,
+    vehicle_access,
+    requested_by,
+    failure: VehicleAccessError,
+    ip_address: str | None,
+    user_agent: str | None,
+) -> None:
+    attempted_reservation_id = getattr(reservation, "id", None)
+
+    with transaction.atomic():
+        LockingLog.objects.create(
+            vehicle_access=vehicle_access,
+            reservation=reservation if getattr(reservation, "id", None) else None,
+            vehicle=vehicle if getattr(vehicle, "id", None) else None,
+            user=requested_by if getattr(requested_by, "is_authenticated", False) else None,
+            action=LockingLog.Action.LOCK,
+            result=LockingLog.Result.FAILURE,
+            failure_code=failure.code,
+            failure_message=failure.message,
+            attempted_reservation_id=attempted_reservation_id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            metadata={},
+        )
+
+
+def _assert_lock_business_rules(
+    *,
+    reservation: Reservation,
+    requested_by,
+    vehicle: Vehicle,
+    vehicle_access: VehicleAccess,
+    final_lock: bool,
+) -> None:
+    if reservation.client.user_id != requested_by.id:
+        _raise_vehicle_access_error(
+            "NOT_OWNER",
+            "Cette reservation n'appartient pas a l'utilisateur authentifie.",
+            http_status=403,
+        )
+
+    if reservation.status not in {Reservation.Status.EN_COURS, Reservation.Status.A_CONTROLER}:
+        _raise_vehicle_access_error(
+            "INVALID_RESERVATION_STATUS",
+            "La reservation doit etre EN_COURS ou A_CONTROLER.",
+            http_status=409,
+        )
+
+    if reservation.status == Reservation.Status.A_CONTROLER and not final_lock:
+        _raise_vehicle_access_error(
+            "INVALID_RESERVATION_STATUS",
+            "La reservation A_CONTROLER autorise uniquement le verrouillage final.",
+            http_status=409,
+        )
+
+    if vehicle_access.status == VehicleAccess.Status.REVOKED:
+        _raise_vehicle_access_error(
+            "ACCESS_REVOKED",
+            "L'acces vehicule est deja revoque.",
+            http_status=409,
+        )
+
+    if vehicle_access.vehicle_id != reservation.vehicle_id:
+        _raise_vehicle_access_error(
+            "WRONG_VEHICLE",
+            "Le vehicule d'acces ne correspond pas a la reservation.",
+            http_status=409,
+        )
+
+    if vehicle_access.client_id != requested_by.id:
+        _raise_vehicle_access_error(
+            "NOT_OWNER",
+            "L'acces vehicule ne correspond pas a l'utilisateur authentifie.",
+            http_status=403,
+        )
+
+    if vehicle.id != reservation.vehicle_id or vehicle_access.vehicle_id != vehicle.id:
+        _raise_vehicle_access_error(
+            "WRONG_VEHICLE",
+            "Vehicule cible invalide pour cette reservation.",
+            http_status=409,
+        )
+
+    if vehicle_access.lock_state == VehicleAccess.LockState.LOCKED:
+        _raise_vehicle_access_error(
+            "ALREADY_LOCKED",
+            "Le vehicule est deja verrouille.",
+            http_status=409,
+        )
+
+    if vehicle_access.lock_state != VehicleAccess.LockState.UNLOCKED:
+        _raise_vehicle_access_error(
+            "ALREADY_LOCKED",
+            "Etat de verrouillage invalide pour un verrouillage client.",
+            http_status=409,
+        )
+
+
+def _lock_vehicle_internal(
+    *,
+    reservation,
+    requested_by,
+    request_context,
+    final_lock: bool,
+    revoke_after_lock: bool,
+):
+    ip_address, user_agent = _extract_audit_context(request_context=request_context)
+    resolved_reservation = reservation
+    resolved_vehicle = getattr(reservation, "vehicle", None)
+    resolved_vehicle_access = None
+
+    try:
+        _assert_client_identity(requested_by=requested_by, action_label="verrouillage")
+
+        with transaction.atomic():
+            reservation_locked = (
+                Reservation.objects.select_for_update()
+                .select_related("client", "client__user", "vehicle")
+                .get(pk=reservation.pk)
+            )
+            vehicle_locked = Vehicle.objects.select_for_update().get(pk=reservation_locked.vehicle_id)
+            vehicle_access_locked = (
+                VehicleAccess.objects.select_for_update()
+                .select_related("reservation", "vehicle", "client")
+                .filter(reservation=reservation_locked)
+                .first()
+            )
+
+            resolved_reservation = reservation_locked
+            resolved_vehicle = vehicle_locked
+
+            if vehicle_access_locked is None:
+                _raise_vehicle_access_error(
+                    "ACCESS_NOT_FOUND",
+                    "Aucun acces vehicule n'est associe a cette reservation.",
+                    http_status=404,
+                )
+
+            resolved_vehicle_access = vehicle_access_locked
+
+            # Avoid incoherent duplicate logs on repeated finalization calls.
+            if (
+                final_lock
+                and revoke_after_lock
+                and reservation_locked.status == Reservation.Status.A_CONTROLER
+                and vehicle_access_locked.status == VehicleAccess.Status.REVOKED
+                and not vehicle_access_locked.is_active
+                and vehicle_access_locked.lock_state == VehicleAccess.LockState.LOCKED
+            ):
+                return {
+                    "state": VehicleAccess.LockState.LOCKED,
+                    "locked_at": vehicle_access_locked.last_locked_at,
+                }
+
+            _assert_lock_business_rules(
+                reservation=reservation_locked,
+                requested_by=requested_by,
+                vehicle=vehicle_locked,
+                vehicle_access=vehicle_access_locked,
+                final_lock=final_lock,
+            )
+
+            locked_at = timezone.now()
+            vehicle_access_locked.lock_state = VehicleAccess.LockState.LOCKED
+            vehicle_access_locked.last_locked_at = locked_at
+            vehicle_access_locked.save(update_fields=["lock_state", "last_locked_at", "updated_at"])
+
+            LockingLog.objects.create(
+                vehicle_access=vehicle_access_locked,
+                reservation=reservation_locked,
+                vehicle=vehicle_locked,
+                user=requested_by,
+                action=LockingLog.Action.LOCK,
+                result=LockingLog.Result.SUCCESS,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                metadata={},
+            )
+
+            if revoke_after_lock:
+                now = timezone.now()
+                vehicle_access_locked.status = VehicleAccess.Status.REVOKED
+                vehicle_access_locked.is_active = False
+                vehicle_access_locked.revoked_at = now
+                vehicle_access_locked.save(update_fields=["status", "is_active", "revoked_at", "updated_at"])
+
+                _log_once(
+                    vehicle_access=vehicle_access_locked,
+                    reservation=reservation_locked,
+                    vehicle=vehicle_locked,
+                    user=requested_by,
+                    action=LockingLog.Action.ACCESS_REVOKED,
+                    result=LockingLog.Result.SUCCESS,
+                    metadata={"reason": "return_final_lock"},
+                )
+
+            return {
+                "state": VehicleAccess.LockState.LOCKED,
+                "locked_at": locked_at,
+            }
+    except VehicleAccessError as exc:
+        try:
+            _log_lock_failure(
+                reservation=resolved_reservation,
+                vehicle=resolved_vehicle,
+                vehicle_access=resolved_vehicle_access,
+                requested_by=requested_by,
+                failure=exc,
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        except Exception:
+            pass
+        raise
+
+
+def lock_vehicle(
+    *,
+    reservation,
+    requested_by,
+    request_context=None,
+):
+    return _lock_vehicle_internal(
+        reservation=reservation,
+        requested_by=requested_by,
+        request_context=request_context,
+        final_lock=False,
+        revoke_after_lock=False,
+    )
+
+
+def lock_and_revoke_after_return(
+    *,
+    reservation,
+    requested_by,
+    request_context=None,
+):
+    return _lock_vehicle_internal(
+        reservation=reservation,
+        requested_by=requested_by,
+        request_context=request_context,
+        final_lock=True,
+        revoke_after_lock=True,
+    )
 
 
 def unlock_vehicle(
