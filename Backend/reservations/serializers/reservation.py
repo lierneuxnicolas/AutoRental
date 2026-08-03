@@ -182,3 +182,37 @@ class ReservationDepositResponseSerializer(serializers.Serializer):
     authorized_at = serializers.DateTimeField(read_only=True, allow_null=True)
     client_secret = serializers.CharField(read_only=True, allow_null=True)
     authorization_note = serializers.CharField(read_only=True)
+
+
+ALLOWED_PAYMENT_INTENT_FIELDS = set()
+FORBIDDEN_PAYMENT_INTENT_FIELDS = {
+    "amount",
+    "currency",
+    "payment_id",
+    "client_secret",
+    "stripe_payment_intent_id",
+}
+
+
+class ReservationPaymentIntentRequestSerializer(serializers.Serializer):
+    def to_internal_value(self, data):
+        if hasattr(data, "keys"):
+            keys = set(data.keys())
+            forbidden_provided = sorted(keys & FORBIDDEN_PAYMENT_INTENT_FIELDS)
+            if forbidden_provided:
+                raise serializers.ValidationError(
+                    {field: ["Ce champ est gere par le backend."] for field in forbidden_provided}
+                )
+
+            unexpected_fields = sorted(keys - ALLOWED_PAYMENT_INTENT_FIELDS)
+            if unexpected_fields:
+                raise serializers.ValidationError(
+                    {field: ["Ce champ n'est pas autorise."] for field in unexpected_fields}
+                )
+
+        return super().to_internal_value(data)
+
+
+class ReservationPaymentIntentResponseSerializer(serializers.Serializer):
+    client_secret = serializers.CharField(read_only=True, allow_null=True)
+    payment_id = serializers.IntegerField(read_only=True)
