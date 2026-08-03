@@ -1,6 +1,6 @@
 from django.urls import path
 
-from inspections.views import DepartureInspectionCreateView
+from inspections.views import DepartureInspectionCreateView, ReturnInspectionCreateView
 from reservations.views import (
     PriceSimulationView,
     ReservationClientCancelView,
@@ -22,6 +22,11 @@ urlpatterns = [
         "reservations/<int:pk>/inspections/departure/",
         DepartureInspectionCreateView.as_view(),
         name="reservation-departure-inspection",
+    ),
+    path(
+        "reservations/<int:pk>/inspections/return/",
+        ReturnInspectionCreateView.as_view(),
+        name="reservation-return-inspection",
     ),
     path("reservations/<int:pk>/deposit/", ReservationClientDepositAuthorizeView.as_view(), name="reservation-deposit-authorize"),
     path("reservations/<int:pk>/payment-intent/", ReservationClientPaymentIntentView.as_view(), name="reservation-payment-intent"),

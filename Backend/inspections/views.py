@@ -23,6 +23,7 @@ from inspections.services.departure import (
 	complete_departure_inspection,
 	create_departure_inspection,
 )
+from inspections.services.return_inspection import complete_return_inspection, create_return_inspection
 from reservations.models import Reservation
 
 
@@ -60,6 +61,63 @@ class CompleteDepartureInspectionRequestSerializer(serializers.Serializer):
 	mileage = serializers.IntegerField(min_value=0)
 	energy_level_percent = serializers.IntegerField(min_value=0, max_value=100)
 	comments = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class ReturnInspectionCreateView(generics.GenericAPIView):
+	permission_classes = [IsAuthenticated, IsClient, IsReservationOwner]
+	serializer_class = DepartureInspectionResponseSerializer
+	lookup_field = "id"
+	lookup_url_kwarg = "pk"
+
+	def get_queryset(self):
+		if getattr(self, "swagger_fake_view", False):
+			return Reservation.objects.none()
+
+		return Reservation.objects.filter(client__user=self.request.user).select_related(
+			"client",
+			"client__user",
+			"vehicle",
+			"vehicle__brand",
+			"vehicle__category",
+		)
+
+	def get_object(self):
+		queryset = self.get_queryset()
+		reservation = get_object_or_404(queryset, pk=self.kwargs[self.lookup_url_kwarg])
+		self.check_object_permissions(self.request, reservation)
+		return reservation
+
+	@extend_schema(
+		tags=["Inspections"],
+		description=(
+			"Cree l'etat des lieux FINAL de retour pour une reservation EN_COURS, "
+			"si l'inspection INITIAL est deja terminee et qu'aucune inspection FINAL n'existe encore."
+		),
+		responses={
+			200: DepartureInspectionResponseSerializer,
+			400: DepartureInspectionResponseSerializer,
+			401: DepartureInspectionResponseSerializer,
+			403: DepartureInspectionResponseSerializer,
+			404: DepartureInspectionResponseSerializer,
+		},
+	)
+	def post(self, request, *args, **kwargs):
+		reservation = self.get_object()
+
+		try:
+			inspection = create_return_inspection(reservation=reservation, requested_by=request.user)
+		except DepartureInspectionError as exc:
+			detail = {"code": exc.code, "message": exc.message}
+			if exc.details:
+				detail["details"] = exc.details
+			return Response(detail, status=status.HTTP_400_BAD_REQUEST)
+
+		response_data = {
+			"inspection": inspection,
+			"mandatory_photo_types": get_mandatory_photo_types(inspection),
+			"missing_fields": MISSING_FIELDS,
+		}
+		return Response(DepartureInspectionResponseSerializer(response_data).data, status=status.HTTP_200_OK)
 
 
 class DepartureInspectionCreateView(generics.GenericAPIView):
@@ -255,13 +313,22 @@ class DepartureInspectionCompleteView(generics.GenericAPIView):
 		serializer.is_valid(raise_exception=True)
 
 		try:
-			completed_inspection = complete_departure_inspection(
-				inspection=inspection,
-				requested_by=request.user,
-				mileage=serializer.validated_data["mileage"],
-				energy_level_percent=serializer.validated_data["energy_level_percent"],
-				comments=serializer.validated_data.get("comments", ""),
-			)
+			if inspection.inspection_type == Inspection.Type.FINAL:
+				completed_inspection = complete_return_inspection(
+					inspection=inspection,
+					requested_by=request.user,
+					mileage=serializer.validated_data["mileage"],
+					energy_level_percent=serializer.validated_data["energy_level_percent"],
+					comments=serializer.validated_data.get("comments", ""),
+				)
+			else:
+				completed_inspection = complete_departure_inspection(
+					inspection=inspection,
+					requested_by=request.user,
+					mileage=serializer.validated_data["mileage"],
+					energy_level_percent=serializer.validated_data["energy_level_percent"],
+					comments=serializer.validated_data.get("comments", ""),
+				)
 		except DepartureInspectionError as exc:
 			detail = {"code": exc.code, "message": exc.message}
 			if exc.details:
