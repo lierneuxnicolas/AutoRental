@@ -153,6 +153,11 @@ class Damage(models.Model):
 		on_delete=models.PROTECT,
 		related_name="reported_damages",
 	)
+	evidence_photos = models.ManyToManyField(
+		InspectionPhoto,
+		blank=True,
+		related_name="damage_evidence",
+	)
 	description = models.TextField()
 	severity = models.CharField(max_length=20, choices=Severity.choices)
 	location = models.CharField(max_length=120)

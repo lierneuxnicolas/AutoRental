@@ -1,11 +1,21 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import generics, serializers, status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.permissions import IsClient, IsReservationOwner
-from inspections.models import Inspection
+from inspections.models import Damage, Inspection, InspectionPhoto
+from inspections.serializers import (
+	InspectionDamageCreateSerializer,
+	InspectionDamageReadSerializer,
+	InspectionPhotoCreateSerializer,
+	InspectionPhotoReadSerializer,
+	get_mandatory_photo_types,
+	get_missing_mandatory_photo_types,
+)
 from inspections.services.departure import (
 	MANDATORY_PHOTO_TYPES,
 	MISSING_FIELDS,
@@ -13,6 +23,9 @@ from inspections.services.departure import (
 	create_departure_inspection,
 )
 from reservations.models import Reservation
+
+
+ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou ressource introuvable.")
 
 
 class InspectionSummarySerializer(serializers.ModelSerializer):
@@ -44,6 +57,7 @@ class DepartureInspectionResponseSerializer(serializers.Serializer):
 
 class DepartureInspectionCreateView(generics.GenericAPIView):
 	permission_classes = [IsAuthenticated, IsClient, IsReservationOwner]
+	serializer_class = DepartureInspectionResponseSerializer
 	lookup_field = "id"
 	lookup_url_kwarg = "pk"
 
@@ -92,8 +106,97 @@ class DepartureInspectionCreateView(generics.GenericAPIView):
 			return Response(detail, status=status.HTTP_400_BAD_REQUEST)
 
 		response_data = {
-			"inspection": InspectionSummarySerializer(inspection).data,
-			"mandatory_photo_types": MANDATORY_PHOTO_TYPES,
+			"inspection": inspection,
+				"mandatory_photo_types": get_mandatory_photo_types(inspection),
 			"missing_fields": MISSING_FIELDS,
 		}
 		return Response(DepartureInspectionResponseSerializer(response_data).data, status=status.HTTP_200_OK)
+
+
+class InspectionPhotoCreateView(generics.GenericAPIView):
+	permission_classes = [IsAuthenticated, IsClient, IsReservationOwner]
+	serializer_class = InspectionPhotoCreateSerializer
+	parser_classes = [MultiPartParser, FormParser]
+	lookup_field = "id"
+	lookup_url_kwarg = "pk"
+
+	def get_queryset(self):
+		if getattr(self, "swagger_fake_view", False):
+			return Inspection.objects.none()
+
+		return (
+			Inspection.objects.select_related("reservation", "reservation__client", "reservation__client__user", "reservation__vehicle")
+			.filter(reservation__client__user=self.request.user)
+		)
+
+	def get_object(self):
+		queryset = self.get_queryset()
+		inspection = get_object_or_404(queryset, pk=self.kwargs[self.lookup_url_kwarg])
+		self.check_object_permissions(self.request, inspection.reservation)
+		return inspection
+
+	@extend_schema(
+		tags=["Inspections"],
+		request={"multipart/form-data": InspectionPhotoCreateSerializer},
+		responses={
+			201: InspectionPhotoReadSerializer,
+			400: ErrorDetailResponseSerializer,
+			401: ErrorDetailResponseSerializer,
+			403: ErrorDetailResponseSerializer,
+			404: ErrorDetailResponseSerializer,
+		},
+	)
+	def post(self, request, *args, **kwargs):
+		inspection = self.get_object()
+		serializer = self.get_serializer(data=request.data, context={"inspection": inspection, "requested_by": request.user})
+		serializer.is_valid(raise_exception=True)
+
+		with transaction.atomic():
+			photo = serializer.save()
+
+		response_serializer = InspectionPhotoReadSerializer(photo, context={"request": request})
+		return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class InspectionDamageCreateView(generics.GenericAPIView):
+	permission_classes = [IsAuthenticated, IsClient, IsReservationOwner]
+	serializer_class = InspectionDamageCreateSerializer
+	lookup_field = "id"
+	lookup_url_kwarg = "pk"
+
+	def get_queryset(self):
+		if getattr(self, "swagger_fake_view", False):
+			return Inspection.objects.none()
+
+		return (
+			Inspection.objects.select_related("reservation", "reservation__client", "reservation__client__user", "reservation__vehicle")
+			.filter(reservation__client__user=self.request.user)
+		)
+
+	def get_object(self):
+		queryset = self.get_queryset()
+		inspection = get_object_or_404(queryset, pk=self.kwargs[self.lookup_url_kwarg])
+		self.check_object_permissions(self.request, inspection.reservation)
+		return inspection
+
+	@extend_schema(
+		tags=["Inspections"],
+		request=InspectionDamageCreateSerializer,
+		responses={
+			201: InspectionDamageReadSerializer,
+			400: ErrorDetailResponseSerializer,
+			401: ErrorDetailResponseSerializer,
+			403: ErrorDetailResponseSerializer,
+			404: ErrorDetailResponseSerializer,
+		},
+	)
+	def post(self, request, *args, **kwargs):
+		inspection = self.get_object()
+		serializer = self.get_serializer(data=request.data, context={"inspection": inspection, "requested_by": request.user})
+		serializer.is_valid(raise_exception=True)
+
+		with transaction.atomic():
+			damage = serializer.save()
+
+		response_serializer = InspectionDamageReadSerializer(damage, context={"request": request})
+		return Response(response_serializer.data, status=status.HTTP_201_CREATED)

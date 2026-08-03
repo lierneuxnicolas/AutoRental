@@ -1,0 +1,3221 @@
+openapi: 3.0.3
+info:
+  title: AutoRental API
+  version: 1.0.0
+  description: REST API for AutoRental platform
+paths:
+  /api/v1/auth/login/:
+    post:
+      operationId: auth_login_create
+      description: |-
+        Takes a set of user credentials and returns an access and refresh JSON web
+        token pair to prove the authentication of those credentials.
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Login'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Login'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Login'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetailResponse'
+          description: ''
+  /api/v1/auth/logout/:
+    post:
+      operationId: auth_logout_create
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Logout'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Logout'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Logout'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '205':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetailResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetailResponse'
+          description: ''
+  /api/v1/auth/me/:
+    get:
+      operationId: auth_me_retrieve
+      tags:
+      - Authentication
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetailResponse'
+          description: ''
+  /api/v1/auth/password-reset/:
+    post:
+      operationId: auth_password_reset_create
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+          description: ''
+  /api/v1/auth/password-reset/confirm/:
+    post:
+      operationId: auth_password_reset_confirm_create
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirm'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirm'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirm'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetailResponse'
+          description: ''
+  /api/v1/auth/register/:
+    post:
+      operationId: auth_register_create
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Register'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Register'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Register'
+        required: true
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetailResponse'
+          description: ''
+  /api/v1/auth/token/refresh/:
+    post:
+      operationId: auth_token_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefreshResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetailResponse'
+          description: ''
+  /api/v1/auth/verify-email/:
+    post:
+      operationId: auth_verify_email_create
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyEmail'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VerifyEmail'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VerifyEmail'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetailResponse'
+          description: ''
+  /api/v1/inspections/{id}/damages/:
+    post:
+      operationId: inspections_damages_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Inspections
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspectionDamageCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InspectionDamageCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InspectionDamageCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectionDamageRead'
+          description: ''
+        '400':
+          description: Erreur de validation ou ressource introuvable.
+        '401':
+          description: Erreur de validation ou ressource introuvable.
+        '403':
+          description: Erreur de validation ou ressource introuvable.
+        '404':
+          description: Erreur de validation ou ressource introuvable.
+  /api/v1/inspections/{id}/photos/:
+    post:
+      operationId: inspections_photos_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Inspections
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InspectionPhotoCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectionPhotoRead'
+          description: ''
+        '400':
+          description: Erreur de validation ou ressource introuvable.
+        '401':
+          description: Erreur de validation ou ressource introuvable.
+        '403':
+          description: Erreur de validation ou ressource introuvable.
+        '404':
+          description: Erreur de validation ou ressource introuvable.
+  /api/v1/management/documents/:
+    get:
+      operationId: management_documents_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - Document Management
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedManagerClientDocumentListList'
+          description: ''
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/management/documents/{id}/:
+    get:
+      operationId: management_documents_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Document Management
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagerClientDocumentDetail'
+          description: ''
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+        '404':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/management/documents/{id}/reject/:
+    post:
+      operationId: management_documents_reject_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Document Management
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManagerRejectDocument'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ManagerRejectDocument'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ManagerRejectDocument'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagerClientDocumentDetail'
+          description: ''
+        '400':
+          description: Erreur de validation ou d'autorisation.
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+        '404':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/management/documents/{id}/validate/:
+    post:
+      operationId: management_documents_validate_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Document Management
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagerClientDocumentDetail'
+          description: ''
+        '400':
+          description: Erreur de validation ou d'autorisation.
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+        '404':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/management/reservations/:
+    get:
+      operationId: management_reservations_list
+      description: Liste paginée de toutes les réservations pour le gestionnaire-comptable
+        et l'administrateur. Accès refusé aux clients, mécaniciens, nettoyeurs et
+        utilisateurs anonymes. Les mécaniciens/nettoyeurs consomment uniquement les
+        données nécessaires via leurs interventions attribuées et un serializer limité.
+      parameters:
+      - in: query
+        name: client
+        schema:
+          type: integer
+        description: Filtrer par ID du client.
+      - in: query
+        name: client_email
+        schema:
+          type: string
+        description: Rechercher par email du client (contient).
+      - in: query
+        name: client_first_name
+        schema:
+          type: string
+        description: Rechercher par prénom du client (contient).
+      - in: query
+        name: client_last_name
+        schema:
+          type: string
+        description: Rechercher par nom du client (contient).
+      - in: query
+        name: end_at
+        schema:
+          type: string
+        description: 'Filtrer par date de fin exacte. Format: ISO 8601 datetime.'
+      - in: query
+        name: end_at_from
+        schema:
+          type: string
+        description: 'Filtrer par date de fin (>=). Format: ISO 8601 datetime.'
+      - in: query
+        name: end_at_to
+        schema:
+          type: string
+        description: 'Filtrer par date de fin (<=). Format: ISO 8601 datetime.'
+      - in: query
+        name: ordering
+        schema:
+          type: string
+        description: 'Tri autorisé: created_at, -created_at, start_at, -start_at,
+          rental_amount, -rental_amount.'
+      - in: query
+        name: page
+        schema:
+          type: integer
+        description: Numéro de page (pagination).
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+        description: Nombre d'éléments par page.
+      - in: query
+        name: reference
+        schema:
+          type: string
+        description: Rechercher par référence (contient).
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Recherche globale (référence, email client, prénom, nom, immatriculation).
+      - in: query
+        name: start_at
+        schema:
+          type: string
+        description: 'Filtrer par date de début exacte. Format: ISO 8601 datetime.'
+      - in: query
+        name: start_at_from
+        schema:
+          type: string
+        description: 'Filtrer par date de début (>=). Format: ISO 8601 datetime.'
+      - in: query
+        name: start_at_to
+        schema:
+          type: string
+        description: 'Filtrer par date de début (<=). Format: ISO 8601 datetime.'
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filtrer par statut de réservation (exact match).
+      - in: query
+        name: vehicle
+        schema:
+          type: integer
+        description: Filtrer par ID du véhicule.
+      - in: query
+        name: vehicle_registration_plate
+        schema:
+          type: string
+        description: Rechercher par immatriculation du véhicule (contient).
+      tags:
+      - Reservation Management
+      security:
+      - jwtAuth: []
+      responses:
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/management/reservations/{id}/:
+    get:
+      operationId: management_reservations_retrieve
+      description: Récupère les détails d'une réservation pour le gestionnaire-comptable
+        et l'administrateur. Aucun mot de passe, document d'identité complet, fichier
+        de document ou donnée bancaire n'est exposé. Accès refusé aux clients, mécaniciens,
+        nettoyeurs et anonymes.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Reservation Management
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationManagementDetail'
+          description: ''
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+        '404':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/management/vehicles/:
+    post:
+      operationId: management_vehicles_create
+      tags:
+      - Vehicle Management
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VehicleManagementWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VehicleManagementWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VehicleManagementWrite'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehiclePublic'
+          description: ''
+        '400':
+          description: Erreur de validation ou ressource introuvable.
+        '401':
+          description: Erreur de validation ou ressource introuvable.
+        '403':
+          description: Erreur de validation ou ressource introuvable.
+  /api/v1/management/vehicles/{id}/:
+    patch:
+      operationId: management_vehicles_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Vehicle Management
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicleManagementWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicleManagementWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicleManagementWrite'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehiclePublic'
+          description: ''
+        '400':
+          description: Erreur de validation ou ressource introuvable.
+        '401':
+          description: Erreur de validation ou ressource introuvable.
+        '403':
+          description: Erreur de validation ou ressource introuvable.
+        '404':
+          description: Erreur de validation ou ressource introuvable.
+  /api/v1/management/vehicles/{id}/photos/:
+    post:
+      operationId: management_vehicles_photos_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Vehicle Management
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VehiclePhotoCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehiclePhotoRead'
+          description: ''
+        '400':
+          description: Erreur de validation ou ressource introuvable.
+        '401':
+          description: Erreur de validation ou ressource introuvable.
+        '403':
+          description: Erreur de validation ou ressource introuvable.
+        '404':
+          description: Erreur de validation ou ressource introuvable.
+  /api/v1/management/vehicles/{id}/photos/{photo_id}/:
+    delete:
+      operationId: management_vehicles_photos_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: photo_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Vehicle Management
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+        '401':
+          description: Erreur de validation ou ressource introuvable.
+        '403':
+          description: Erreur de validation ou ressource introuvable.
+        '404':
+          description: Erreur de validation ou ressource introuvable.
+  /api/v1/management/vehicles/{id}/status/:
+    patch:
+      operationId: management_vehicles_status_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Vehicle Management
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicleStatusUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicleStatusUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicleStatusUpdate'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehiclePublic'
+          description: ''
+        '400':
+          description: Erreur de validation ou ressource introuvable.
+        '401':
+          description: Erreur de validation ou ressource introuvable.
+        '403':
+          description: Erreur de validation ou ressource introuvable.
+        '404':
+          description: Erreur de validation ou ressource introuvable.
+  /api/v1/parkings/:
+    get:
+      operationId: parkings_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - Parkings
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ParkingPublic'
+          description: ''
+  /api/v1/payments/webhooks/stripe/:
+    post:
+      operationId: payments_webhooks_stripe_create
+      description: Recoit les webhooks Stripe signes pour synchroniser l'etat local
+        des paiements. La signature Stripe est obligatoire et les evenements sont
+        traites de maniere idempotente.
+      tags:
+      - Payments
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StripeWebhookMessageResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StripeWebhookErrorResponse'
+          description: ''
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StripeWebhookErrorResponse'
+          description: ''
+  /api/v1/reservations/:
+    get:
+      operationId: reservations_list
+      parameters:
+      - in: query
+        name: ordering
+        schema:
+          type: string
+        description: 'Tri autorise: created_at, -created_at, start_at, -start_at.'
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filtrer par statut de reservation.
+      tags:
+      - Reservations
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedReservationListDetailList'
+          description: ''
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+    post:
+      operationId: reservations_create
+      description: Cree une reservation BROUILLON pour le client connecte. Le prix
+        est recalcule cote Django et la disponibilite est reverifiee. Aucun paiement
+        ni caution n'est cree a ce stade.
+      tags:
+      - Reservations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReservationCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReservationCreateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationCreateResponse'
+          description: ''
+        '400':
+          description: Erreur de validation ou d'autorisation.
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/reservations/{id}/:
+    get:
+      operationId: reservations_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Reservations
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationListDetail'
+          description: ''
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+        '404':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/reservations/{id}/cancel/:
+    post:
+      operationId: reservations_cancel_create
+      description: Annule une réservation pour le client connecté.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Reservations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationCancelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReservationCancelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReservationCancelRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationCancelResponse'
+          description: ''
+        '400':
+          description: Erreur de validation ou d'autorisation.
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+        '404':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/reservations/{id}/deposit/:
+    post:
+      operationId: reservations_deposit_create
+      description: 'Preautorise la caution d''une reservation via SIMULATED ou STRIPE_TEST.
+        Le montant est toujours calcule cote backend. Attention: une preautorisation
+        Stripe expire automatiquement.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Reservations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationDepositRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReservationDepositRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReservationDepositRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationDepositResponse'
+          description: ''
+        '400':
+          description: Erreur de validation ou d'autorisation.
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+        '404':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/reservations/{id}/inspections/departure/:
+    post:
+      operationId: reservations_inspections_departure_create
+      description: Cree l'etat des lieux INITIAL de depart pour une reservation CONFIRMEE,
+        a condition que le paiement soit REUSSI, que la caution soit AUTORISEE et
+        que la fenetre horaire autorisee soit respectee.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Inspections
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepartureInspectionResponse'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DepartureInspectionResponse'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DepartureInspectionResponse'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartureInspectionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartureInspectionResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartureInspectionResponse'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartureInspectionResponse'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartureInspectionResponse'
+          description: ''
+  /api/v1/reservations/{id}/payment-intent/:
+    post:
+      operationId: reservations_payment_intent_create
+      description: Cree ou reutilise un PaymentIntent Stripe pour payer la location.
+        Le montant est toujours recalcule cote backend et la caution doit etre AUTORISEE.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Reservations
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationPaymentIntentResponse'
+          description: ''
+        '400':
+          description: Erreur de validation ou d'autorisation.
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+        '404':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/simulations/:
+    post:
+      operationId: simulations_create
+      description: Calcule une estimation tarifaire sans creer de reservation ni bloquer
+        le vehicule. La disponibilite retournee est indicative et sera verifiee a
+        nouveau lors de la reservation et du paiement.
+      tags:
+      - Simulations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PriceSimulationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PriceSimulationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PriceSimulationRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceSimulationResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceSimulationErrorDetailResponse'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceSimulationErrorDetailResponse'
+          description: ''
+  /api/v1/users/me/:
+    get:
+      operationId: users_me_retrieve
+      tags:
+      - Profile
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientProfileMe'
+          description: ''
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+    patch:
+      operationId: users_me_partial_update
+      tags:
+      - Profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedClientProfileMe'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedClientProfileMe'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedClientProfileMe'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientProfileMe'
+          description: ''
+        '400':
+          description: Erreur de validation ou d'autorisation.
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/users/me/documents/:
+    get:
+      operationId: users_me_documents_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - Client Documents
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedClientDocumentReadList'
+          description: ''
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+    post:
+      operationId: users_me_documents_create
+      tags:
+      - Client Documents
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ClientDocumentCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientDocumentRead'
+          description: ''
+        '400':
+          description: Erreur de validation ou d'autorisation.
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/users/me/documents/{id}/:
+    get:
+      operationId: users_me_documents_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Client Documents
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientDocumentRead'
+          description: ''
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+        '404':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/users/me/profile-progress/:
+    get:
+      operationId: users_me_profile_progress_retrieve
+      tags:
+      - Profile
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientProfileProgress'
+          description: ''
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/vehicle-categories/:
+    get:
+      operationId: vehicle_categories_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - Vehicle Categories
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VehicleCategoryPublic'
+          description: ''
+  /api/v1/vehicles/:
+    get:
+      operationId: vehicles_list
+      parameters:
+      - in: query
+        name: brand
+        schema:
+          type: number
+      - in: query
+        name: category
+        schema:
+          type: number
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - ACCIDENTE
+          - A_CONTROLER
+          - DISPONIBLE
+          - INDISPONIBLE
+          - LOUE
+          - MAINTENANCE
+          - NETTOYAGE
+          - RESERVE
+        description: |-
+          * `DISPONIBLE` - Disponible
+          * `RESERVE` - Reserve
+          * `LOUE` - Loue
+          * `A_CONTROLER` - A controler
+          * `MAINTENANCE` - Maintenance
+          * `NETTOYAGE` - Nettoyage
+          * `ACCIDENTE` - Accidente
+          * `INDISPONIBLE` - Indisponible
+      tags:
+      - Vehicles
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedVehiclePublicList'
+          description: ''
+  /api/v1/vehicles/{id}/:
+    get:
+      operationId: vehicles_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Vehicles
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehiclePublic'
+          description: ''
+        '404':
+          description: Erreur de validation ou ressource introuvable.
+  /api/v1/vehicles/available/:
+    get:
+      operationId: vehicles_available_list
+      description: La disponibilité retournée est indicative et sera vérifiée à nouveau
+        lors de la réservation et du paiement.
+      parameters:
+      - in: query
+        name: brand
+        schema:
+          type: number
+      - in: query
+        name: category
+        schema:
+          type: number
+      - in: query
+        name: end
+        schema:
+          type: string
+        description: 'Date et heure de fin au format ISO 8601 (ex: 2030-01-01T13:00:00+01:00).'
+        required: true
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: start
+        schema:
+          type: string
+        description: 'Date et heure de debut au format ISO 8601 (ex: 2030-01-01T10:00:00+01:00).'
+        required: true
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - ACCIDENTE
+          - A_CONTROLER
+          - DISPONIBLE
+          - INDISPONIBLE
+          - LOUE
+          - MAINTENANCE
+          - NETTOYAGE
+          - RESERVE
+        description: |-
+          * `DISPONIBLE` - Disponible
+          * `RESERVE` - Reserve
+          * `LOUE` - Loue
+          * `A_CONTROLER` - A controler
+          * `MAINTENANCE` - Maintenance
+          * `NETTOYAGE` - Nettoyage
+          * `ACCIDENTE` - Accidente
+          * `INDISPONIBLE` - Indisponible
+      tags:
+      - Vehicles
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedVehiclePublicList'
+          description: ''
+components:
+  schemas:
+    AuthUserResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+        role:
+          type: string
+          nullable: true
+        email_verified:
+          type: boolean
+      required:
+      - email
+      - email_verified
+      - first_name
+      - id
+      - last_name
+      - role
+    ClientDocumentCreate:
+      type: object
+      properties:
+        document_type:
+          $ref: '#/components/schemas/DocumentTypeEnum'
+        document_number:
+          type: string
+          maxLength: 120
+        file:
+          type: string
+          format: uri
+        expiration_date:
+          type: string
+          format: date
+          nullable: true
+      required:
+      - document_number
+      - document_type
+      - file
+    ClientDocumentRead:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        document_type:
+          $ref: '#/components/schemas/DocumentTypeEnum'
+        document_number:
+          type: string
+          maxLength: 120
+        expiration_date:
+          type: string
+          format: date
+          nullable: true
+        status:
+          $ref: '#/components/schemas/StatusF0aEnum'
+        rejection_reason:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+          readOnly: true
+        validated_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_active:
+          type: boolean
+        file:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+      required:
+      - document_number
+      - document_type
+      - file
+      - id
+      - uploaded_at
+    ClientProfileMe:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+          maxLength: 30
+        email_verified:
+          type: boolean
+          readOnly: true
+        role:
+          type: string
+          nullable: true
+          readOnly: true
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        address:
+          type: string
+        profile_status:
+          allOf:
+          - $ref: '#/components/schemas/ProfileStatusEnum'
+          readOnly: true
+        rejection_reason:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - date_joined
+      - email
+      - email_verified
+      - id
+      - profile_status
+      - rejection_reason
+      - role
+      - updated_at
+    ClientProfileProgress:
+      type: object
+      properties:
+        percentage:
+          type: integer
+          maximum: 100
+          minimum: 0
+        account_created:
+          type: boolean
+        email_verified:
+          type: boolean
+        personal_information_complete:
+          type: boolean
+        identity_card_valid:
+          type: boolean
+        driving_license_valid:
+          type: boolean
+      required:
+      - account_created
+      - driving_license_valid
+      - email_verified
+      - identity_card_valid
+      - percentage
+      - personal_information_complete
+    CurrentUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          title: Email address
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        phone:
+          type: string
+          maxLength: 30
+        role:
+          type: string
+          nullable: true
+          readOnly: true
+        email_verified:
+          type: boolean
+        is_active:
+          type: boolean
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - date_joined
+      - email
+      - first_name
+      - id
+      - last_name
+      - role
+    DepartureInspectionResponse:
+      type: object
+      properties:
+        inspection:
+          allOf:
+          - $ref: '#/components/schemas/InspectionSummary'
+          readOnly: true
+        mandatory_photo_types:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        missing_fields:
+          type: array
+          items:
+            type: string
+          readOnly: true
+      required:
+      - inspection
+      - mandatory_photo_types
+      - missing_fields
+    DocumentTypeEnum:
+      enum:
+      - CARTE_IDENTITE
+      - PERMIS_CONDUIRE
+      type: string
+      description: |-
+        * `CARTE_IDENTITE` - Carte d'identite
+        * `PERMIS_CONDUIRE` - Permis de conduire
+    ErrorDetailResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+      required:
+      - detail
+    InspectionDamageCreate:
+      type: object
+      properties:
+        description:
+          type: string
+        severity:
+          $ref: '#/components/schemas/SeverityEnum'
+        location:
+          type: string
+          maxLength: 120
+        photo_ids:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+      required:
+      - description
+      - location
+      - severity
+    InspectionDamageRead:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        inspection:
+          type: integer
+        vehicle:
+          type: integer
+        reported_by:
+          type: integer
+        description:
+          type: string
+        severity:
+          $ref: '#/components/schemas/SeverityEnum'
+        location:
+          type: string
+          maxLength: 120
+        photo_ids:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - description
+      - id
+      - inspection
+      - location
+      - photo_ids
+      - reported_by
+      - severity
+      - updated_at
+      - vehicle
+    InspectionPhotoCreate:
+      type: object
+      properties:
+        file:
+          type: string
+          format: uri
+        photo_type:
+          $ref: '#/components/schemas/PhotoTypeEnum'
+        position:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+      required:
+      - file
+      - photo_type
+    InspectionPhotoRead:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        inspection:
+          type: integer
+        photo_type:
+          $ref: '#/components/schemas/PhotoTypeEnum'
+        file:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        position:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+          default: 0
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - file
+      - id
+      - inspection
+      - photo_type
+    InspectionSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        reservation:
+          type: integer
+        inspection_type:
+          $ref: '#/components/schemas/InspectionTypeEnum'
+        status:
+          $ref: '#/components/schemas/InspectionSummaryStatusEnum'
+        mileage:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+          nullable: true
+        energy_level_percent:
+          type: integer
+          maximum: 65535
+          minimum: 0
+          nullable: true
+        comments:
+          type: string
+        has_critical_issue:
+          type: boolean
+        critical_issue_description:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_by:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - inspection_type
+      - reservation
+      - updated_at
+    InspectionSummaryStatusEnum:
+      enum:
+      - BROUILLON
+      - EN_COURS
+      - TERMINE
+      - ANNULE
+      type: string
+      description: |-
+        * `BROUILLON` - Brouillon
+        * `EN_COURS` - En cours
+        * `TERMINE` - Termine
+        * `ANNULE` - Annule
+    InspectionTypeEnum:
+      enum:
+      - INITIAL
+      - FINAL
+      type: string
+      description: |-
+        * `INITIAL` - Initial
+        * `FINAL` - Final
+    Login:
+      type: object
+      properties:
+        email:
+          type: string
+          writeOnly: true
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - email
+      - password
+    LoginResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUserResponse'
+        access:
+          type: string
+        refresh:
+          type: string
+      required:
+      - access
+      - refresh
+      - user
+    Logout:
+      type: object
+      properties:
+        refresh:
+          type: string
+          writeOnly: true
+      required:
+      - refresh
+    ManagerClientDocumentDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        client:
+          type: integer
+          readOnly: true
+        client_email:
+          type: string
+          format: email
+          readOnly: true
+        client_first_name:
+          type: string
+          readOnly: true
+        client_last_name:
+          type: string
+          readOnly: true
+        document_type:
+          $ref: '#/components/schemas/DocumentTypeEnum'
+        document_number:
+          type: string
+          maxLength: 120
+        file:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        expiration_date:
+          type: string
+          format: date
+          nullable: true
+        status:
+          $ref: '#/components/schemas/StatusF0aEnum'
+        rejection_reason:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+          readOnly: true
+        validated_at:
+          type: string
+          format: date-time
+          nullable: true
+        validated_by:
+          type: integer
+          readOnly: true
+          nullable: true
+        validated_by_email:
+          type: string
+          format: email
+          readOnly: true
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - client
+      - client_email
+      - client_first_name
+      - client_last_name
+      - created_at
+      - document_number
+      - document_type
+      - file
+      - id
+      - updated_at
+      - uploaded_at
+      - validated_by
+      - validated_by_email
+    ManagerClientDocumentList:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        client:
+          type: integer
+          readOnly: true
+        client_email:
+          type: string
+          format: email
+          readOnly: true
+        client_first_name:
+          type: string
+          readOnly: true
+        client_last_name:
+          type: string
+          readOnly: true
+        document_type:
+          $ref: '#/components/schemas/DocumentTypeEnum'
+        document_number:
+          type: string
+          maxLength: 120
+        expiration_date:
+          type: string
+          format: date
+          nullable: true
+        status:
+          $ref: '#/components/schemas/StatusF0aEnum'
+        is_active:
+          type: boolean
+        uploaded_at:
+          type: string
+          format: date-time
+          readOnly: true
+        validated_at:
+          type: string
+          format: date-time
+          nullable: true
+        validated_by_email:
+          type: string
+          format: email
+          readOnly: true
+          nullable: true
+      required:
+      - client
+      - client_email
+      - client_first_name
+      - client_last_name
+      - document_number
+      - document_type
+      - id
+      - uploaded_at
+      - validated_by_email
+    ManagerRejectDocument:
+      type: object
+      properties:
+        reason:
+          type: string
+      required:
+      - reason
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+      - message
+    ModeEnum:
+      enum:
+      - SIMULATED
+      - STRIPE_TEST
+      type: string
+      description: |-
+        * `SIMULATED` - SIMULATED
+        * `STRIPE_TEST` - STRIPE_TEST
+    PaginatedClientDocumentReadList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClientDocumentRead'
+    PaginatedManagerClientDocumentListList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManagerClientDocumentList'
+    PaginatedReservationListDetailList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservationListDetail'
+    PaginatedVehiclePublicList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/VehiclePublic'
+    ParkingPublic:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+        address:
+          type: string
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        public_capacity:
+          type: integer
+          readOnly: true
+      required:
+      - address
+      - id
+      - name
+      - public_capacity
+    PasswordResetConfirm:
+      type: object
+      properties:
+        uid:
+          type: string
+        token:
+          type: string
+        new_password:
+          type: string
+          writeOnly: true
+        new_password_confirm:
+          type: string
+          writeOnly: true
+      required:
+      - new_password
+      - new_password_confirm
+      - token
+      - uid
+    PasswordResetRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required:
+      - email
+    PatchedClientProfileMe:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+          maxLength: 30
+        email_verified:
+          type: boolean
+          readOnly: true
+        role:
+          type: string
+          nullable: true
+          readOnly: true
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        address:
+          type: string
+        profile_status:
+          allOf:
+          - $ref: '#/components/schemas/ProfileStatusEnum'
+          readOnly: true
+        rejection_reason:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedVehicleManagementWrite:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        brand:
+          type: integer
+        category:
+          type: integer
+        parking_space:
+          type: integer
+        registration_number:
+          type: string
+          maxLength: 30
+        model_name:
+          type: string
+          maxLength: 150
+        year:
+          type: integer
+          maximum: 4294967295
+          minimum: 1886
+          format: int64
+        color:
+          type: string
+          maxLength: 60
+        fuel_type:
+          type: string
+        transmission:
+          type: string
+          maxLength: 60
+        seats:
+          type: integer
+          maximum: 4294967295
+          minimum: 1
+          format: int64
+        doors:
+          type: integer
+          maximum: 4294967295
+          minimum: 1
+          format: int64
+        mileage:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/Status081Enum'
+        is_active:
+          type: boolean
+    PatchedVehicleStatusUpdate:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/Status081Enum'
+        reason:
+          type: string
+          maxLength: 500
+    PhotoTypeEnum:
+      enum:
+      - AVANT
+      - ARRIERE
+      - COTE_GAUCHE
+      - COTE_DROIT
+      - INTERIEUR
+      - TABLEAU_DE_BORD
+      - DOMMAGE
+      - AUTRE
+      type: string
+      description: |-
+        * `AVANT` - Avant
+        * `ARRIERE` - Arriere
+        * `COTE_GAUCHE` - Cote gauche
+        * `COTE_DROIT` - Cote droit
+        * `INTERIEUR` - Interieur
+        * `TABLEAU_DE_BORD` - Tableau de bord
+        * `DOMMAGE` - Dommage
+        * `AUTRE` - Autre
+    PriceSimulationErrorDetailResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+      required:
+      - detail
+    PriceSimulationRequest:
+      type: object
+      properties:
+        vehicle_id:
+          type: integer
+        start_at:
+          type: string
+          format: date-time
+        end_at:
+          type: string
+          format: date-time
+      required:
+      - end_at
+      - start_at
+      - vehicle_id
+    PriceSimulationResponse:
+      type: object
+      properties:
+        vehicle_id:
+          type: integer
+        duration_hours:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        rental_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        deposit_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        insurance_included:
+          type: boolean
+        total_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - deposit_amount
+      - duration_hours
+      - insurance_included
+      - rental_amount
+      - total_amount
+      - vehicle_id
+    ProfileStatusEnum:
+      enum:
+      - INCOMPLET
+      - EN_ATTENTE
+      - VALIDE
+      - REFUSE
+      - EXPIRE
+      type: string
+      description: |-
+        * `INCOMPLET` - Incomplet
+        * `EN_ATTENTE` - En attente
+        * `VALIDE` - Valide
+        * `REFUSE` - Refuse
+        * `EXPIRE` - Expire
+    Register:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          writeOnly: true
+        password_confirm:
+          type: string
+          writeOnly: true
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        phone:
+          type: string
+          maxLength: 30
+      required:
+      - email
+      - first_name
+      - last_name
+      - password
+      - password_confirm
+    RegisterResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUserResponse'
+        message:
+          type: string
+      required:
+      - message
+      - user
+    ReservationCancelRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+      required:
+      - reason
+    ReservationCancelResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          readOnly: true
+        reservation:
+          $ref: '#/components/schemas/ReservationListDetail'
+      required:
+      - message
+      - reservation
+    ReservationCreateRequest:
+      type: object
+      properties:
+        vehicle_id:
+          type: integer
+        start_at:
+          type: string
+          format: date-time
+        end_at:
+          type: string
+          format: date-time
+      required:
+      - end_at
+      - start_at
+      - vehicle_id
+    ReservationCreateResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        reference:
+          type: string
+          readOnly: true
+          description: Reference generee automatiquement par le backend.
+        vehicle:
+          allOf:
+          - $ref: '#/components/schemas/ReservationVehicleSummary'
+          readOnly: true
+        start_at:
+          type: string
+          format: date-time
+        end_at:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/StatusD60Enum'
+        rental_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        deposit_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancelled_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancellation_reason:
+          type: string
+      required:
+      - created_at
+      - deposit_amount
+      - end_at
+      - id
+      - reference
+      - rental_amount
+      - start_at
+      - vehicle
+    ReservationDepositRequest:
+      type: object
+      properties:
+        mode:
+          $ref: '#/components/schemas/ModeEnum'
+      required:
+      - mode
+    ReservationDepositResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          readOnly: true
+        reservation:
+          allOf:
+          - $ref: '#/components/schemas/ReservationListDetail'
+          readOnly: true
+        deposit_id:
+          type: integer
+          readOnly: true
+        deposit_mode:
+          type: string
+          readOnly: true
+        deposit_status:
+          type: string
+          readOnly: true
+        deposit_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        currency:
+          type: string
+          readOnly: true
+        stripe_payment_intent_id:
+          type: string
+          readOnly: true
+          nullable: true
+        authorization_expires_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        authorized_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        client_secret:
+          type: string
+          readOnly: true
+          nullable: true
+        authorization_note:
+          type: string
+          readOnly: true
+      required:
+      - authorization_expires_at
+      - authorization_note
+      - authorized_at
+      - client_secret
+      - currency
+      - deposit_amount
+      - deposit_id
+      - deposit_mode
+      - deposit_status
+      - message
+      - reservation
+      - stripe_payment_intent_id
+    ReservationListDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        reference:
+          type: string
+          readOnly: true
+          description: Reference generee automatiquement par le backend.
+        vehicle:
+          allOf:
+          - $ref: '#/components/schemas/ReservationVehicleSummary'
+          readOnly: true
+        start_at:
+          type: string
+          format: date-time
+        end_at:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/StatusD60Enum'
+        rental_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        deposit_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancelled_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancellation_reason:
+          type: string
+      required:
+      - created_at
+      - deposit_amount
+      - end_at
+      - id
+      - reference
+      - rental_amount
+      - start_at
+      - vehicle
+    ReservationManagementClientSummary:
+      type: object
+      description: Client résumé pour le management - données limitées.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        first_name:
+          type: string
+          readOnly: true
+        last_name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        phone:
+          type: string
+          readOnly: true
+        profile_status:
+          type: string
+          readOnly: true
+        date_of_birth:
+          type: string
+          format: date
+          readOnly: true
+          nullable: true
+      required:
+      - date_of_birth
+      - email
+      - first_name
+      - id
+      - last_name
+      - phone
+      - profile_status
+    ReservationManagementDetail:
+      type: object
+      description: Réservation en détail pour le management.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        reference:
+          type: string
+          readOnly: true
+          description: Reference generee automatiquement par le backend.
+        client_summary:
+          allOf:
+          - $ref: '#/components/schemas/ReservationManagementClientSummary'
+          readOnly: true
+        vehicle:
+          allOf:
+          - $ref: '#/components/schemas/ReservationManagementVehicleSummary'
+          readOnly: true
+        start_at:
+          type: string
+          format: date-time
+        end_at:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/StatusD60Enum'
+        rental_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        deposit_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancelled_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancellation_reason:
+          type: string
+      required:
+      - client_summary
+      - created_at
+      - deposit_amount
+      - end_at
+      - id
+      - reference
+      - rental_amount
+      - start_at
+      - vehicle
+    ReservationManagementVehicleSummary:
+      type: object
+      description: Véhicule résumé pour le management.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        brand:
+          type: string
+          readOnly: true
+        model_name:
+          type: string
+          readOnly: true
+        category:
+          type: string
+          readOnly: true
+        year:
+          type: integer
+          readOnly: true
+        color:
+          type: string
+          readOnly: true
+        registration_plate:
+          type: string
+          readOnly: true
+        energy_type:
+          type: string
+          readOnly: true
+        transmission:
+          type: string
+          readOnly: true
+        seats:
+          type: integer
+          readOnly: true
+        doors:
+          type: integer
+          readOnly: true
+      required:
+      - brand
+      - category
+      - color
+      - doors
+      - energy_type
+      - id
+      - model_name
+      - registration_plate
+      - seats
+      - transmission
+      - year
+    ReservationPaymentIntentResponse:
+      type: object
+      properties:
+        client_secret:
+          type: string
+          readOnly: true
+          nullable: true
+        payment_id:
+          type: integer
+          readOnly: true
+      required:
+      - client_secret
+      - payment_id
+    ReservationVehicleSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        brand:
+          type: string
+          readOnly: true
+        model_name:
+          type: string
+          readOnly: true
+        category:
+          type: string
+          readOnly: true
+        year:
+          type: integer
+          readOnly: true
+        color:
+          type: string
+          readOnly: true
+        fuel_type:
+          type: string
+          readOnly: true
+        transmission:
+          type: string
+          readOnly: true
+        seats:
+          type: integer
+          readOnly: true
+        doors:
+          type: integer
+          readOnly: true
+      required:
+      - brand
+      - category
+      - color
+      - doors
+      - fuel_type
+      - id
+      - model_name
+      - seats
+      - transmission
+      - year
+    SeverityEnum:
+      enum:
+      - MINEUR
+      - MODERE
+      - MAJEUR
+      - CRITIQUE
+      type: string
+      description: |-
+        * `MINEUR` - Mineur
+        * `MODERE` - Modere
+        * `MAJEUR` - Majeur
+        * `CRITIQUE` - Critique
+    Status081Enum:
+      enum:
+      - DISPONIBLE
+      - RESERVE
+      - LOUE
+      - A_CONTROLER
+      - MAINTENANCE
+      - NETTOYAGE
+      - ACCIDENTE
+      - INDISPONIBLE
+      type: string
+      description: |-
+        * `DISPONIBLE` - Disponible
+        * `RESERVE` - Reserve
+        * `LOUE` - Loue
+        * `A_CONTROLER` - A controler
+        * `MAINTENANCE` - Maintenance
+        * `NETTOYAGE` - Nettoyage
+        * `ACCIDENTE` - Accidente
+        * `INDISPONIBLE` - Indisponible
+    StatusD60Enum:
+      enum:
+      - BROUILLON
+      - EN_ATTENTE_CAUTION
+      - EN_ATTENTE_PAIEMENT
+      - CONFIRMEE
+      - EN_COURS
+      - A_CONTROLER
+      - TERMINEE
+      - ANNULEE
+      - PAIEMENT_ECHOUE
+      type: string
+      description: |-
+        * `BROUILLON` - Brouillon
+        * `EN_ATTENTE_CAUTION` - En attente caution
+        * `EN_ATTENTE_PAIEMENT` - En attente paiement
+        * `CONFIRMEE` - Confirmee
+        * `EN_COURS` - En cours
+        * `A_CONTROLER` - A controler
+        * `TERMINEE` - Terminee
+        * `ANNULEE` - Annulee
+        * `PAIEMENT_ECHOUE` - Paiement echoue
+    StatusF0aEnum:
+      enum:
+      - EN_ATTENTE
+      - VALIDE
+      - REFUSE
+      - EXPIRE
+      type: string
+      description: |-
+        * `EN_ATTENTE` - En attente
+        * `VALIDE` - Valide
+        * `REFUSE` - Refuse
+        * `EXPIRE` - Expire
+    StripeWebhookErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+      required:
+      - detail
+    StripeWebhookMessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+      - message
+    TokenRefreshRequest:
+      type: object
+      properties:
+        refresh:
+          type: string
+      required:
+      - refresh
+    TokenRefreshResponse:
+      type: object
+      properties:
+        access:
+          type: string
+      required:
+      - access
+    VehicleCategoryPublic:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+        daily_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - daily_rate
+      - id
+      - name
+    VehicleManagementWrite:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        brand:
+          type: integer
+        category:
+          type: integer
+        parking_space:
+          type: integer
+        registration_number:
+          type: string
+          maxLength: 30
+        model_name:
+          type: string
+          maxLength: 150
+        year:
+          type: integer
+          maximum: 4294967295
+          minimum: 1886
+          format: int64
+        color:
+          type: string
+          maxLength: 60
+        fuel_type:
+          type: string
+        transmission:
+          type: string
+          maxLength: 60
+        seats:
+          type: integer
+          maximum: 4294967295
+          minimum: 1
+          format: int64
+        doors:
+          type: integer
+          maximum: 4294967295
+          minimum: 1
+          format: int64
+        mileage:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/Status081Enum'
+        is_active:
+          type: boolean
+      required:
+      - brand
+      - category
+      - color
+      - doors
+      - fuel_type
+      - id
+      - model_name
+      - parking_space
+      - registration_number
+      - seats
+      - status
+      - transmission
+      - year
+    VehiclePhotoCreate:
+      type: object
+      properties:
+        file:
+          type: string
+          format: uri
+        is_primary:
+          type: boolean
+        position:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+        caption:
+          type: string
+          maxLength: 255
+      required:
+      - file
+    VehiclePhotoPublic:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        file:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        caption:
+          type: string
+          readOnly: true
+        position:
+          type: integer
+          readOnly: true
+      required:
+      - caption
+      - file
+      - id
+      - position
+    VehiclePhotoRead:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        file:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        is_primary:
+          type: boolean
+        position:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+        caption:
+          type: string
+          maxLength: 255
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - file
+      - id
+      - updated_at
+    VehiclePublic:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        brand:
+          type: string
+          readOnly: true
+        model_name:
+          type: string
+          maxLength: 150
+        category:
+          type: string
+          readOnly: true
+        year:
+          type: integer
+          maximum: 4294967295
+          minimum: 1886
+          format: int64
+        color:
+          type: string
+          maxLength: 60
+        fuel_type:
+          type: string
+          readOnly: true
+        transmission:
+          type: string
+          maxLength: 60
+        seats:
+          type: integer
+          maximum: 4294967295
+          minimum: 1
+          format: int64
+        doors:
+          type: integer
+          maximum: 4294967295
+          minimum: 1
+          format: int64
+        description:
+          type: string
+        public_status:
+          type: string
+          readOnly: true
+        category_daily_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        main_photo:
+          allOf:
+          - $ref: '#/components/schemas/VehiclePhotoPublic'
+          nullable: true
+          readOnly: true
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/VehiclePhotoPublic'
+          readOnly: true
+        parking_name:
+          type: string
+          nullable: true
+          readOnly: true
+        parking_address:
+          type: string
+          nullable: true
+          readOnly: true
+        parking_space_number:
+          type: string
+          nullable: true
+          readOnly: true
+      required:
+      - brand
+      - category
+      - category_daily_rate
+      - color
+      - doors
+      - fuel_type
+      - id
+      - main_photo
+      - model_name
+      - parking_address
+      - parking_name
+      - parking_space_number
+      - photos
+      - public_status
+      - seats
+      - transmission
+      - year
+    VerifyEmail:
+      type: object
+      properties:
+        token:
+          type: string
+          writeOnly: true
+      required:
+      - token
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
