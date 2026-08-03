@@ -89,7 +89,7 @@ class ReservationManagementFilterSet(filters.FilterSet):
     client_email = filters.CharFilter(field_name="client__user__email", lookup_expr="icontains")
     client_first_name = filters.CharFilter(field_name="client__user__first_name", lookup_expr="icontains")
     client_last_name = filters.CharFilter(field_name="client__user__last_name", lookup_expr="icontains")
-    vehicle_registration_plate = filters.CharFilter(field_name="vehicle__registration_plate", lookup_expr="icontains")
+    vehicle_registration_plate = filters.CharFilter(field_name="vehicle__registration_number", lookup_expr="icontains")
 
     class Meta:
         model = Reservation
@@ -145,7 +145,7 @@ class ReservationManagementListView(generics.ListAPIView):
         "client__user__email",
         "client__user__first_name",
         "client__user__last_name",
-        "vehicle__registration_plate",
+        "vehicle__registration_number",
     ]
     ordering_fields = ["created_at", "start_at", "rental_amount"]
     ordering = ["-created_at"]
