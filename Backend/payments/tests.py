@@ -2,16 +2,147 @@ from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
+import stripe
+from django.conf import settings
+from django.db import IntegrityError
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APIClient
 
 from accounts.models import ClientDocument, ClientProfile, Role
 from accounts.tests.utils import create_user, ensure_roles
 from notifications.models import Notification
-from payments.models import Payment, StripeEvent
+from payments.models import Deposit, Payment, StripeEvent
 from payments.services.webhooks import InvoiceIntegrationPending, process_stripe_event
 from reservations.models import Reservation
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory
+
+
+class PaymentsModelValidationTests(TestCase):
+	def setUp(self):
+		self.roles = ensure_roles()
+		self.client_user = create_user(
+			email="model-client@example.com",
+			password="StrongPass123!",
+			role=self.roles[Role.Code.CLIENT],
+			email_verified=True,
+			is_active=True,
+		)
+		self.profile = ClientProfile.objects.create(
+			user=self.client_user,
+			date_of_birth=date(1990, 1, 1),
+			address="Rue Models 1",
+			profile_status=ClientProfile.ProfileStatus.VALIDE,
+		)
+		self.brand = Brand.objects.create(name="Model Brand", is_active=True)
+		self.category = VehicleCategory.objects.create(
+			name="Model Category",
+			description="Model tests",
+			daily_rate=Decimal("80.00"),
+			hourly_rate=Decimal("12.00"),
+			minimum_deposit=Decimal("350.00"),
+			minimum_rental_hours=1,
+			is_active=True,
+		)
+		self.parking = Parking.objects.create(name="Model Parking", address="Rue Parking", capacity=10, is_active=True)
+		self.parking_space = ParkingSpace.objects.create(parking=self.parking, number="M1", is_active=True)
+		self.vehicle = Vehicle.objects.create(
+			brand=self.brand,
+			category=self.category,
+			parking_space=self.parking_space,
+			registration_number="MOD-001",
+			model_name="Model",
+			year=2024,
+			color="Black",
+			energy_type="Hybrid",
+			transmission="Auto",
+			seats=5,
+			doors=5,
+			mileage=1000,
+			status=Vehicle.Status.DISPONIBLE,
+			is_active=True,
+		)
+		start_at = timezone.now() + timedelta(days=2)
+		end_at = start_at + timedelta(days=2)
+		self.reservation = Reservation.objects.create(
+			client=self.profile,
+			vehicle=self.vehicle,
+			start_at=start_at,
+			end_at=end_at,
+			status=Reservation.Status.BROUILLON,
+			rental_amount=Decimal("100.00"),
+			deposit_amount=Decimal("350.00"),
+		)
+
+	def test_payment_amount_must_be_non_negative(self):
+		with self.assertRaises(IntegrityError):
+			Payment.objects.create(
+				reservation=self.reservation,
+				provider=Payment.Provider.STRIPE,
+				amount=Decimal("-1.00"),
+				currency="EUR",
+			)
+
+	def test_deposit_amount_must_be_non_negative(self):
+		with self.assertRaises(IntegrityError):
+			Deposit.objects.create(
+				reservation=self.reservation,
+				mode=Deposit.Mode.SIMULATED,
+				amount=Decimal("-0.01"),
+				currency="EUR",
+			)
+
+	def test_payment_stripe_payment_intent_id_is_unique(self):
+		Payment.objects.create(
+			reservation=self.reservation,
+			provider=Payment.Provider.STRIPE,
+			amount=Decimal("10.00"),
+			currency="EUR",
+			stripe_payment_intent_id="pi_unique_model",
+		)
+
+		with self.assertRaises(IntegrityError):
+			Payment.objects.create(
+				reservation=self.reservation,
+				provider=Payment.Provider.STRIPE,
+				amount=Decimal("11.00"),
+				currency="EUR",
+				stripe_payment_intent_id="pi_unique_model",
+			)
+
+	def test_stripe_event_id_is_unique(self):
+		StripeEvent.objects.create(
+			stripe_event_id="evt_unique",
+			event_type="payment_intent.succeeded",
+			payload={"id": "evt_unique", "type": "payment_intent.succeeded"},
+		)
+
+		with self.assertRaises(IntegrityError):
+			StripeEvent.objects.create(
+				stripe_event_id="evt_unique",
+				event_type="payment_intent.payment_failed",
+				payload={"id": "evt_unique", "type": "payment_intent.payment_failed"},
+			)
+
+	def test_payment_status_choices_are_exact(self):
+		expected = {
+			"CREE",
+			"EN_ATTENTE",
+			"ACTION_REQUISE",
+			"TRAITEMENT",
+			"REUSSI",
+			"ECHOUE",
+			"ANNULE",
+		}
+		self.assertEqual({value for value, _ in Payment.Status.choices}, expected)
+
+	def test_models_do_not_have_bank_card_fields(self):
+		for model in (Payment, Deposit, StripeEvent):
+			field_names = {field.name for field in model._meta.get_fields()}
+			for forbidden in ["card_number", "cvc", "expiry", "pin", "secret_key"]:
+				self.assertNotIn(forbidden, field_names)
 
 
 class StripeWebhookBusinessProcessingTests(TestCase):
@@ -264,3 +395,161 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 
 		stripe_event = StripeEvent.objects.get(stripe_event_id="evt_bad_amount")
 		self.assertFalse(stripe_event.processed)
+
+	def test_payment_not_found_marks_event_retryable(self):
+		event = {
+			"id": "evt_unknown_payment",
+			"type": "payment_intent.succeeded",
+			"api_version": "2025-01-01",
+			"data": {
+				"object": {
+					"id": "pi_missing_123",
+					"amount": 12000,
+					"amount_received": 12000,
+					"currency": "eur",
+				}
+			},
+		}
+
+		with self.assertRaisesMessage(Exception, "Unknown payment intent"):
+			process_stripe_event(event)
+
+		stored_event = StripeEvent.objects.get(stripe_event_id="evt_unknown_payment")
+		self.assertFalse(stored_event.processed)
+		self.assertIn("Unknown payment intent", stored_event.processing_error)
+
+	def test_unknown_event_type_is_processed_without_side_effects(self):
+		event = {
+			"id": "evt_unknown_type",
+			"type": "customer.created",
+			"api_version": "2025-01-01",
+			"data": {"object": {"id": "cus_123"}},
+		}
+
+		before_status = self.payment.status
+		process_stripe_event(event)
+
+		self.payment.refresh_from_db()
+		self.assertEqual(self.payment.status, before_status)
+		stored_event = StripeEvent.objects.get(stripe_event_id="evt_unknown_type")
+		self.assertTrue(stored_event.processed)
+
+	@patch("payments.services.webhooks.create_invoice_for_reservation", side_effect=InvoiceIntegrationPending("Invoice temporarily unavailable"))
+	def test_local_error_then_retry_succeeds(self, mocked_invoice):
+		event = self._build_event("evt_retry_flow", "payment_intent.succeeded")
+
+		with self.assertRaises(InvoiceIntegrationPending):
+			process_stripe_event(event)
+
+		self.payment.refresh_from_db()
+		self.assertEqual(self.payment.status, Payment.Status.EN_ATTENTE)
+
+		mocked_invoice.side_effect = None
+		mocked_invoice.return_value = object()
+		process_stripe_event(event)
+
+		self.payment.refresh_from_db()
+		self.reservation.refresh_from_db()
+		self.vehicle.refresh_from_db()
+		stored_event = StripeEvent.objects.get(stripe_event_id="evt_retry_flow")
+		self.assertTrue(stored_event.processed)
+		self.assertEqual(self.payment.status, Payment.Status.REUSSI)
+		self.assertEqual(self.reservation.status, Reservation.Status.CONFIRMEE)
+		self.assertEqual(self.vehicle.status, Vehicle.Status.RESERVE)
+
+	def test_success_processing_is_atomic_on_local_error(self):
+		event = self._build_event("evt_atomic", "payment_intent.succeeded")
+
+		with patch("payments.services.webhooks._notify_once", side_effect=RuntimeError("notif down")):
+			with self.assertRaisesMessage(RuntimeError, "notif down"):
+				process_stripe_event(event)
+
+		self.payment.refresh_from_db()
+		self.reservation.refresh_from_db()
+		self.vehicle.refresh_from_db()
+		self.assertEqual(self.payment.status, Payment.Status.EN_ATTENTE)
+		self.assertEqual(self.reservation.status, Reservation.Status.EN_ATTENTE_PAIEMENT)
+		self.assertEqual(self.vehicle.status, Vehicle.Status.DISPONIBLE)
+
+
+class StripeWebhookEndpointTests(TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+		self.url = reverse("payments:stripe-webhook")
+
+	def test_invalid_signature_returns_400(self):
+		with self.settings(STRIPE_WEBHOOK_SECRET="whsec_test"):
+			with patch(
+				"payments.views.stripe.Webhook.construct_event",
+				side_effect=stripe.error.SignatureVerificationError("Bad signature", "sig_header"),
+			):
+				response = self.client_api.post(
+					self.url,
+					data='{"id":"evt_1","type":"payment_intent.succeeded"}',
+					content_type="application/json",
+					HTTP_STRIPE_SIGNATURE="t=1,v1=bad",
+				)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["detail"], "Signature Stripe invalide.")
+
+	def test_duplicate_event_returns_200_once_processed(self):
+		event = {
+			"id": "evt_duplicate",
+			"type": "customer.created",
+			"api_version": "2025-01-01",
+			"data": {"object": {"id": "cus_1"}},
+		}
+
+		with self.settings(STRIPE_WEBHOOK_SECRET="whsec_test"):
+			with patch("payments.views.stripe.Webhook.construct_event", return_value=event):
+				first = self.client_api.post(
+					self.url,
+					data='{"id":"evt_duplicate","type":"customer.created"}',
+					content_type="application/json",
+					HTTP_STRIPE_SIGNATURE="t=1,v1=sig",
+				)
+				second = self.client_api.post(
+					self.url,
+					data='{"id":"evt_duplicate","type":"customer.created"}',
+					content_type="application/json",
+					HTTP_STRIPE_SIGNATURE="t=1,v1=sig",
+				)
+
+		self.assertEqual(first.status_code, status.HTTP_200_OK)
+		self.assertEqual(second.status_code, status.HTTP_200_OK)
+		self.assertEqual(StripeEvent.objects.filter(stripe_event_id="evt_duplicate").count(), 1)
+
+	def test_webhook_endpoint_rejects_payload_with_sensitive_fields(self):
+		event = {
+			"id": "evt_sensitive",
+			"type": "customer.created",
+			"api_version": "2025-01-01",
+			"data": {
+				"object": {
+					"id": "cus_sensitive",
+					"card_number": "4242424242424242",
+					"cvc": "123",
+					"expiry": "12/30",
+					"pin": "9999",
+					"secret_key": getattr(settings, "STRIPE_SECRET_KEY", ""),
+				}
+			},
+		}
+
+		with self.settings(STRIPE_WEBHOOK_SECRET="whsec_test"):
+			with patch("payments.views.stripe.Webhook.construct_event", return_value=event):
+				response = self.client_api.post(
+					self.url,
+					data='{"id":"evt_sensitive","type":"customer.created"}',
+					content_type="application/json",
+					HTTP_STRIPE_SIGNATURE="t=1,v1=sig",
+				)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		stored_event = StripeEvent.objects.get(stripe_event_id="evt_sensitive")
+		payload_text = str(stored_event.payload)
+		self.assertNotIn("4242424242424242", payload_text)
+		self.assertNotIn("123", payload_text)
+		self.assertNotIn("12/30", payload_text)
+		self.assertNotIn("9999", payload_text)

@@ -46,6 +46,7 @@ def _validate_reservation_status(reservation: Reservation) -> None:
     allowed_statuses = {
         Reservation.Status.BROUILLON,
         Reservation.Status.EN_ATTENTE_CAUTION,
+        Reservation.Status.EN_ATTENTE_PAIEMENT,
     }
     if reservation.status not in allowed_statuses:
         _raise_deposit_error(
@@ -105,10 +106,12 @@ def _recalculate_deposit_amount(reservation: Reservation) -> Decimal:
 
 
 def _ensure_vehicle_still_available(reservation: Reservation) -> None:
+    reservation_queryset = Reservation.objects.exclude(pk=reservation.pk)
     if not is_vehicle_available(
         vehicle=reservation.vehicle,
         start=reservation.start_at,
         end=reservation.end_at,
+        reservation_queryset=reservation_queryset,
     ):
         _raise_deposit_error(
             "VEHICLE_UNAVAILABLE",
