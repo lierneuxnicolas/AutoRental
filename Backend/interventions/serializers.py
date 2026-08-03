@@ -79,3 +79,19 @@ class InterventionManagementResponseSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+
+class InterventionWorkerPhotoCreateSerializer(serializers.Serializer):
+    file = serializers.ImageField(required=True)
+    caption = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class InterventionWorkerPhotoResponseSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    file = serializers.ImageField(read_only=True)
+    caption = serializers.CharField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
+class InterventionWorkerCompleteSerializer(serializers.Serializer):
+    report = serializers.CharField(required=False, allow_blank=True, default="")

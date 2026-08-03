@@ -1,6 +1,19 @@
 from django.urls import path
 
-from interventions.views import InterventionManagementAssignView, InterventionManagementCreateListView
+from interventions.views import (
+    CleaningInterventionCompleteView,
+    CleaningInterventionDetailView,
+    CleaningInterventionListView,
+    CleaningInterventionPhotoCreateView,
+    CleaningInterventionStartView,
+    InterventionManagementAssignView,
+    InterventionManagementCreateListView,
+    MechanicInterventionCompleteView,
+    MechanicInterventionDetailView,
+    MechanicInterventionListView,
+    MechanicInterventionPhotoCreateView,
+    MechanicInterventionStartView,
+)
 
 app_name = "interventions"
 
@@ -14,5 +27,55 @@ urlpatterns = [
         "management/interventions/<int:id>/assign/",
         InterventionManagementAssignView.as_view(),
         name="management-interventions-assign",
+    ),
+    path(
+        "mechanic/interventions/",
+        MechanicInterventionListView.as_view(),
+        name="mechanic-interventions-list",
+    ),
+    path(
+        "mechanic/interventions/<int:id>/",
+        MechanicInterventionDetailView.as_view(),
+        name="mechanic-interventions-detail",
+    ),
+    path(
+        "mechanic/interventions/<int:id>/start/",
+        MechanicInterventionStartView.as_view(),
+        name="mechanic-interventions-start",
+    ),
+    path(
+        "mechanic/interventions/<int:id>/photos/",
+        MechanicInterventionPhotoCreateView.as_view(),
+        name="mechanic-interventions-photos",
+    ),
+    path(
+        "mechanic/interventions/<int:id>/complete/",
+        MechanicInterventionCompleteView.as_view(),
+        name="mechanic-interventions-complete",
+    ),
+    path(
+        "cleaning/interventions/",
+        CleaningInterventionListView.as_view(),
+        name="cleaning-interventions-list",
+    ),
+    path(
+        "cleaning/interventions/<int:id>/",
+        CleaningInterventionDetailView.as_view(),
+        name="cleaning-interventions-detail",
+    ),
+    path(
+        "cleaning/interventions/<int:id>/start/",
+        CleaningInterventionStartView.as_view(),
+        name="cleaning-interventions-start",
+    ),
+    path(
+        "cleaning/interventions/<int:id>/photos/",
+        CleaningInterventionPhotoCreateView.as_view(),
+        name="cleaning-interventions-photos",
+    ),
+    path(
+        "cleaning/interventions/<int:id>/complete/",
+        CleaningInterventionCompleteView.as_view(),
+        name="cleaning-interventions-complete",
     ),
 ]
