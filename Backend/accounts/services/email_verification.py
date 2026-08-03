@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.mail import send_mail
 from django.core.signing import BadSignature, SignatureExpired, dumps, loads
+from django.db import transaction
 
 from accounts.models import User
 from notifications.services import create_notification
@@ -83,11 +84,13 @@ def verify_email_verification_token(token):
     user.email_verified = True
     user.save(update_fields=["email_verified"])
 
-    create_notification(
-        user=user,
-        notification_type="EMAIL_VERIFIED",
-        title="Adresse e-mail confirmee",
-        message="Votre adresse e-mail AutoRental a ete confirmee.",
+    transaction.on_commit(
+        lambda: create_notification(
+            user=user,
+            notification_type="EMAIL_VERIFIED",
+            title="Adresse e-mail confirmee",
+            message="Votre adresse e-mail AutoRental a ete confirmee.",
+        )
     )
 
     return user

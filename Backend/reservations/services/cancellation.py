@@ -189,9 +189,10 @@ def cancel_reservation(
         # Sauvegarder uniquement les champs concernés
         reservation_locked.save(update_fields=["status", "cancelled_at", "cancellation_reason", "updated_at"])
 
-        # Créer une notification (une seule, grâce au statut revérifié)
-        try:
-            create_notification(
+        # La notification est créée après commit pour éviter toute incohérence
+        # si la transaction métier est annulée.
+        transaction.on_commit(
+            lambda: create_notification(
                 user=owner,
                 notification_type="RESERVATION_CANCELLED",
                 title="Réservation annulée",
@@ -199,9 +200,6 @@ def cancel_reservation(
                 related_object_type="Reservation",
                 related_object_id=reservation_locked.id,
             )
-        except Exception:
-            # Si la création de notification échoue, on ne bloque pas l'annulation.
-            # Log ou traitement d'erreur supplémentaire peut être ajouté.
-            pass
+        )
 
     return reservation_locked

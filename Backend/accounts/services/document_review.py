@@ -78,13 +78,15 @@ def validate_document(*, document, manager):
         recalculate_profile_status(locked_document.client)
 
         message = f"Votre document {locked_document.document_type} a ete valide."
-        _notify_once(
-            user=locked_document.client.user,
-            notification_type="DOCUMENT_VALIDATED",
-            title="Document valide",
-            message=message,
-            related_object_type="ClientDocument",
-            related_object_id=locked_document.id,
+        transaction.on_commit(
+            lambda: _notify_once(
+                user=locked_document.client.user,
+                notification_type="DOCUMENT_VALIDATED",
+                title="Document valide",
+                message=message,
+                related_object_type="ClientDocument",
+                related_object_id=locked_document.id,
+            )
         )
 
         document.status = locked_document.status
@@ -138,13 +140,15 @@ def reject_document(*, document, manager, reason):
             f"Votre document {locked_document.get_document_type_display()} a ete refuse. "
             f"Motif: {cleaned_reason}"
         )
-        _notify_once(
-            user=locked_document.client.user,
-            notification_type="DOCUMENT_REJECTED",
-            title="Document refuse",
-            message=message,
-            related_object_type="ClientDocument",
-            related_object_id=locked_document.id,
+        transaction.on_commit(
+            lambda: _notify_once(
+                user=locked_document.client.user,
+                notification_type="DOCUMENT_REJECTED",
+                title="Document refuse",
+                message=message,
+                related_object_type="ClientDocument",
+                related_object_id=locked_document.id,
+            )
         )
 
         document.status = locked_document.status
