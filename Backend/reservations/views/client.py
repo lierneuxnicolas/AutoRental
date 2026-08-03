@@ -3,9 +3,11 @@ from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_sche
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import serializers
 
 from accounts.models import ClientProfile
 from accounts.permissions import IsClient, IsReservationOwner
+from interventions.services.vehicle_access import VehicleAccessError, lock_vehicle, unlock_vehicle
 from payments.services import (
     DepositAuthorizationError,
     PaymentIntentError,
@@ -30,6 +32,57 @@ from vehicles.models import Vehicle
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou d'autorisation.")
+
+
+class VehicleAccessActionResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(read_only=True)
+    state = serializers.CharField(read_only=True)
+    timestamp = serializers.DateTimeField(read_only=True)
+
+
+class VehicleAccessActionRequestSerializer(serializers.Serializer):
+    def to_internal_value(self, data):
+        if hasattr(data, "keys"):
+            keys = sorted(data.keys())
+            if keys:
+                raise serializers.ValidationError(
+                    {field: ["Ce champ n'est pas autorise."] for field in keys}
+                )
+        return {}
+
+
+def _client_request_context(request):
+    meta = getattr(request, "META", {}) or {}
+    forwarded_for = meta.get("HTTP_X_FORWARDED_FOR")
+    ip_address = None
+
+    if isinstance(forwarded_for, str) and forwarded_for.strip():
+        ip_address = forwarded_for.split(",")[0].strip() or None
+    if ip_address is None:
+        remote_addr = meta.get("REMOTE_ADDR")
+        if isinstance(remote_addr, str):
+            ip_address = remote_addr.strip() or None
+
+    user_agent = request.headers.get("User-Agent") if hasattr(request, "headers") else None
+    if isinstance(user_agent, str):
+        user_agent = user_agent.strip()[:512] or None
+    else:
+        user_agent = None
+
+    return {
+        "ip_address": ip_address,
+        "user_agent": user_agent,
+    }
+
+
+def _reservation_access_error_response(exc: VehicleAccessError):
+    detail = {"code": exc.code, "message": exc.message}
+    status_code = exc.http_status or status.HTTP_400_BAD_REQUEST
+
+    if exc.code == "NOT_OWNER":
+        status_code = status.HTTP_404_NOT_FOUND
+
+    return Response(detail, status=status_code)
 
 
 class ReservationClientListCreateView(generics.ListCreateAPIView):
@@ -405,3 +458,119 @@ class ReservationClientPaymentIntentView(generics.GenericAPIView):
 
         response_serializer = ReservationPaymentIntentResponseSerializer(result)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class ReservationUnlockView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsClient]
+    serializer_class = VehicleAccessActionRequestSerializer
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return Reservation.objects.select_related("client", "client__user", "vehicle")
+
+    def get_object(self):
+        queryset = self.get_queryset()
+        return get_object_or_404(queryset, pk=self.kwargs[self.lookup_url_kwarg])
+
+    @extend_schema(
+        tags=["Vehicle Access"],
+        description=(
+            "Simulation logicielle de deverrouillage. Aucun dispositif physique n'est contacte. "
+            "L'acces depend de la reservation et de l'etat des lieux initial. Toutes les tentatives authentifiees "
+            "sont journalisees cote backend."
+        ),
+        request=VehicleAccessActionRequestSerializer,
+        responses={
+            200: VehicleAccessActionResponseSerializer,
+            400: ErrorDetailResponseSerializer,
+            401: ErrorDetailResponseSerializer,
+            403: ErrorDetailResponseSerializer,
+            404: ErrorDetailResponseSerializer,
+            409: ErrorDetailResponseSerializer,
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        reservation = self.get_object()
+
+        try:
+            result = unlock_vehicle(
+                reservation=reservation,
+                requested_by=request.user,
+                request_context=_client_request_context(request),
+            )
+        except VehicleAccessError as exc:
+            return _reservation_access_error_response(exc)
+
+        return Response(
+            {
+                "message": "Véhicule déverrouillé.",
+                "state": result["state"],
+                "timestamp": result["unlocked_at"],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ReservationLockView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsClient]
+    serializer_class = VehicleAccessActionRequestSerializer
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return Reservation.objects.select_related("client", "client__user", "vehicle")
+
+    def get_object(self):
+        queryset = self.get_queryset()
+        return get_object_or_404(queryset, pk=self.kwargs[self.lookup_url_kwarg])
+
+    @extend_schema(
+        tags=["Vehicle Access"],
+        description=(
+            "Simulation logicielle de verrouillage. Aucun dispositif physique n'est contacte. "
+            "L'acces depend de la reservation et de l'etat des lieux initial. Toutes les tentatives authentifiees "
+            "sont journalisees cote backend."
+        ),
+        request=VehicleAccessActionRequestSerializer,
+        responses={
+            200: VehicleAccessActionResponseSerializer,
+            400: ErrorDetailResponseSerializer,
+            401: ErrorDetailResponseSerializer,
+            403: ErrorDetailResponseSerializer,
+            404: ErrorDetailResponseSerializer,
+            409: ErrorDetailResponseSerializer,
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        reservation = self.get_object()
+
+        try:
+            result = lock_vehicle(
+                reservation=reservation,
+                requested_by=request.user,
+                request_context=_client_request_context(request),
+            )
+        except VehicleAccessError as exc:
+            return _reservation_access_error_response(exc)
+
+        return Response(
+            {
+                "message": "Véhicule verrouillé.",
+                "state": result["state"],
+                "timestamp": result["locked_at"],
+            },
+            status=status.HTTP_200_OK,
+        )
