@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
@@ -14,7 +15,10 @@ from rest_framework.test import APIClient
 from accounts.models import ClientProfile, Role
 from inspections.models import Inspection
 from interventions.admin import LockingLogAdmin
-from interventions.models import LockingLog, VehicleAccess
+from interventions.models import Intervention, LockingLog, TechnicalInspection, TechnicalPhoto, VehicleAccess
+from interventions.services import assign_intervention
+from interventions.services.assignment import InterventionAssignmentError
+from interventions.services.workflow import InterventionWorkflowServiceError, complete_intervention
 from interventions.services.vehicle_access import (
 	VehicleAccessError,
 	VehicleAccessLifecycleError,
@@ -23,6 +27,7 @@ from interventions.services.vehicle_access import (
 	lock_vehicle,
 	unlock_vehicle,
 )
+from notifications.models import Notification
 from reservations.models import Reservation
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory
 
@@ -35,6 +40,8 @@ class VehicleAccessTestDataMixin:
 		cls.role_client = Role.objects.create(code=Role.Code.CLIENT, label="Client")
 		cls.role_manager = Role.objects.create(code=Role.Code.GESTIONNAIRE_COMPTABLE, label="Gestionnaire")
 		cls.role_admin = Role.objects.create(code=Role.Code.ADMINISTRATEUR, label="Administrateur")
+		cls.role_mechanic = Role.objects.create(code=Role.Code.MECANICIEN, label="Mecanicien")
+		cls.role_cleaner = Role.objects.create(code=Role.Code.NETTOYEUR, label="Nettoyeur")
 
 		cls.client_user_1 = User.objects.create_user(
 			email="ia-client-1@example.com",
@@ -73,6 +80,42 @@ class VehicleAccessTestDataMixin:
 			email_verified=True,
 			is_staff=True,
 			is_superuser=True,
+		)
+		cls.mechanic_user_1 = User.objects.create_user(
+			email="ia-mechanic-1@example.com",
+			password="Pass1234!",
+			first_name="Mec",
+			last_name="One",
+			phone="0400000105",
+			role=cls.role_mechanic,
+			email_verified=True,
+		)
+		cls.mechanic_user_2 = User.objects.create_user(
+			email="ia-mechanic-2@example.com",
+			password="Pass1234!",
+			first_name="Mec",
+			last_name="Two",
+			phone="0400000106",
+			role=cls.role_mechanic,
+			email_verified=True,
+		)
+		cls.cleaner_user_1 = User.objects.create_user(
+			email="ia-cleaner-1@example.com",
+			password="Pass1234!",
+			first_name="Clean",
+			last_name="One",
+			phone="0400000107",
+			role=cls.role_cleaner,
+			email_verified=True,
+		)
+		cls.cleaner_user_2 = User.objects.create_user(
+			email="ia-cleaner-2@example.com",
+			password="Pass1234!",
+			first_name="Clean",
+			last_name="Two",
+			phone="0400000108",
+			role=cls.role_cleaner,
+			email_verified=True,
 		)
 
 		adult_birthdate = timezone.localdate() - timedelta(days=25 * 365)
@@ -193,6 +236,42 @@ class VehicleAccessTestDataMixin:
 		return activate_vehicle_access(
 			reservation=reservation,
 			requested_by=requested_by or self.client_user_1,
+		)
+
+	def _create_intervention(
+		self,
+		*,
+		intervention_type=Intervention.Type.MECANIQUE,
+		status_value=Intervention.Status.A_ATTRIBUER,
+		vehicle=None,
+		reservation=None,
+		assigned_to=None,
+		report="",
+		final_cost=None,
+	):
+		reference = f"INT-TEST-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+		return Intervention.objects.create(
+			reference=reference,
+			vehicle=vehicle or self.vehicle_1,
+			reservation=reservation,
+			assigned_to=assigned_to,
+			created_by=self.manager_user,
+			intervention_type=intervention_type,
+			status=status_value,
+			report=report,
+			final_cost=final_cost,
+		)
+
+	@staticmethod
+	def _image_file(name="test-photo.gif"):
+		return SimpleUploadedFile(
+			name,
+			(
+				b"GIF89a\x01\x00\x01\x00\x80\x00\x00"
+				b"\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,"
+				b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+			),
+			content_type="image/gif",
 		)
 
 
@@ -940,4 +1019,455 @@ class LockingLogAdminTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertFalse(self.admin_instance.has_add_permission(request))
 		self.assertFalse(self.admin_instance.has_change_permission(request))
 		self.assertFalse(self.admin_instance.has_delete_permission(request))
+
+
+class InterventionModelTests(VehicleAccessTestDataMixin, TestCase):
+	def test_creation_intervention(self):
+		intervention = self._create_intervention(intervention_type=Intervention.Type.MECANIQUE)
+
+		self.assertEqual(intervention.created_by, self.manager_user)
+		self.assertEqual(intervention.status, Intervention.Status.A_ATTRIBUER)
+		self.assertEqual(intervention.intervention_type, Intervention.Type.MECANIQUE)
+
+	def test_creation_technical_inspection(self):
+		intervention = self._create_intervention(
+			intervention_type=Intervention.Type.MECANIQUE,
+			status_value=Intervention.Status.EN_COURS,
+			assigned_to=self.mechanic_user_1,
+		)
+		technical_inspection = TechnicalInspection.objects.create(
+			intervention=intervention,
+			vehicle=intervention.vehicle,
+			mileage=1540,
+			energy_level_percent=68,
+			observations="Controle visuel avant cloture.",
+		)
+
+		self.assertEqual(technical_inspection.intervention_id, intervention.id)
+		self.assertEqual(technical_inspection.vehicle_id, intervention.vehicle_id)
+		self.assertEqual(technical_inspection.energy_level_percent, 68)
+
+	def test_creation_technical_photo(self):
+		intervention = self._create_intervention(
+			intervention_type=Intervention.Type.MECANIQUE,
+			status_value=Intervention.Status.EN_COURS,
+			assigned_to=self.mechanic_user_1,
+		)
+		technical_inspection = TechnicalInspection.objects.create(
+			intervention=intervention,
+			vehicle=intervention.vehicle,
+			mileage=1540,
+			energy_level_percent=68,
+		)
+		photo = TechnicalPhoto.objects.create(
+			technical_inspection=technical_inspection,
+			file=self._image_file("model-photo.gif"),
+			caption="Photo modele",
+		)
+
+		self.assertEqual(photo.technical_inspection_id, technical_inspection.id)
+		self.assertEqual(photo.caption, "Photo modele")
+
+
+class InterventionAssignmentTests(VehicleAccessTestDataMixin, TestCase):
+	def test_assign_mechanic_accepted_for_mechanical_intervention(self):
+		intervention = self._create_intervention(intervention_type=Intervention.Type.MECANIQUE)
+
+		assign_intervention(
+			intervention=intervention,
+			assigned_user_id=self.mechanic_user_1.id,
+			manager=self.manager_user,
+		)
+		intervention.refresh_from_db()
+
+		self.assertEqual(intervention.assigned_to_id, self.mechanic_user_1.id)
+		self.assertEqual(intervention.status, Intervention.Status.ATTRIBUEE)
+
+	def test_assign_cleaner_accepted_for_cleaning_intervention(self):
+		intervention = self._create_intervention(intervention_type=Intervention.Type.NETTOYAGE)
+
+		assign_intervention(
+			intervention=intervention,
+			assigned_user_id=self.cleaner_user_1.id,
+			manager=self.manager_user,
+		)
+		intervention.refresh_from_db()
+
+		self.assertEqual(intervention.assigned_to_id, self.cleaner_user_1.id)
+		self.assertEqual(intervention.status, Intervention.Status.ATTRIBUEE)
+
+	def test_assign_wrong_role_refused(self):
+		intervention = self._create_intervention(intervention_type=Intervention.Type.MECANIQUE)
+
+		with self.assertRaises(InterventionAssignmentError) as exc:
+			assign_intervention(
+				intervention=intervention,
+				assigned_user_id=self.cleaner_user_1.id,
+				manager=self.manager_user,
+			)
+
+		self.assertEqual(exc.exception.code, "INVALID_ASSIGNEE_ROLE")
+
+
+class InterventionManagementApiTests(VehicleAccessTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+
+	def test_manager_create_intervention(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(
+			"/api/v1/management/interventions/",
+			{
+				"vehicle_id": self.vehicle_1.id,
+				"type": Intervention.Type.MECANIQUE,
+				"description": "Controle freinage",
+			},
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		self.assertEqual(Intervention.objects.count(), 1)
+		created = Intervention.objects.get()
+		self.assertEqual(created.created_by_id, self.manager_user.id)
+
+	def test_manager_assign_intervention(self):
+		intervention = self._create_intervention(intervention_type=Intervention.Type.MECANIQUE)
+		self.client_api.force_authenticate(self.manager_user)
+
+		with self.captureOnCommitCallbacks(execute=True):
+			response = self.client_api.patch(
+				f"/api/v1/management/interventions/{intervention.id}/assign/",
+				{"assigned_user_id": self.mechanic_user_1.id},
+				format="json",
+			)
+
+		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.assigned_to_id, self.mechanic_user_1.id)
+		self.assertEqual(intervention.status, Intervention.Status.ATTRIBUEE)
+
+	def test_manager_list_interventions(self):
+		self._create_intervention(intervention_type=Intervention.Type.MECANIQUE)
+		self._create_intervention(intervention_type=Intervention.Type.NETTOYAGE)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.get("/api/v1/management/interventions/")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(len(response.data), 2)
+
+
+class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+
+	def _assigned_mechanic_intervention(self, *, assigned_to=None, status_value=Intervention.Status.ATTRIBUEE):
+		return self._create_intervention(
+			intervention_type=Intervention.Type.MECANIQUE,
+			status_value=status_value,
+			assigned_to=assigned_to or self.mechanic_user_1,
+		)
+
+	def test_mechanic_sees_only_his_interventions(self):
+		mine = self._assigned_mechanic_intervention(assigned_to=self.mechanic_user_1)
+		self._assigned_mechanic_intervention(assigned_to=self.mechanic_user_2)
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.get("/api/v1/mechanic/interventions/")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		returned_ids = {item["id"] for item in response.data}
+		self.assertEqual(returned_ids, {mine.id})
+
+	def test_mechanic_start_intervention(self):
+		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.ATTRIBUEE)
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.post(f"/api/v1/mechanic/interventions/{intervention.id}/start/", format="json")
+
+		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.status, Intervention.Status.EN_COURS)
+		self.assertIsNotNone(intervention.started_at)
+
+	def test_mechanic_add_photo(self):
+		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.EN_COURS)
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/mechanic/interventions/{intervention.id}/photos/",
+			{"file": self._image_file("mechanic-photo.gif"), "caption": "Avant intervention"},
+			format="multipart",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		self.assertTrue(
+			TechnicalPhoto.objects.filter(
+				technical_inspection__intervention=intervention,
+				caption="Avant intervention",
+			).exists()
+		)
+
+	def test_mechanic_close_intervention(self):
+		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.EN_COURS)
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/mechanic/interventions/{intervention.id}/complete/",
+			{"report": "Intervention terminee"},
+			format="json",
+		)
+
+		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.status, Intervention.Status.TERMINEE)
+		self.assertEqual(intervention.report, "Intervention terminee")
+
+
+class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+
+	def _assigned_cleaning_intervention(self, *, assigned_to=None, status_value=Intervention.Status.ATTRIBUEE):
+		return self._create_intervention(
+			intervention_type=Intervention.Type.NETTOYAGE,
+			status_value=status_value,
+			assigned_to=assigned_to or self.cleaner_user_1,
+		)
+
+	def test_cleaner_sees_only_his_interventions(self):
+		mine = self._assigned_cleaning_intervention(assigned_to=self.cleaner_user_1)
+		self._assigned_cleaning_intervention(assigned_to=self.cleaner_user_2)
+		self.client_api.force_authenticate(self.cleaner_user_1)
+
+		response = self.client_api.get("/api/v1/cleaning/interventions/")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		returned_ids = {item["id"] for item in response.data}
+		self.assertEqual(returned_ids, {mine.id})
+
+	def test_cleaner_start_intervention(self):
+		intervention = self._assigned_cleaning_intervention(status_value=Intervention.Status.ATTRIBUEE)
+		self.client_api.force_authenticate(self.cleaner_user_1)
+
+		response = self.client_api.post(f"/api/v1/cleaning/interventions/{intervention.id}/start/", format="json")
+
+		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.status, Intervention.Status.EN_COURS)
+		self.assertIsNotNone(intervention.started_at)
+
+	def test_cleaner_add_photo(self):
+		intervention = self._assigned_cleaning_intervention(status_value=Intervention.Status.EN_COURS)
+		self.client_api.force_authenticate(self.cleaner_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/cleaning/interventions/{intervention.id}/photos/",
+			{"file": self._image_file("cleaning-photo.gif"), "caption": "Apres nettoyage"},
+			format="multipart",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		self.assertTrue(
+			TechnicalPhoto.objects.filter(
+				technical_inspection__intervention=intervention,
+				caption="Apres nettoyage",
+			).exists()
+		)
+
+	def test_cleaner_close_intervention(self):
+		intervention = self._assigned_cleaning_intervention(status_value=Intervention.Status.EN_COURS)
+		self.client_api.force_authenticate(self.cleaner_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/cleaning/interventions/{intervention.id}/complete/",
+			{"report": "Nettoyage termine"},
+			format="json",
+		)
+
+		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.status, Intervention.Status.TERMINEE)
+		self.assertEqual(intervention.report, "Nettoyage termine")
+
+
+class InterventionWorkflowServiceTests(VehicleAccessTestDataMixin, TestCase):
+	def _prepare_in_progress_intervention_with_active_access(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_1,
+			vehicle=self.vehicle_1,
+			status=Reservation.Status.EN_COURS,
+		)
+		intervention = self._create_intervention(
+			intervention_type=Intervention.Type.MECANIQUE,
+			status_value=Intervention.Status.EN_COURS,
+			assigned_to=self.mechanic_user_1,
+			vehicle=self.vehicle_1,
+			reservation=reservation,
+		)
+		now = timezone.now()
+		VehicleAccess.objects.create(
+			reservation=reservation,
+			vehicle=self.vehicle_1,
+			client=self.client_user_1,
+			status=VehicleAccess.Status.ACTIVE,
+			lock_state=VehicleAccess.LockState.UNLOCKED,
+			valid_from=now - timedelta(hours=1),
+			valid_until=now + timedelta(hours=2),
+			is_active=True,
+		)
+		self.vehicle_1.status = Vehicle.Status.LOUE
+		self.vehicle_1.save(update_fields=["status", "updated_at"])
+		return intervention
+
+	def test_workflow_report_required(self):
+		intervention = self._prepare_in_progress_intervention_with_active_access()
+
+		with self.assertRaises(InterventionWorkflowServiceError) as exc:
+			complete_intervention(
+				intervention=intervention,
+				report="   ",
+				photos=[{"file": self._image_file("workflow-photo.gif")}],
+			)
+
+		self.assertEqual(exc.exception.code, "REPORT_REQUIRED")
+
+	def test_workflow_records_final_cost(self):
+		intervention = self._prepare_in_progress_intervention_with_active_access()
+
+		with self.captureOnCommitCallbacks(execute=True):
+			complete_intervention(
+				intervention=intervention,
+				report="Intervention validee et cloturee.",
+				final_cost=Decimal("149.90"),
+				inspection_mileage=1555,
+				inspection_energy_level_percent=75,
+				inspection_observations="RAS",
+				photos=[{"file": self._image_file("workflow-cost.gif"), "caption": "Photo cout"}],
+			)
+
+		intervention.refresh_from_db()
+		self.assertEqual(intervention.final_cost, Decimal("149.90"))
+
+	def test_workflow_creates_notification_for_manager(self):
+		intervention = self._prepare_in_progress_intervention_with_active_access()
+
+		with self.captureOnCommitCallbacks(execute=True):
+			complete_intervention(
+				intervention=intervention,
+				report="Intervention terminee avec validation requise.",
+				photos=[{"file": self._image_file("workflow-notif.gif"), "caption": "Photo notif"}],
+			)
+
+		self.assertTrue(
+			Notification.objects.filter(
+				user=self.manager_user,
+				notification_type="INTERVENTION_COMPLETED_REVIEW_REQUIRED",
+				related_object_type="Intervention",
+				related_object_id=intervention.id,
+			).exists()
+		)
+
+	def test_workflow_disables_vehicle_access(self):
+		intervention = self._prepare_in_progress_intervention_with_active_access()
+
+		with self.captureOnCommitCallbacks(execute=True):
+			complete_intervention(
+				intervention=intervention,
+				report="Intervention terminee.",
+				photos=[{"file": self._image_file("workflow-access.gif"), "caption": "Photo access"}],
+			)
+
+		access = VehicleAccess.objects.get(reservation=intervention.reservation)
+		self.assertFalse(access.is_active)
+		self.assertEqual(access.status, VehicleAccess.Status.PENDING)
+		self.assertEqual(access.lock_state, VehicleAccess.LockState.LOCKED)
+
+	def test_workflow_keeps_vehicle_status_a_controler(self):
+		intervention = self._prepare_in_progress_intervention_with_active_access()
+
+		with self.captureOnCommitCallbacks(execute=True):
+			complete_intervention(
+				intervention=intervention,
+				report="Vehicule en attente de controle.",
+				photos=[{"file": self._image_file("workflow-vehicle.gif"), "caption": "Photo vehicule"}],
+			)
+
+		intervention.vehicle.refresh_from_db()
+		self.assertEqual(intervention.vehicle.status, Vehicle.Status.A_CONTROLER)
+
+
+class InterventionSecurityApiTests(VehicleAccessTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+
+	def test_mechanic_cannot_access_other_mechanic_intervention(self):
+		other = self._create_intervention(
+			intervention_type=Intervention.Type.MECANIQUE,
+			status_value=Intervention.Status.ATTRIBUEE,
+			assigned_to=self.mechanic_user_2,
+		)
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.get(f"/api/v1/mechanic/interventions/{other.id}/")
+
+		self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+	def test_cleaner_cannot_access_other_cleaner_intervention(self):
+		other = self._create_intervention(
+			intervention_type=Intervention.Type.NETTOYAGE,
+			status_value=Intervention.Status.ATTRIBUEE,
+			assigned_to=self.cleaner_user_2,
+		)
+		self.client_api.force_authenticate(self.cleaner_user_1)
+
+		response = self.client_api.get(f"/api/v1/cleaning/interventions/{other.id}/")
+
+		self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+	def test_client_cannot_access_any_intervention_endpoint(self):
+		intervention = self._create_intervention(intervention_type=Intervention.Type.MECANIQUE)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		responses = [
+			self.client_api.get("/api/v1/management/interventions/"),
+			self.client_api.post(
+				"/api/v1/management/interventions/",
+				{"vehicle_id": self.vehicle_1.id, "type": Intervention.Type.MECANIQUE},
+				format="json",
+			),
+			self.client_api.patch(
+				f"/api/v1/management/interventions/{intervention.id}/assign/",
+				{"assigned_user_id": self.mechanic_user_1.id},
+				format="json",
+			),
+			self.client_api.get("/api/v1/mechanic/interventions/"),
+			self.client_api.post(f"/api/v1/mechanic/interventions/{intervention.id}/start/", format="json"),
+			self.client_api.post(
+				f"/api/v1/mechanic/interventions/{intervention.id}/photos/",
+				{"file": self._image_file("security-mechanic.gif")},
+				format="multipart",
+			),
+			self.client_api.post(
+				f"/api/v1/mechanic/interventions/{intervention.id}/complete/",
+				{"report": "No access"},
+				format="json",
+			),
+			self.client_api.get("/api/v1/cleaning/interventions/"),
+			self.client_api.post(f"/api/v1/cleaning/interventions/{intervention.id}/start/", format="json"),
+			self.client_api.post(
+				f"/api/v1/cleaning/interventions/{intervention.id}/photos/",
+				{"file": self._image_file("security-cleaning.gif")},
+				format="multipart",
+			),
+			self.client_api.post(
+				f"/api/v1/cleaning/interventions/{intervention.id}/complete/",
+				{"report": "No access"},
+				format="json",
+			),
+		]
+
+		for response in responses:
+			self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
