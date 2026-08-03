@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import Any
 
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from accounts.models import Role
 from inspections.models import Damage, Inspection
 from interventions.models import LockingLog, VehicleAccess
 from reservations.models import Reservation
@@ -24,6 +26,324 @@ class VehicleAccessLifecycleError(ValueError):
 
 def _raise_access_error(code: str, message: str) -> None:
     raise VehicleAccessLifecycleError(code=code, message=message)
+
+
+@dataclass(frozen=True)
+class VehicleAccessError(ValueError):
+    code: str
+    message: str
+    http_status: int | None = None
+
+    def __str__(self) -> str:
+        return self.message
+
+
+def _raise_vehicle_access_error(code: str, message: str, *, http_status: int | None = None) -> None:
+    raise VehicleAccessError(code=code, message=message, http_status=http_status)
+
+
+def _extract_audit_context(*, request_context: Any = None) -> tuple[str | None, str | None]:
+    ip_address = None
+    user_agent = None
+
+    if isinstance(request_context, dict):
+        ip_address = request_context.get("ip_address") or request_context.get("ip")
+        user_agent = request_context.get("user_agent")
+
+        headers = request_context.get("headers")
+        if not user_agent and isinstance(headers, dict):
+            user_agent = headers.get("User-Agent") or headers.get("user-agent")
+
+        forwarded = request_context.get("x_forwarded_for") or request_context.get("X-Forwarded-For")
+        if not ip_address and isinstance(forwarded, str):
+            ip_address = forwarded.split(",")[0].strip()
+    else:
+        meta = getattr(request_context, "META", None)
+        if isinstance(meta, dict):
+            forwarded = meta.get("HTTP_X_FORWARDED_FOR")
+            if isinstance(forwarded, str) and forwarded.strip():
+                ip_address = forwarded.split(",")[0].strip()
+            else:
+                ip_address = meta.get("REMOTE_ADDR")
+            user_agent = meta.get("HTTP_USER_AGENT")
+
+    if isinstance(ip_address, str):
+        ip_address = ip_address.strip() or None
+    else:
+        ip_address = None
+
+    if isinstance(user_agent, str):
+        user_agent = user_agent.strip()[:512] or None
+    else:
+        user_agent = None
+
+    return ip_address, user_agent
+
+
+def _assert_unlock_identity(*, requested_by) -> None:
+    if not requested_by or not getattr(requested_by, "is_authenticated", False):
+        _raise_vehicle_access_error(
+            "UNAUTHENTICATED",
+            "Authentification requise.",
+            http_status=401,
+        )
+
+    if not getattr(requested_by, "is_active", False):
+        _raise_vehicle_access_error(
+            "UNAUTHENTICATED",
+            "Compte utilisateur inactif.",
+            http_status=401,
+        )
+
+    role = getattr(requested_by, "role", None)
+    if role is None or role.code != Role.Code.CLIENT:
+        _raise_vehicle_access_error(
+            "INVALID_ROLE",
+            "Seul un client peut declencher le deverrouillage simule.",
+            http_status=403,
+        )
+
+
+def _assert_unlock_business_rules(
+    *,
+    reservation: Reservation,
+    requested_by,
+    vehicle: Vehicle,
+    vehicle_access: VehicleAccess,
+) -> None:
+    if reservation.client.user_id != requested_by.id:
+        _raise_vehicle_access_error(
+            "NOT_OWNER",
+            "Cette reservation n'appartient pas a l'utilisateur authentifie.",
+            http_status=403,
+        )
+
+    if reservation.status != Reservation.Status.EN_COURS:
+        _raise_vehicle_access_error(
+            "INVALID_RESERVATION_STATUS",
+            "La reservation doit etre EN_COURS.",
+            http_status=409,
+        )
+
+    initial_inspection = _find_initial_inspection(reservation=reservation)
+    if initial_inspection is None:
+        _raise_vehicle_access_error(
+            "INITIAL_INSPECTION_REQUIRED",
+            "Inspection INITIAL introuvable.",
+            http_status=409,
+        )
+
+    if initial_inspection.status != Inspection.Status.TERMINE:
+        _raise_vehicle_access_error(
+            "INITIAL_INSPECTION_NOT_COMPLETED",
+            "Inspection INITIAL non terminee.",
+            http_status=409,
+        )
+
+    if _has_blocking_critical_issue(initial_inspection=initial_inspection):
+        _raise_vehicle_access_error(
+            "CRITICAL_ISSUE",
+            "Un probleme critique bloque le deverrouillage.",
+            http_status=409,
+        )
+
+    if vehicle_access.vehicle_id != reservation.vehicle_id:
+        _raise_vehicle_access_error(
+            "WRONG_VEHICLE",
+            "Le vehicule d'acces ne correspond pas a la reservation.",
+            http_status=409,
+        )
+
+    if vehicle_access.client_id != requested_by.id:
+        _raise_vehicle_access_error(
+            "NOT_OWNER",
+            "L'acces vehicule ne correspond pas a l'utilisateur authentifie.",
+            http_status=403,
+        )
+
+    if not vehicle_access.is_active:
+        _raise_vehicle_access_error(
+            "ACCESS_NOT_ACTIVE",
+            "L'acces vehicule est inactif.",
+            http_status=409,
+        )
+
+    if vehicle_access.status != VehicleAccess.Status.ACTIVE:
+        if vehicle_access.status == VehicleAccess.Status.PENDING:
+            _raise_vehicle_access_error(
+                "ACCESS_NOT_STARTED",
+                "L'acces vehicule n'a pas encore demarre.",
+                http_status=409,
+            )
+
+        if vehicle_access.status == VehicleAccess.Status.EXPIRED:
+            _raise_vehicle_access_error(
+                "ACCESS_EXPIRED",
+                "L'acces vehicule a expire.",
+                http_status=409,
+            )
+
+        _raise_vehicle_access_error(
+            "ACCESS_NOT_ACTIVE",
+            "Le statut de l'acces vehicule ne permet pas le deverrouillage.",
+            http_status=409,
+        )
+
+    now = timezone.now()
+    if now < vehicle_access.valid_from:
+        _raise_vehicle_access_error(
+            "ACCESS_NOT_STARTED",
+            "La fenetre de validite n'a pas commence.",
+            http_status=409,
+        )
+
+    if now > vehicle_access.valid_until:
+        _raise_vehicle_access_error(
+            "ACCESS_EXPIRED",
+            "La fenetre de validite est depassee.",
+            http_status=409,
+        )
+
+    if vehicle.id != reservation.vehicle_id or vehicle_access.vehicle_id != vehicle.id:
+        _raise_vehicle_access_error(
+            "WRONG_VEHICLE",
+            "Vehicule cible invalide pour cette reservation.",
+            http_status=409,
+        )
+
+    if vehicle.status != Vehicle.Status.LOUE:
+        _raise_vehicle_access_error(
+            "VEHICLE_NOT_RENTED",
+            "Le vehicule n'est pas en statut LOUE.",
+            http_status=409,
+        )
+
+    if vehicle_access.lock_state == VehicleAccess.LockState.UNLOCKED:
+        _raise_vehicle_access_error(
+            "ALREADY_UNLOCKED",
+            "Le vehicule est deja deverrouille.",
+            http_status=409,
+        )
+
+    if vehicle_access.lock_state != VehicleAccess.LockState.LOCKED:
+        _raise_vehicle_access_error(
+            "ACCESS_NOT_ACTIVE",
+            "Etat de verrouillage invalide.",
+            http_status=409,
+        )
+
+
+def _log_unlock_failure(
+    *,
+    reservation,
+    vehicle,
+    vehicle_access,
+    requested_by,
+    failure: VehicleAccessError,
+    ip_address: str | None,
+    user_agent: str | None,
+) -> None:
+    attempted_reservation_id = getattr(reservation, "id", None)
+
+    with transaction.atomic():
+        LockingLog.objects.create(
+            vehicle_access=vehicle_access,
+            reservation=reservation if getattr(reservation, "id", None) else None,
+            vehicle=vehicle if getattr(vehicle, "id", None) else None,
+            user=requested_by if getattr(requested_by, "is_authenticated", False) else None,
+            action=LockingLog.Action.UNLOCK,
+            result=LockingLog.Result.FAILURE,
+            failure_code=failure.code,
+            failure_message=failure.message,
+            attempted_reservation_id=attempted_reservation_id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            metadata={},
+        )
+
+
+def unlock_vehicle(
+    *,
+    reservation,
+    requested_by,
+    request_context=None,
+):
+    ip_address, user_agent = _extract_audit_context(request_context=request_context)
+    resolved_reservation = reservation
+    resolved_vehicle = getattr(reservation, "vehicle", None)
+    resolved_vehicle_access = None
+
+    try:
+        _assert_unlock_identity(requested_by=requested_by)
+
+        with transaction.atomic():
+            reservation_locked = (
+                Reservation.objects.select_for_update()
+                .select_related("client", "client__user", "vehicle")
+                .get(pk=reservation.pk)
+            )
+            vehicle_locked = Vehicle.objects.select_for_update().get(pk=reservation_locked.vehicle_id)
+            vehicle_access_locked = (
+                VehicleAccess.objects.select_for_update()
+                .select_related("reservation", "vehicle", "client")
+                .filter(reservation=reservation_locked)
+                .first()
+            )
+
+            resolved_reservation = reservation_locked
+            resolved_vehicle = vehicle_locked
+
+            if vehicle_access_locked is None:
+                _raise_vehicle_access_error(
+                    "ACCESS_NOT_FOUND",
+                    "Aucun acces vehicule n'est associe a cette reservation.",
+                    http_status=404,
+                )
+
+            resolved_vehicle_access = vehicle_access_locked
+
+            _assert_unlock_business_rules(
+                reservation=reservation_locked,
+                requested_by=requested_by,
+                vehicle=vehicle_locked,
+                vehicle_access=vehicle_access_locked,
+            )
+
+            unlocked_at = timezone.now()
+            vehicle_access_locked.lock_state = VehicleAccess.LockState.UNLOCKED
+            vehicle_access_locked.last_unlocked_at = unlocked_at
+            vehicle_access_locked.save(update_fields=["lock_state", "last_unlocked_at", "updated_at"])
+
+            LockingLog.objects.create(
+                vehicle_access=vehicle_access_locked,
+                reservation=reservation_locked,
+                vehicle=vehicle_locked,
+                user=requested_by,
+                action=LockingLog.Action.UNLOCK,
+                result=LockingLog.Result.SUCCESS,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                metadata={},
+            )
+
+            return {
+                "state": VehicleAccess.LockState.UNLOCKED,
+                "unlocked_at": unlocked_at,
+            }
+    except VehicleAccessError as exc:
+        try:
+            _log_unlock_failure(
+                reservation=resolved_reservation,
+                vehicle=resolved_vehicle,
+                vehicle_access=resolved_vehicle_access,
+                requested_by=requested_by,
+                failure=exc,
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        except Exception:
+            pass
+        raise
 
 
 def _build_validity_window(*, reservation: Reservation) -> tuple:
