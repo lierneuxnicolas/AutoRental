@@ -6,12 +6,15 @@ from rest_framework.response import Response
 
 from accounts.models import ClientProfile
 from accounts.permissions import IsClient, IsReservationOwner
+from payments.services import DepositAuthorizationError, authorize_deposit
 from reservations.models import Reservation
 from reservations.serializers.reservation import (
     ReservationCancelRequestSerializer,
     ReservationCancelResponseSerializer,
     ReservationCreateRequestSerializer,
     ReservationCreateResponseSerializer,
+    ReservationDepositRequestSerializer,
+    ReservationDepositResponseSerializer,
     ReservationListDetailSerializer,
 )
 from reservations.services import ReservationCreationError, create_draft_reservation
@@ -256,3 +259,83 @@ class ReservationClientCancelView(generics.GenericAPIView):
             "reservation": ReservationListDetailSerializer(cancelled_reservation).data,
         }
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class ReservationClientDepositAuthorizeView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsClient, IsReservationOwner]
+    serializer_class = ReservationDepositRequestSerializer
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return Reservation.objects.filter(client__user=self.request.user).select_related(
+            "client",
+            "client__user",
+            "vehicle",
+            "vehicle__brand",
+            "vehicle__category",
+        )
+
+    def get_object(self):
+        queryset = self.get_queryset()
+        reservation = get_object_or_404(queryset, pk=self.kwargs[self.lookup_url_kwarg])
+        self.check_object_permissions(self.request, reservation)
+        return reservation
+
+    @extend_schema(
+        tags=["Reservations"],
+        description=(
+            "Preautorise la caution d'une reservation via SIMULATED ou STRIPE_TEST. "
+            "Le montant est toujours calcule cote backend. "
+            "Attention: une preautorisation Stripe expire automatiquement."
+        ),
+        request=ReservationDepositRequestSerializer,
+        responses={
+            200: ReservationDepositResponseSerializer,
+            400: ErrorDetailResponseSerializer,
+            401: ErrorDetailResponseSerializer,
+            403: ErrorDetailResponseSerializer,
+            404: ErrorDetailResponseSerializer,
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        reservation = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        mode = serializer.validated_data["mode"]
+
+        try:
+            result = authorize_deposit(
+                reservation=reservation,
+                requested_by=request.user,
+                mode=mode,
+            )
+        except DepositAuthorizationError as exc:
+            detail = {"code": exc.code, "message": exc.message}
+            if exc.details:
+                detail["details"] = exc.details
+            return Response(detail, status=status.HTTP_400_BAD_REQUEST)
+
+        deposit = result["deposit"]
+        updated_reservation = result["reservation"]
+        response_data = {
+            "message": "Caution preautorisee.",
+            "reservation": ReservationListDetailSerializer(updated_reservation).data,
+            "deposit_id": deposit.id,
+            "deposit_mode": deposit.mode,
+            "deposit_status": deposit.status,
+            "deposit_amount": deposit.amount,
+            "currency": deposit.currency,
+            "stripe_payment_intent_id": deposit.stripe_payment_intent_id,
+            "authorization_expires_at": deposit.authorization_expires_at,
+            "authorized_at": deposit.authorized_at,
+            "client_secret": result["client_secret"],
+            "authorization_note": result["authorization_note"],
+        }
+
+        response_serializer = ReservationDepositResponseSerializer(response_data)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)

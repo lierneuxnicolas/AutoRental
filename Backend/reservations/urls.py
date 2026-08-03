@@ -3,6 +3,7 @@ from django.urls import path
 from reservations.views import (
     PriceSimulationView,
     ReservationClientCancelView,
+    ReservationClientDepositAuthorizeView,
     ReservationClientDetailView,
     ReservationClientListCreateView,
     ReservationManagementDetailView,
@@ -15,6 +16,7 @@ urlpatterns = [
     path("simulations/", PriceSimulationView.as_view(), name="price-simulation"),
     path("reservations/", ReservationClientListCreateView.as_view(), name="reservation-list-create"),
     path("reservations/<int:pk>/", ReservationClientDetailView.as_view(), name="reservation-detail"),
+    path("reservations/<int:pk>/deposit/", ReservationClientDepositAuthorizeView.as_view(), name="reservation-deposit-authorize"),
     path("reservations/<int:pk>/cancel/", ReservationClientCancelView.as_view(), name="reservation-cancel"),
     # Management endpoints (point 39F)
     path("management/reservations/", ReservationManagementListView.as_view(), name="management-reservation-list"),
