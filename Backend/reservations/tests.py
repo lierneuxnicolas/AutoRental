@@ -18,6 +18,8 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from accounts.models import ClientDocument, ClientProfile, Role
+from interventions.models import LockingLog, VehicleAccess
+from interventions.services.vehicle_access import activate_vehicle_access
 from notifications.models import Notification
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
@@ -32,6 +34,8 @@ from reservations.views import (
 	ReservationClientPaymentIntentView,
 	ReservationManagementDetailView,
 	ReservationManagementListView,
+	ReservationLockView,
+	ReservationUnlockView,
 )
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory
 
@@ -826,12 +830,16 @@ class ReservationRoutingTests(TestCase):
 		self.assertEqual(reverse("reservations:reservation-deposit-authorize", kwargs={"pk": 1}), "/api/v1/reservations/1/deposit/")
 		self.assertEqual(reverse("reservations:reservation-payment-intent", kwargs={"pk": 1}), "/api/v1/reservations/1/payment-intent/")
 		self.assertEqual(reverse("reservations:reservation-cancel", kwargs={"pk": 1}), "/api/v1/reservations/1/cancel/")
+		self.assertEqual(reverse("reservations:reservation-unlock", kwargs={"pk": 1}), "/api/v1/reservations/1/unlock/")
+		self.assertEqual(reverse("reservations:reservation-lock", kwargs={"pk": 1}), "/api/v1/reservations/1/lock/")
 
 		self.assertIs(resolve("/api/v1/reservations/").func.view_class, ReservationClientListCreateView)
 		self.assertIs(resolve("/api/v1/reservations/1/").func.view_class, ReservationClientDetailView)
 		self.assertIs(resolve("/api/v1/reservations/1/deposit/").func.view_class, ReservationClientDepositAuthorizeView)
 		self.assertIs(resolve("/api/v1/reservations/1/payment-intent/").func.view_class, ReservationClientPaymentIntentView)
 		self.assertIs(resolve("/api/v1/reservations/1/cancel/").func.view_class, ReservationClientCancelView)
+		self.assertIs(resolve("/api/v1/reservations/1/unlock/").func.view_class, ReservationUnlockView)
+		self.assertIs(resolve("/api/v1/reservations/1/lock/").func.view_class, ReservationLockView)
 
 	def test_management_urls_are_configured(self):
 		self.assertEqual(reverse("reservations:management-reservation-list"), "/api/v1/management/reservations/")
@@ -1400,6 +1408,114 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		if payment_before is not None:
 			self.assertEqual(apps.get_model("payments", "Payment").objects.count(), payment_before)
+
+
+class ReservationVehicleAccessTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+
+	def _make_active_access(self, reservation):
+		if reservation.status != Reservation.Status.EN_COURS:
+			reservation.status = Reservation.Status.EN_COURS
+			reservation.confirmed_at = reservation.confirmed_at or timezone.now()
+			reservation.save(update_fields=["status", "confirmed_at", "updated_at"])
+
+		reservation.vehicle.status = Vehicle.Status.LOUE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+
+		inspection, _ = reservation.inspections.get_or_create(
+			inspection_type="INITIAL",
+			defaults={
+				"status": "TERMINE",
+				"completed_at": timezone.now(),
+				"completed_by": self.client_user_1,
+			},
+		)
+		inspection.status = "TERMINE"
+		inspection.completed_at = inspection.completed_at or timezone.now()
+		inspection.completed_by = inspection.completed_by or self.client_user_1
+		inspection.save(update_fields=["status", "completed_at", "completed_by", "updated_at"])
+
+		return activate_vehicle_access(reservation=reservation, requested_by=self.client_user_1)
+
+	def test_unlock_and_lock_routes_are_resolved(self):
+		self.assertEqual(reverse("reservations:reservation-unlock", kwargs={"pk": 1}), "/api/v1/reservations/1/unlock/")
+		self.assertEqual(reverse("reservations:reservation-lock", kwargs={"pk": 1}), "/api/v1/reservations/1/lock/")
+
+	def test_unlock_and_lock_succeed_for_owner_with_active_access(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() - timedelta(hours=1),
+			end_at=timezone.now() + timedelta(hours=3),
+		)
+		self._make_active_access(reservation)
+		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
+		lock_url = reverse("reservations:reservation-lock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		unlock_response = self.client_api.post(unlock_url, format="json")
+		self.assertEqual(unlock_response.status_code, status.HTTP_200_OK)
+		self.assertEqual(unlock_response.data["message"], "Véhicule déverrouillé.")
+		self.assertEqual(unlock_response.data["state"], "UNLOCKED")
+		self.assertIn("timestamp", unlock_response.data)
+
+		lock_response = self.client_api.post(lock_url, format="json")
+		self.assertEqual(lock_response.status_code, status.HTTP_200_OK)
+		self.assertEqual(lock_response.data["message"], "Véhicule verrouillé.")
+		self.assertEqual(lock_response.data["state"], "LOCKED")
+		self.assertIn("timestamp", lock_response.data)
+
+		self.assertTrue(LockingLog.objects.filter(reservation=reservation, result=LockingLog.Result.SUCCESS).exists())
+
+	def test_foreign_reservation_returns_not_owner_without_exposing_details(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_2,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() - timedelta(hours=1),
+			end_at=timezone.now() + timedelta(hours=3),
+		)
+		self._make_active_access(reservation)
+		url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.post(url, format="json")
+
+		self.assertIn(response.status_code, {status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND})
+		self.assertEqual(response.data["code"], "NOT_OWNER")
+		self.assertFalse("reference" in response.data or "vehicle" in response.data)
+
+	def test_lock_without_access_returns_not_found_or_conflict(self):
+		reservation = self._create_reservation(client=self.client_profile_1, status=Reservation.Status.EN_COURS)
+		url = reverse("reservations:reservation-lock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.post(url, format="json")
+
+		self.assertIn(response.status_code, {status.HTTP_404_NOT_FOUND, status.HTTP_409_CONFLICT})
+
+	def test_unlock_rejects_unexpected_payload_fields(self):
+		reservation = self._create_reservation(client=self.client_profile_1, status=Reservation.Status.EN_COURS)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(
+			reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id}),
+			{
+				"vehicle_id": 1,
+				"client_id": 1,
+				"access_id": 1,
+				"state": "UNLOCKED",
+				"pin": "1234",
+			},
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("vehicle_id", response.data)
+		self.assertIn("client_id", response.data)
+		self.assertIn("access_id", response.data)
+		self.assertIn("state", response.data)
+		self.assertIn("pin", response.data)
 
 
 class ReservationDepositAuthorizationTests(ReservationTestDataMixin, TestCase):
