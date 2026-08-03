@@ -8,6 +8,7 @@ from django.utils import timezone
 from accounts.models import Role, User
 from inspections.models import Damage, Inspection, InspectionPhoto
 from inspections.services.departure import DepartureInspectionError
+from interventions.services.vehicle_access import revoke_vehicle_access
 from notifications.services import create_notification
 from reservations.models import Reservation
 from vehicles.models import Vehicle
@@ -282,6 +283,12 @@ def complete_return_inspection(
         ).exists()
         if has_major_or_critical_damage:
             _integrate_intervention_for_major_or_critical_damage(inspection=inspection_locked)
+
+        revoke_vehicle_access(
+            reservation=reservation_locked,
+            requested_by=requested_by,
+            reason="return_inspection_completed",
+        )
 
         client_notification_message = (
             f"L'inspection de retour pour la reservation {reservation_locked.reference} est terminee."

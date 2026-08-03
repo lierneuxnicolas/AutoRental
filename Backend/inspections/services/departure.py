@@ -9,6 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from inspections.models import Inspection, InspectionPhoto
+from interventions.services.vehicle_access import activate_vehicle_access
 from notifications.services import create_notification
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
@@ -214,7 +215,10 @@ def _notify_once(*, user, notification_type: str, title: str, message: str, rela
 
 
 def _mark_vehicle_access_ready(*, inspection: Inspection) -> None:
-    """Integration hook for future vehicle unlock/activation after successful departure completion."""
+    activate_vehicle_access(
+        reservation=inspection.reservation,
+        requested_by=inspection.completed_by,
+    )
 
 
 def complete_departure_inspection(
