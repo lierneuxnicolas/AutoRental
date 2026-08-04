@@ -2,11 +2,13 @@ import os
 import uuid
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 from rest_framework import serializers
 
 from accounts.models import ClientDocument
+from notifications.services import create_notification
 
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
@@ -110,7 +112,7 @@ class ClientDocumentCreateSerializer(serializers.ModelSerializer):
         safe_ext = ext.lower()
         uploaded_file.name = f"{uuid.uuid4().hex}{safe_ext}"
 
-        return ClientDocument.objects.create(
+        document = ClientDocument.objects.create(
             client=client_profile,
             document_type=validated_data["document_type"],
             document_number=validated_data["document_number"],
@@ -122,6 +124,31 @@ class ClientDocumentCreateSerializer(serializers.ModelSerializer):
             validated_by=None,
             is_active=True,
         )
+
+        notification_message = (
+            f"Votre document {document.get_document_type_display()} a ete transmis et est en attente de validation."
+        )
+
+        def _notify_document_uploaded_once():
+            if document.client.user.notifications.filter(
+                notification_type="DOCUMENT_UPLOADED",
+                message=notification_message,
+                related_object_type="document",
+                related_object_id=document.id,
+            ).exists():
+                return
+
+            create_notification(
+                user=document.client.user,
+                notification_type="DOCUMENT_UPLOADED",
+                title="Document transmis",
+                message=notification_message,
+                related_object_type="document",
+                related_object_id=document.id,
+            )
+
+        transaction.on_commit(_notify_document_uploaded_once)
+        return document
 
 
 class ManagerClientDocumentListSerializer(serializers.ModelSerializer):

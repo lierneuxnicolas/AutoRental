@@ -34,13 +34,20 @@ class EmailVerificationTests(APITestCase):
     def test_email_verification_with_valid_token(self):
         token = generate_email_verification_token(self.user)
 
-        response = self.client.post(self.url, {"token": token}, format="json")
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(self.url, {"token": token}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.user.refresh_from_db()
         self.assertTrue(self.user.email_verified)
         self.assertTrue(
-            Notification.objects.filter(user=self.user, notification_type="EMAIL_VERIFIED").exists()
+            Notification.objects.filter(
+                user=self.user,
+                notification_type="EMAIL_VERIFIED",
+                title="Adresse e-mail confirmee",
+                related_object_type="user",
+                related_object_id=self.user.id,
+            ).exists()
         )
 
     def test_email_verification_rejects_invalid_token(self):
@@ -63,11 +70,16 @@ class EmailVerificationTests(APITestCase):
 
     def test_email_verification_rejects_reused_token(self):
         token = generate_email_verification_token(self.user)
-        first = self.client.post(self.url, {"token": token}, format="json")
+        with self.captureOnCommitCallbacks(execute=True):
+            first = self.client.post(self.url, {"token": token}, format="json")
         second = self.client.post(self.url, {"token": token}, format="json")
 
         self.assertEqual(first.status_code, status.HTTP_200_OK)
         self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            Notification.objects.filter(user=self.user, notification_type="EMAIL_VERIFIED").count(),
+            1,
+        )
 
     def test_email_verification_rejects_token_for_old_email(self):
         token = generate_email_verification_token(self.user)

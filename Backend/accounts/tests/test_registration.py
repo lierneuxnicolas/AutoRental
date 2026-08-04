@@ -46,7 +46,13 @@ class RegistrationTests(APITestCase):
 
         self.assertTrue(ClientProfile.objects.filter(user=user).exists())
         self.assertTrue(
-            Notification.objects.filter(user=user, notification_type="ACCOUNT_CREATED").exists()
+            Notification.objects.filter(
+                user=user,
+                notification_type="ACCOUNT_CREATED",
+                title="Compte cree",
+                related_object_type="user",
+                related_object_id=user.id,
+            ).exists()
         )
 
     def test_registration_sends_verification_email(self):

@@ -36,7 +36,9 @@ def register_client_user(*, email, password, first_name, last_name, phone=""):
             user=user,
             notification_type="ACCOUNT_CREATED",
             title="Compte cree",
-            message="Votre compte AutoRental a ete cree. Confirmez votre adresse e-mail.",
+            message="Votre compte AutoRental a ete cree. Confirmez maintenant votre adresse e-mail.",
+            related_object_type="user",
+            related_object_id=user.id,
         )
     )
 

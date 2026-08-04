@@ -4,10 +4,12 @@ import os
 import uuid
 
 from django.conf import settings
+from django.db import transaction
 from PIL import Image, UnidentifiedImageError
 from rest_framework import serializers
 
 from inspections.models import Damage, Inspection, InspectionPhoto
+from notifications.services import create_notification
 from reservations.models import Reservation
 
 
@@ -222,5 +224,30 @@ class InspectionDamageCreateSerializer(serializers.ModelSerializer):
 
 		if photo_ids:
 			damage.evidence_photos.set(InspectionPhoto.objects.filter(inspection=inspection, id__in=photo_ids))
+
+		owner = getattr(getattr(inspection.reservation, "client", None), "user", None)
+		if owner is not None:
+			message = (
+				f"Un dommage a ete signale sur votre reservation {inspection.reservation.reference}."
+			)
+
+			def _notify_damage_reported_once():
+				if owner.notifications.filter(
+					notification_type="DAMAGE_REPORTED",
+					related_object_type="damage",
+					related_object_id=damage.id,
+				).exists():
+					return
+
+				create_notification(
+					user=owner,
+					notification_type="DAMAGE_REPORTED",
+					title="Dommage signale",
+					message=message,
+					related_object_type="damage",
+					related_object_id=damage.id,
+				)
+
+			transaction.on_commit(_notify_damage_reported_once)
 
 		return damage

@@ -243,6 +243,21 @@ def complete_intervention(
             "Validation finale gestionnaire requise avant disponibilite."
         )
         managers = list(_resolve_managers_for_notification())
+        assigned_user = locked.assigned_to
+        assigned_message = (
+            f"L'intervention {locked.reference} que vous aviez en charge est terminee."
+        )
+        if assigned_user is not None:
+            transaction.on_commit(
+                lambda: create_notification(
+                    user=assigned_user,
+                    notification_type="INTERVENTION_COMPLETED",
+                    title="Intervention terminee",
+                    message=assigned_message,
+                    related_object_type="Intervention",
+                    related_object_id=locked.id,
+                )
+            )
         transaction.on_commit(
             lambda: [
                 create_notification(

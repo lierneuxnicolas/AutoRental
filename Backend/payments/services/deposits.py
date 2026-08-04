@@ -159,6 +159,26 @@ def _build_idempotency_key(*, deposit: Deposit) -> str:
     return f"deposit_authorize:{deposit.id}:{deposit.amount}:{deposit.currency}"
 
 
+def _notify_deposit_authorized_once(*, reservation: Reservation, deposit: Deposit, owner) -> None:
+    message = f"La caution de votre reservation {reservation.reference} a ete autorisee."
+    existing = owner.notifications.filter(
+        notification_type="DEPOSIT_AUTHORIZED",
+        related_object_type="deposit",
+        related_object_id=deposit.id,
+    ).exists()
+    if existing:
+        return
+
+    create_notification(
+        user=owner,
+        notification_type="DEPOSIT_AUTHORIZED",
+        title="Caution autorisee",
+        message=message,
+        related_object_type="deposit",
+        related_object_id=deposit.id,
+    )
+
+
 def _authorize_simulated(*, reservation: Reservation, deposit: Deposit, owner) -> None:
     now = timezone.now()
     deposit.status = Deposit.Status.AUTORISEE
@@ -184,17 +204,6 @@ def _authorize_simulated(*, reservation: Reservation, deposit: Deposit, owner) -
     if reservation.status == Reservation.Status.BROUILLON:
         reservation.status = Reservation.Status.EN_ATTENTE_PAIEMENT
         reservation.save(update_fields=["status", "updated_at"])
-
-    create_notification(
-        user=owner,
-        notification_type="DEPOSIT_AUTHORIZED",
-        title="Caution preautorisee",
-        message=(
-            f"La caution de la reservation {reservation.reference} a ete preautorisee en mode simulation."
-        ),
-        related_object_type="Reservation",
-        related_object_id=reservation.id,
-    )
 
 
 def _authorize_stripe_test(*, reservation: Reservation, deposit: Deposit) -> str | None:
@@ -298,6 +307,14 @@ def authorize_deposit(
                 reservation=reservation_locked,
                 deposit=deposit,
             )
+
+        transaction.on_commit(
+            lambda: _notify_deposit_authorized_once(
+                reservation=reservation_locked,
+                deposit=deposit,
+                owner=client_profile.user,
+            )
+        )
 
     # Important: Stripe manual authorization has a limited validity window.
     # This endpoint does not guarantee a long-term hold until a distant rental date.

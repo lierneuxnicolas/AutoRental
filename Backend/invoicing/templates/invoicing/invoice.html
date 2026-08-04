@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Facture {{ invoice.number }}</title>
+  <style>
+    @page { size: A4; margin: 16mm; }
+    body { font-family: sans-serif; color: #1f2937; font-size: 12px; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .brand { font-size: 22px; font-weight: 700; color: #0f172a; }
+    .muted { color: #6b7280; }
+    .section { margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #d1d5db; padding: 8px; }
+    th { background: #f3f4f6; text-align: left; }
+    .right { text-align: right; }
+    .totals { width: 45%; margin-left: auto; margin-top: 16px; }
+    .totals td { border: none; padding: 4px 0; }
+    .totals .strong { font-weight: 700; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="brand">AutoRental</div>
+      <div class="muted">Facture client</div>
+    </div>
+    <div>
+      <div><strong>Numero:</strong> {{ invoice.number }}</div>
+      <div><strong>Date d'emission:</strong> {{ invoice.issue_date }}</div>
+      <div><strong>Statut:</strong> {{ invoice.get_status_display }}</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div><strong>Facture a :</strong></div>
+    <div>{{ invoice.billing_name }}</div>
+    <div>{{ invoice.billing_address|linebreaksbr }}</div>
+  </div>
+
+  <div class="section">
+    <div><strong>Reservation:</strong> {{ invoice.reservation.reference }}</div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Description</th>
+        <th>Type</th>
+        <th class="right">Quantite</th>
+        <th class="right">Prix unitaire</th>
+        <th class="right">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+      <tr>
+        <td>{{ line.description }}</td>
+        <td>{{ line.get_line_type_display }}</td>
+        <td class="right">{{ line.quantity }}</td>
+        <td class="right">{{ line.unit_price }} {{ invoice.currency }}</td>
+        <td class="right">{{ line.total_price }} {{ invoice.currency }}</td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="5" class="muted">Aucune ligne de facturation.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <table class="totals">
+    <tr>
+      <td>Sous-total</td>
+      <td class="right">{{ invoice.subtotal }} {{ invoice.currency }}</td>
+    </tr>
+    <tr>
+      <td>Taxes</td>
+      <td class="right">{{ invoice.tax_amount }} {{ invoice.currency }}</td>
+    </tr>
+    <tr class="strong">
+      <td>Total</td>
+      <td class="right">{{ invoice.total_amount }} {{ invoice.currency }}</td>
+    </tr>
+  </table>
+</body>
+</html>

@@ -74,7 +74,6 @@ def _parse_stripe_currency(currency: Any) -> str:
 def _notify_once(*, user, notification_type: str, title: str, message: str, related_object_type: str, related_object_id: int):
     existing = user.notifications.filter(
         notification_type=notification_type,
-        message=message,
         related_object_type=related_object_type,
         related_object_id=related_object_id,
     ).exists()
@@ -265,19 +264,46 @@ def _handle_success(*, payment: Payment, reservation: Reservation, vehicle: Vehi
         vehicle.status = Vehicle.Status.RESERVE
         vehicle.save(update_fields=["status", "updated_at"])
 
-    _notify_once(
-        user=reservation.client.user,
-        notification_type="PAYMENT_SUCCEEDED",
-        title="Paiement confirme",
-        message=f"Le paiement de votre reservation {reservation.reference} a ete confirme.",
-        related_object_type="Reservation",
-        related_object_id=reservation.id,
+    notification_message = f"Le paiement de votre reservation {reservation.reference} a ete valide."
+    transaction.on_commit(
+        lambda: _notify_once(
+            user=reservation.client.user,
+            notification_type="PAYMENT_SUCCEEDED",
+            title="Paiement reussi",
+            message=notification_message,
+            related_object_type="payment",
+            related_object_id=payment.id,
+        )
+    )
+    transaction.on_commit(
+        lambda: _notify_once(
+            user=reservation.client.user,
+            notification_type="RESERVATION_CONFIRMED",
+            title="Reservation confirmee",
+            message=f"Votre reservation {reservation.reference} est confirmee.",
+            related_object_type="reservation",
+            related_object_id=reservation.id,
+        )
     )
 
     try:
-        create_invoice_for_reservation(reservation)
+        invoice = create_invoice_for_reservation(reservation)
     except InvoiceCreationNotAvailable as exc:
         raise InvoiceIntegrationPending(str(exc)) from exc
+    else:
+        if invoice is not None:
+            invoice_id = getattr(invoice, "id", None)
+            if invoice_id is not None:
+                transaction.on_commit(
+                    lambda: _notify_once(
+                        user=reservation.client.user,
+                        notification_type="INVOICE_AVAILABLE",
+                        title="Facture disponible",
+                        message=f"La facture de votre reservation {reservation.reference} est disponible.",
+                        related_object_type="invoice",
+                        related_object_id=invoice_id,
+                    )
+                )
 
 
 def _handle_failed(*, payment: Payment, reservation: Reservation, payment_intent: dict[str, Any]) -> None:
@@ -306,13 +332,15 @@ def _handle_failed(*, payment: Payment, reservation: Reservation, payment_intent
     reservation.status = Reservation.Status.PAIEMENT_ECHOUE
     reservation.save(update_fields=["status", "updated_at"])
 
-    _notify_once(
-        user=reservation.client.user,
-        notification_type="PAYMENT_FAILED",
-        title="Paiement echoue",
-        message=f"Le paiement de votre reservation {reservation.reference} a echoue.",
-        related_object_type="Reservation",
-        related_object_id=reservation.id,
+    transaction.on_commit(
+        lambda: _notify_once(
+            user=reservation.client.user,
+            notification_type="PAYMENT_FAILED",
+            title="Paiement echoue",
+            message="Votre paiement n'a pas abouti. Veuillez reessayer.",
+            related_object_type="payment",
+            related_object_id=payment.id,
+        )
     )
 
 

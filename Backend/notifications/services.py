@@ -15,8 +15,9 @@ def _clean_text(value, *, field_name: str) -> str:
 
 def _validate_notification_type(notification_type: str) -> str:
     cleaned = _clean_text(notification_type, field_name="notification_type")
-    if cleaned not in Notification.NotificationType.values:
-        raise ValueError("notification_type is invalid")
+    max_length = Notification._meta.get_field("notification_type").max_length
+    if max_length is not None and len(cleaned) > max_length:
+        raise ValueError(f"notification_type cannot exceed {max_length} characters")
     return cleaned
 
 
@@ -52,13 +53,14 @@ def _prepare_related_object_id(related_object_id):
 
 def create_notification(
     *,
-    user,
-    notification_type,
-    title,
-    message,
-    related_object_type=None,
-    related_object_id=None,
-):
+    user: object,
+    notification_type: str,
+    title: str,
+    message: str,
+    related_object_type: str | None = None,
+    related_object_id: int | None = None,
+) -> Notification:
+    """Create and persist one notification for an existing user."""
     validated_user = _validate_user_instance(user)
     validated_type = _validate_notification_type(notification_type)
     cleaned_title = _clean_text(title, field_name="title")
