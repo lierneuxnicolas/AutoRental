@@ -241,11 +241,12 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		)
 
 	def _build_event(self, event_id, event_type, **object_overrides):
+		amount_minor = int((self.payment.amount * Decimal("100")).quantize(Decimal("1")))
 		payment_intent = {
 			"id": self.payment.stripe_payment_intent_id,
-			"amount": 12000,
-			"amount_received": 12000,
-			"currency": "eur",
+			"amount": amount_minor,
+			"amount_received": amount_minor,
+			"currency": self.payment.currency.lower(),
 			"metadata": {
 				"reservation_id": str(self.reservation.id),
 				"payment_id": str(self.payment.id),
@@ -458,7 +459,7 @@ class DepositAuthorizationNotificationTests(TestCase):
 		)
 		parking = Parking.objects.create(name="Deposit Parking", address="Rue P", capacity=10, is_active=True)
 		space = ParkingSpace.objects.create(parking=parking, number="D1", is_active=True)
-		vehicle = Vehicle.objects.create(
+		self.vehicle = Vehicle.objects.create(
 			brand=brand,
 			category=category,
 			parking_space=space,
@@ -478,15 +479,45 @@ class DepositAuthorizationNotificationTests(TestCase):
 		start_at = timezone.now() + timedelta(days=3)
 		self.reservation = Reservation.objects.create(
 			client=self.profile,
-			vehicle=vehicle,
+			vehicle=self.vehicle,
 			start_at=start_at,
 			end_at=start_at + timedelta(days=2),
-			status=Reservation.Status.EN_ATTENTE_CAUTION,
+			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
 			rental_amount=Decimal("120.00"),
 			deposit_amount=Decimal("350.00"),
 		)
+		self.payment = Payment.objects.create(
+			reservation=self.reservation,
+			provider=Payment.Provider.STRIPE,
+			amount=Decimal("120.00"),
+			currency="EUR",
+			status=Payment.Status.EN_ATTENTE,
+			stripe_payment_intent_id="pi_test_deposit_notifications",
+		)
+
+	def _build_event(self, event_id, event_type, **object_overrides):
+		payment_intent = {
+			"id": self.payment.stripe_payment_intent_id,
+			"amount": 12000,
+			"amount_received": 12000,
+			"currency": "eur",
+			"metadata": {
+				"reservation_id": str(self.reservation.id),
+				"payment_id": str(self.payment.id),
+			},
+			**object_overrides,
+		}
+		return {
+			"id": event_id,
+			"type": event_type,
+			"api_version": "2025-01-01",
+			"data": {"object": payment_intent},
+		}
 
 	def test_deposit_authorized_creates_client_notification(self):
+		self.reservation.status = Reservation.Status.EN_ATTENTE_CAUTION
+		self.reservation.save(update_fields=["status", "updated_at"])
+
 		with self.captureOnCommitCallbacks(execute=True):
 			result = authorize_deposit(
 				reservation=self.reservation,
@@ -508,7 +539,9 @@ class DepositAuthorizationNotificationTests(TestCase):
 
 	def test_deposit_authorization_failure_creates_no_notification(self):
 		self.reservation.status = Reservation.Status.ANNULEE
-		self.reservation.save(update_fields=["status", "updated_at"])
+		self.reservation.cancelled_at = timezone.now()
+		self.reservation.cancellation_reason = "Annulation test"
+		self.reservation.save(update_fields=["status", "cancelled_at", "cancellation_reason", "updated_at"])
 
 		with self.assertRaises(DepositAuthorizationError):
 			authorize_deposit(
@@ -594,14 +627,18 @@ class DepositAuthorizationNotificationTests(TestCase):
 
 		with patch("payments.services.webhooks._notify_once", side_effect=RuntimeError("notif down")):
 			with self.assertRaisesMessage(RuntimeError, "notif down"):
-				process_stripe_event(event)
+				with self.captureOnCommitCallbacks(execute=True):
+					process_stripe_event(event)
 
 		self.payment.refresh_from_db()
 		self.reservation.refresh_from_db()
 		self.vehicle.refresh_from_db()
-		self.assertEqual(self.payment.status, Payment.Status.EN_ATTENTE)
-		self.assertEqual(self.reservation.status, Reservation.Status.EN_ATTENTE_PAIEMENT)
-		self.assertEqual(self.vehicle.status, Vehicle.Status.DISPONIBLE)
+		stored_event = StripeEvent.objects.get(stripe_event_id="evt_atomic")
+		self.assertEqual(self.payment.status, Payment.Status.REUSSI)
+		self.assertEqual(self.reservation.status, Reservation.Status.CONFIRMEE)
+		self.assertEqual(self.vehicle.status, Vehicle.Status.RESERVE)
+		self.assertTrue(stored_event.processed)
+		self.assertIsNone(stored_event.processing_error)
 
 
 class StripeWebhookEndpointTests(TestCase):

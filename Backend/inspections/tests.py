@@ -15,6 +15,7 @@ from accounts.models import Role
 from accounts.tests.utils import create_user, ensure_roles
 from accounts.models import ClientProfile
 from inspections.models import Damage, Inspection, InspectionPhoto
+from interventions.models import VehicleAccess
 from notifications.models import Notification
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
@@ -934,6 +935,19 @@ class ReturnInspectionFlowTests(TestCase):
                 position=0,
             )
 
+    def _create_active_unlocked_vehicle_access(self):
+        now = timezone.now()
+        return VehicleAccess.objects.create(
+            reservation=self.reservation,
+            vehicle=self.vehicle,
+            client=self.client_user,
+            status=VehicleAccess.Status.ACTIVE,
+            lock_state=VehicleAccess.LockState.UNLOCKED,
+            valid_from=now - timedelta(hours=1),
+            valid_until=now + timedelta(hours=1),
+            is_active=True,
+        )
+
     def test_creates_final_inspection_in_draft(self):
         self.api.force_authenticate(self.client_user)
         response = self.api.post(self._create_return_url(self.reservation.id), {}, format="json")
@@ -999,6 +1013,7 @@ class ReturnInspectionFlowTests(TestCase):
             status=Inspection.Status.EN_COURS,
         )
         self._create_required_photos(final_inspection)
+        self._create_active_unlocked_vehicle_access()
         self.api.force_authenticate(self.client_user)
 
         with self.captureOnCommitCallbacks(execute=True):
@@ -1048,6 +1063,7 @@ class ReturnInspectionFlowTests(TestCase):
             status=Inspection.Status.EN_COURS,
         )
         self._create_required_photos(final_inspection)
+        self._create_active_unlocked_vehicle_access()
         self.api.force_authenticate(self.client_user)
 
         with self.captureOnCommitCallbacks(execute=True):
@@ -1106,6 +1122,7 @@ class ReturnInspectionFlowTests(TestCase):
             status=Inspection.Status.EN_COURS,
         )
         self._create_required_photos(final_inspection)
+        self._create_active_unlocked_vehicle_access()
         self.api.force_authenticate(self.client_user)
 
         response = self.api.post(
@@ -1123,6 +1140,7 @@ class ReturnInspectionFlowTests(TestCase):
             inspection_type=Inspection.Type.FINAL,
             status=Inspection.Status.EN_COURS,
         )
+        self._create_active_unlocked_vehicle_access()
         self.api.force_authenticate(self.client_user)
 
         response = self.api.post(
@@ -1143,6 +1161,7 @@ class ReturnInspectionFlowTests(TestCase):
             critical_issue_description="Impact visible",
         )
         self._create_required_photos(final_inspection)
+        self._create_active_unlocked_vehicle_access()
         self.api.force_authenticate(self.client_user)
 
         response = self.api.post(
@@ -1163,6 +1182,7 @@ class ReturnInspectionFlowTests(TestCase):
             critical_issue_description="Impact visible",
         )
         self._create_required_photos(final_inspection)
+        self._create_active_unlocked_vehicle_access()
         Damage.objects.create(
             inspection=final_inspection,
             vehicle=self.vehicle,
@@ -1190,6 +1210,7 @@ class ReturnInspectionFlowTests(TestCase):
             status=Inspection.Status.EN_COURS,
         )
         self._create_required_photos(final_inspection)
+        self._create_active_unlocked_vehicle_access()
         Damage.objects.create(
             inspection=final_inspection,
             vehicle=self.vehicle,
