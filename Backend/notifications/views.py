@@ -5,6 +5,7 @@ from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from notifications.models import Notification
 from notifications.serializers import NotificationSerializer
@@ -39,6 +40,7 @@ ErrorResponseSerializer = inline_serializer(
 
 
 class NotificationListView(generics.ListAPIView):
+	authentication_classes = [JWTAuthentication]
 	permission_classes = [IsAuthenticated]
 	serializer_class = NotificationSerializer
 	filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -115,6 +117,7 @@ class NotificationListView(generics.ListAPIView):
 
 
 class NotificationUnreadCountView(APIView):
+	authentication_classes = [JWTAuthentication]
 	permission_classes = [IsAuthenticated]
 
 	@extend_schema(
@@ -131,6 +134,7 @@ class NotificationUnreadCountView(APIView):
 
 
 class NotificationMarkReadView(generics.GenericAPIView):
+	authentication_classes = [JWTAuthentication]
 	permission_classes = [IsAuthenticated]
 	serializer_class = NotificationSerializer
 	lookup_field = "pk"

@@ -237,11 +237,11 @@ def create_draft_reservation(
 
         transaction.on_commit(
             lambda: create_notification(
-            user=client_user,
+                user=client_user,
                 notification_type="RESERVATION_DRAFT_CREATED",
-                title="Réservation créée",
-                message=f"Votre demande de réservation {reference} a été créée et doit encore être payée.",
-                related_object_type="Reservation",
+                title="Reservation creee",
+                message=f"Votre reservation {reference} a ete creee.",
+                related_object_type="reservation",
                 related_object_id=reservation.id,
             )
         )

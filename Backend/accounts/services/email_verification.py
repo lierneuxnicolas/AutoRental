@@ -89,7 +89,9 @@ def verify_email_verification_token(token):
             user=user,
             notification_type="EMAIL_VERIFIED",
             title="Adresse e-mail confirmee",
-            message="Votre adresse e-mail AutoRental a ete confirmee.",
+            message="Votre adresse e-mail AutoRental a bien ete confirmee.",
+            related_object_type="user",
+            related_object_id=user.id,
         )
     )
 

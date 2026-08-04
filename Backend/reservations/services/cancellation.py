@@ -195,9 +195,9 @@ def cancel_reservation(
             lambda: create_notification(
                 user=owner,
                 notification_type="RESERVATION_CANCELLED",
-                title="Réservation annulée",
-                message=f"Votre réservation {reservation_locked.reference} a été annulée.",
-                related_object_type="Reservation",
+                title="Reservation annulee",
+                message=f"Votre reservation {reservation_locked.reference} a ete annulee.",
+                related_object_type="reservation",
                 related_object_id=reservation_locked.id,
             )
         )

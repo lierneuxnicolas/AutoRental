@@ -10,6 +10,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from accounts.models import ClientDocument, ClientProfile, Role
+from notifications.models import Notification
 
 from .utils import create_user, ensure_roles
 
@@ -82,8 +83,20 @@ class ClientDocumentsUploadTests(APITestCase):
 
     def test_accepts_pdf(self):
         self._authenticate()
-        response = self.client.post(self.documents_url, self._payload(self._make_pdf_file(valid=True)))
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(self.documents_url, self._payload(self._make_pdf_file(valid=True)))
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        document = ClientDocument.objects.latest("id")
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.user,
+                notification_type="DOCUMENT_UPLOADED",
+                title="Document transmis",
+                related_object_type="document",
+                related_object_id=document.id,
+            ).exists()
+        )
 
     def test_rejects_forbidden_extension(self):
         self._authenticate()

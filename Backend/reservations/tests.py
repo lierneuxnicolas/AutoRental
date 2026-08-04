@@ -987,6 +987,8 @@ class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
 		self.assertTrue(
 			Notification.objects.filter(
 				notification_type="RESERVATION_DRAFT_CREATED",
+				title="Reservation creee",
+				related_object_type="reservation",
 				related_object_id=reservation.id,
 			).exists()
 		)
@@ -1289,7 +1291,8 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		notif_before = Notification.objects.count()
 		self.client_api.force_authenticate(self.client_user_1)
 
-		response = self.client_api.post(url, {"reason": "Changement de plan"}, format="json")
+		with self.captureOnCommitCallbacks(execute=True):
+			response = self.client_api.post(url, {"reason": "Changement de plan"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		reservation.refresh_from_db()
@@ -1299,6 +1302,8 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		self.assertTrue(
 			Notification.objects.filter(
 				notification_type="RESERVATION_CANCELLED",
+				title="Reservation annulee",
+				related_object_type="reservation",
 				related_object_id=reservation.id,
 			).exists()
 		)

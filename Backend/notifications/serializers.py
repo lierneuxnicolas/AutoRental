@@ -4,11 +4,13 @@ from notifications.models import Notification
 
 
 class NotificationSerializer(serializers.ModelSerializer):
+    type = serializers.CharField(source="notification_type", read_only=True)
+
     class Meta:
         model = Notification
         fields = [
             "id",
-            "notification_type",
+            "type",
             "title",
             "message",
             "is_read",

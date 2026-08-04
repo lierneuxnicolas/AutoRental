@@ -84,7 +84,8 @@ class DocumentManagementEndpointsTests(APITestCase):
         self._authenticate("manager-docs@example.com", "StrongPass123!")
         validate_url = reverse("accounts:management-documents-validate", kwargs={"pk": self.document.pk})
 
-        response = self.client.post(validate_url, {}, format="json")
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(validate_url, {}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.document.refresh_from_db()
@@ -97,6 +98,8 @@ class DocumentManagementEndpointsTests(APITestCase):
             Notification.objects.filter(
                 user=self.client_user,
                 notification_type="DOCUMENT_VALIDATED",
+                title="Document valide",
+                related_object_type="document",
                 related_object_id=self.document.id,
             ).exists()
         )
@@ -116,7 +119,8 @@ class DocumentManagementEndpointsTests(APITestCase):
         self._authenticate("manager-docs@example.com", "StrongPass123!")
         reject_url = reverse("accounts:management-documents-reject", kwargs={"pk": self.document.pk})
 
-        response = self.client.post(reject_url, {"reason": "Document illisible"}, format="json")
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reject_url, {"reason": "Document illisible"}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.document.refresh_from_db()
@@ -131,6 +135,8 @@ class DocumentManagementEndpointsTests(APITestCase):
             Notification.objects.filter(
                 user=self.client_user,
                 notification_type="DOCUMENT_REJECTED",
+                title="Document refuse",
+                related_object_type="document",
                 related_object_id=self.document.id,
             ).exists()
         )
