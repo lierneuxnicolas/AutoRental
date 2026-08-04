@@ -28,14 +28,12 @@ def _raise_access_error(code: str, message: str) -> None:
     raise VehicleAccessLifecycleError(code=code, message=message)
 
 
-@dataclass(frozen=True)
 class VehicleAccessError(ValueError):
-    code: str
-    message: str
-    http_status: int | None = None
-
-    def __str__(self) -> str:
-        return self.message
+    def __init__(self, code: str, message: str, http_status: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.http_status = http_status
 
 
 def _raise_vehicle_access_error(code: str, message: str, *, http_status: int | None = None) -> None:

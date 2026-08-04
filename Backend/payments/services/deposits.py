@@ -163,8 +163,8 @@ def _notify_deposit_authorized_once(*, reservation: Reservation, deposit: Deposi
     message = f"La caution de votre reservation {reservation.reference} a ete autorisee."
     existing = owner.notifications.filter(
         notification_type="DEPOSIT_AUTHORIZED",
-        related_object_type="deposit",
-        related_object_id=deposit.id,
+        related_object_type="reservation",
+        related_object_id=reservation.id,
     ).exists()
     if existing:
         return
@@ -174,8 +174,8 @@ def _notify_deposit_authorized_once(*, reservation: Reservation, deposit: Deposi
         notification_type="DEPOSIT_AUTHORIZED",
         title="Caution autorisee",
         message=message,
-        related_object_type="deposit",
-        related_object_id=deposit.id,
+        related_object_type="reservation",
+        related_object_id=reservation.id,
     )
 
 
@@ -308,12 +308,10 @@ def authorize_deposit(
                 deposit=deposit,
             )
 
-        transaction.on_commit(
-            lambda: _notify_deposit_authorized_once(
-                reservation=reservation_locked,
-                deposit=deposit,
-                owner=client_profile.user,
-            )
+        _notify_deposit_authorized_once(
+            reservation=reservation_locked,
+            deposit=deposit,
+            owner=client_profile.user,
         )
 
     # Important: Stripe manual authorization has a limited validity window.

@@ -109,6 +109,27 @@ def _notify_managers_once(*, notification_type: str, title: str, message: str, r
         )
 
 
+def _notify_once_on_commit(*, user, notification_type: str, title: str, message: str, related_object_type: str, related_object_id: int) -> None:
+    _notify_once(
+        user=user,
+        notification_type=notification_type,
+        title=title,
+        message=message,
+        related_object_type=related_object_type,
+        related_object_id=related_object_id,
+    )
+
+
+def _notify_managers_once_on_commit(*, notification_type: str, title: str, message: str, related_object_type: str, related_object_id: int) -> None:
+    _notify_managers_once(
+        notification_type=notification_type,
+        title=title,
+        message=message,
+        related_object_type=related_object_type,
+        related_object_id=related_object_id,
+    )
+
+
 def _event_to_payload(event: Any) -> dict[str, Any]:
     if hasattr(event, "to_dict_recursive"):
         payload = event.to_dict_recursive()
@@ -222,7 +243,7 @@ def _handle_success(*, payment: Payment, reservation: Reservation, vehicle: Vehi
         reservation.status = Reservation.Status.PAIEMENT_ECHOUE
         reservation.save(update_fields=["status", "updated_at"])
 
-        _notify_managers_once(
+        _notify_managers_once_on_commit(
             notification_type="PAYMENT_CONFLICT",
             title="Conflit apres paiement Stripe",
             message=(
@@ -265,25 +286,21 @@ def _handle_success(*, payment: Payment, reservation: Reservation, vehicle: Vehi
         vehicle.save(update_fields=["status", "updated_at"])
 
     notification_message = f"Le paiement de votre reservation {reservation.reference} a ete valide."
-    transaction.on_commit(
-        lambda: _notify_once(
-            user=reservation.client.user,
-            notification_type="PAYMENT_SUCCEEDED",
-            title="Paiement reussi",
-            message=notification_message,
-            related_object_type="payment",
-            related_object_id=payment.id,
-        )
+    _notify_once_on_commit(
+        user=reservation.client.user,
+        notification_type="PAYMENT_SUCCEEDED",
+        title="Paiement reussi",
+        message=notification_message,
+        related_object_type="payment",
+        related_object_id=payment.id,
     )
-    transaction.on_commit(
-        lambda: _notify_once(
-            user=reservation.client.user,
-            notification_type="RESERVATION_CONFIRMED",
-            title="Reservation confirmee",
-            message=f"Votre reservation {reservation.reference} est confirmee.",
-            related_object_type="reservation",
-            related_object_id=reservation.id,
-        )
+    _notify_once_on_commit(
+        user=reservation.client.user,
+        notification_type="RESERVATION_CONFIRMED",
+        title="Reservation confirmee",
+        message=f"Votre reservation {reservation.reference} est confirmee.",
+        related_object_type="reservation",
+        related_object_id=reservation.id,
     )
 
     try:
@@ -294,15 +311,13 @@ def _handle_success(*, payment: Payment, reservation: Reservation, vehicle: Vehi
         if invoice is not None:
             invoice_id = getattr(invoice, "id", None)
             if invoice_id is not None:
-                transaction.on_commit(
-                    lambda: _notify_once(
-                        user=reservation.client.user,
-                        notification_type="INVOICE_AVAILABLE",
-                        title="Facture disponible",
-                        message=f"La facture de votre reservation {reservation.reference} est disponible.",
-                        related_object_type="invoice",
-                        related_object_id=invoice_id,
-                    )
+                _notify_once_on_commit(
+                    user=reservation.client.user,
+                    notification_type="INVOICE_AVAILABLE",
+                    title="Facture disponible",
+                    message=f"La facture de votre reservation {reservation.reference} est disponible.",
+                    related_object_type="invoice",
+                    related_object_id=invoice_id,
                 )
 
 
@@ -332,15 +347,13 @@ def _handle_failed(*, payment: Payment, reservation: Reservation, payment_intent
     reservation.status = Reservation.Status.PAIEMENT_ECHOUE
     reservation.save(update_fields=["status", "updated_at"])
 
-    transaction.on_commit(
-        lambda: _notify_once(
-            user=reservation.client.user,
-            notification_type="PAYMENT_FAILED",
-            title="Paiement echoue",
-            message="Votre paiement n'a pas abouti. Veuillez reessayer.",
-            related_object_type="payment",
-            related_object_id=payment.id,
-        )
+    _notify_once_on_commit(
+        user=reservation.client.user,
+        notification_type="PAYMENT_FAILED",
+        title="Paiement echoue",
+        message="Votre paiement n'a pas abouti. Veuillez reessayer.",
+        related_object_type="payment",
+        related_object_id=payment.id,
     )
 
 
@@ -368,7 +381,7 @@ def _handle_canceled(*, payment: Payment, reservation: Reservation) -> None:
     reservation.status = Reservation.Status.PAIEMENT_ECHOUE
     reservation.save(update_fields=["status", "updated_at"])
 
-    _notify_once(
+    _notify_once_on_commit(
         user=reservation.client.user,
         notification_type="PAYMENT_CANCELED",
         title="Paiement annule",
