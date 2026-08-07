@@ -202,7 +202,20 @@ class InspectionPhotoCreateView(generics.GenericAPIView):
 
 	@extend_schema(
 		tags=["Inspections"],
-		request={"multipart/form-data": InspectionPhotoCreateSerializer},
+		request={
+			"multipart/form-data": {
+				"type": "object",
+				"properties": {
+					"file": {"type": "string", "format": "binary"},
+					"photo_type": {
+						"type": "string",
+						"enum": [choice[0] for choice in InspectionPhoto.PhotoType.choices],
+					},
+					"position": {"type": "integer", "minimum": 0},
+				},
+				"required": ["file", "photo_type"],
+			}
+		},
 		responses={
 			201: InspectionPhotoReadSerializer,
 			400: ErrorDetailResponseSerializer,

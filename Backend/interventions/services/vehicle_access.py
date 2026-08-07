@@ -342,6 +342,22 @@ def _assert_lock_business_rules(
             http_status=409,
         )
 
+    if reservation.status == Reservation.Status.A_CONTROLER and final_lock:
+        final_inspection = _find_final_inspection(reservation=reservation)
+        if final_inspection is None:
+            _raise_vehicle_access_error(
+                "FINAL_INSPECTION_REQUIRED",
+                "Inspection FINAL introuvable pour le verrouillage final.",
+                http_status=409,
+            )
+
+        if final_inspection.status != Inspection.Status.TERMINE:
+            _raise_vehicle_access_error(
+                "FINAL_INSPECTION_NOT_COMPLETED",
+                "Inspection FINAL non terminee.",
+                http_status=409,
+            )
+
     if vehicle_access.status == VehicleAccess.Status.REVOKED:
         _raise_vehicle_access_error(
             "ACCESS_REVOKED",
@@ -628,6 +644,16 @@ def _find_initial_inspection(*, reservation: Reservation) -> Inspection | None:
         Inspection.objects.filter(
             reservation=reservation,
             inspection_type=Inspection.Type.INITIAL,
+        )
+        .order_by("-completed_at", "-id")
+        .first()
+    )
+
+def _find_final_inspection(*, reservation: Reservation) -> Inspection | None:
+    return (
+        Inspection.objects.filter(
+            reservation=reservation,
+            inspection_type=Inspection.Type.FINAL,
         )
         .order_by("-completed_at", "-id")
         .first()

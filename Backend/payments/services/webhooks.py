@@ -136,7 +136,16 @@ def _event_to_payload(event: Any) -> dict[str, Any]:
         return _sanitize_payload(payload)
     if isinstance(event, dict):
         return _sanitize_payload(event)
-    return _sanitize_payload(dict(event))
+    if hasattr(event, "items"):
+        try:
+            return _sanitize_payload(dict(event.items()))
+        except Exception:
+            pass
+    if hasattr(event, "to_dict"):
+        payload = event.to_dict()
+        if isinstance(payload, dict):
+            return _sanitize_payload(payload)
+    raise StripeWebhookProcessingError("Invalid Stripe event payload.")
 
 
 def _sanitize_payload(payload: Any) -> Any:
@@ -214,7 +223,14 @@ def _is_vehicle_available_for_reservation(reservation: Reservation) -> bool:
     )
 
 
-def _handle_success(*, payment: Payment, reservation: Reservation, vehicle: Vehicle, payment_intent: dict[str, Any]) -> None:
+def _handle_success(
+    *,
+    payment: Payment,
+    reservation: Reservation,
+    vehicle: Vehicle,
+    payment_intent: dict[str, Any],
+    post_commit_actions: list,
+) -> None:
     if payment.status == Payment.Status.REUSSI:
         return
 
@@ -285,40 +301,46 @@ def _handle_success(*, payment: Payment, reservation: Reservation, vehicle: Vehi
         vehicle.status = Vehicle.Status.RESERVE
         vehicle.save(update_fields=["status", "updated_at"])
 
-    notification_message = f"Le paiement de votre reservation {reservation.reference} a ete valide."
-    _notify_once_on_commit(
-        user=reservation.client.user,
-        notification_type="PAYMENT_SUCCEEDED",
-        title="Paiement reussi",
-        message=notification_message,
-        related_object_type="payment",
-        related_object_id=payment.id,
-    )
-    _notify_once_on_commit(
-        user=reservation.client.user,
-        notification_type="RESERVATION_CONFIRMED",
-        title="Reservation confirmee",
-        message=f"Votre reservation {reservation.reference} est confirmee.",
-        related_object_type="reservation",
-        related_object_id=reservation.id,
-    )
-
     try:
         invoice = create_invoice_for_reservation(reservation)
     except InvoiceCreationNotAvailable as exc:
         raise InvoiceIntegrationPending(str(exc)) from exc
-    else:
-        if invoice is not None:
-            invoice_id = getattr(invoice, "id", None)
-            if invoice_id is not None:
-                _notify_once_on_commit(
-                    user=reservation.client.user,
-                    notification_type="INVOICE_AVAILABLE",
-                    title="Facture disponible",
-                    message=f"La facture de votre reservation {reservation.reference} est disponible.",
-                    related_object_type="invoice",
-                    related_object_id=invoice_id,
-                )
+
+    invoice_id = getattr(invoice, "id", None) if invoice is not None else None
+    client_user = reservation.client.user
+    reservation_reference = reservation.reference
+    payment_id = payment.id
+    reservation_id = reservation.id
+
+    def _run_success_notifications() -> None:
+        notification_message = f"Le paiement de votre reservation {reservation_reference} a ete valide."
+        _notify_once(
+            user=client_user,
+            notification_type="PAYMENT_SUCCEEDED",
+            title="Paiement reussi",
+            message=notification_message,
+            related_object_type="payment",
+            related_object_id=payment_id,
+        )
+        _notify_once(
+            user=client_user,
+            notification_type="RESERVATION_CONFIRMED",
+            title="Reservation confirmee",
+            message=f"Votre reservation {reservation_reference} est confirmee.",
+            related_object_type="reservation",
+            related_object_id=reservation_id,
+        )
+        if invoice_id is not None:
+            _notify_once(
+                user=client_user,
+                notification_type="INVOICE_AVAILABLE",
+                title="Facture disponible",
+                message=f"La facture de votre reservation {reservation_reference} est disponible.",
+                related_object_type="invoice",
+                related_object_id=invoice_id,
+            )
+
+    post_commit_actions.append(_run_success_notifications)
 
 
 def _handle_failed(*, payment: Payment, reservation: Reservation, payment_intent: dict[str, Any]) -> None:
@@ -391,7 +413,7 @@ def _handle_canceled(*, payment: Payment, reservation: Reservation) -> None:
     )
 
 
-def _apply_payment_intent_event(*, event_type: str, payment_intent: dict[str, Any]) -> None:
+def _apply_payment_intent_event(*, event_type: str, payment_intent: dict[str, Any], post_commit_actions: list) -> None:
     stripe_payment_intent_id = payment_intent.get("id")
     if not stripe_payment_intent_id:
         raise StripeWebhookProcessingError("Missing payment intent id.")
@@ -403,9 +425,12 @@ def _apply_payment_intent_event(*, event_type: str, payment_intent: dict[str, An
         .first()
     )
     if payment is None:
-        raise StripeWebhookProcessingError("Unknown payment intent.")
+        return
 
-    reservation = Reservation.objects.select_for_update().select_related("client", "client__user", "vehicle", "vehicle__brand", "vehicle__category").get(pk=payment.reservation_id)
+    try:
+        reservation = Reservation.objects.select_for_update().select_related("client", "client__user", "vehicle", "vehicle__brand", "vehicle__category").get(pk=payment.reservation_id)
+    except Reservation.DoesNotExist:
+        return
     vehicle = Vehicle.objects.select_for_update().select_related("brand", "category").get(pk=reservation.vehicle_id)
 
     metadata = _get_object_metadata(payment_intent)
@@ -415,7 +440,13 @@ def _apply_payment_intent_event(*, event_type: str, payment_intent: dict[str, An
         return
 
     if event_type == "payment_intent.succeeded":
-        _handle_success(payment=payment, reservation=reservation, vehicle=vehicle, payment_intent=payment_intent)
+        _handle_success(
+            payment=payment,
+            reservation=reservation,
+            vehicle=vehicle,
+            payment_intent=payment_intent,
+            post_commit_actions=post_commit_actions,
+        )
         return
 
     if event_type == "payment_intent.payment_failed":
@@ -444,8 +475,11 @@ def process_stripe_event(event: Any) -> StripeEvent:
         },
     )
 
+    post_commit_actions: list = []
+    committed = False
     try:
         with transaction.atomic():
+
             stripe_event = StripeEvent.objects.select_for_update().get(stripe_event_id=stripe_event_id)
 
             if stripe_event.processed:
@@ -462,14 +496,24 @@ def process_stripe_event(event: Any) -> StripeEvent:
                 event_object = ((payload.get("data") or {}).get("object") or {})
                 if not isinstance(event_object, dict):
                     raise StripeWebhookProcessingError("Invalid Stripe event object.")
-                _apply_payment_intent_event(event_type=event_type, payment_intent=event_object)
+                _apply_payment_intent_event(
+                    event_type=event_type,
+                    payment_intent=event_object,
+                    post_commit_actions=post_commit_actions,
+                )
 
             stripe_event.processed = True
             stripe_event.processed_at = timezone.now()
             stripe_event.processing_error = None
             stripe_event.save(update_fields=["processed", "processed_at", "processing_error"])
-            return stripe_event
+        committed = True
+        for action in post_commit_actions:
+            action()
+        return stripe_event
     except Exception as exc:
+        if committed:
+            raise
+
         with transaction.atomic():
             stripe_event = StripeEvent.objects.select_for_update().get(stripe_event_id=stripe_event_id)
             stripe_event.processing_error = str(exc)
