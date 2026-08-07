@@ -42,6 +42,8 @@ class ClientDocumentReadSerializer(serializers.ModelSerializer):
 
 
 class ClientDocumentCreateSerializer(serializers.ModelSerializer):
+    file = serializers.FileField()
+
     class Meta:
         model = ClientDocument
         fields = (

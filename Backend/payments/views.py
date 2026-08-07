@@ -1,3 +1,4 @@
+import logging
 import json
 
 import stripe
@@ -10,6 +11,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from payments.services import StripeWebhookProcessingError, process_stripe_event
+
+
+logger = logging.getLogger(__name__)
 
 
 WebhookMessageResponseSerializer = inline_serializer(
@@ -64,11 +68,13 @@ class StripeWebhookView(APIView):
 		try:
 			process_stripe_event(event)
 		except StripeWebhookProcessingError:
+			logger.exception("Stripe webhook processing error.")
 			return Response(
 				{"detail": "Le traitement du webhook a echoue."},
 				status=status.HTTP_500_INTERNAL_SERVER_ERROR,
 			)
 		except Exception:
+			logger.exception("Unexpected Stripe webhook error.")
 			return Response(
 				{"detail": "Le traitement du webhook a echoue."},
 				status=status.HTTP_500_INTERNAL_SERVER_ERROR,

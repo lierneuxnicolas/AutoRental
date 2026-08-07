@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 import stripe
+from django.db.models import Q
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -161,22 +162,34 @@ def _build_idempotency_key(*, deposit: Deposit) -> str:
 
 def _notify_deposit_authorized_once(*, reservation: Reservation, deposit: Deposit, owner) -> None:
     message = f"La caution de votre reservation {reservation.reference} a ete autorisee."
-    existing = owner.notifications.filter(
-        notification_type="DEPOSIT_AUTHORIZED",
-        related_object_type="reservation",
-        related_object_id=reservation.id,
-    ).exists()
-    if existing:
-        return
-
-    create_notification(
-        user=owner,
-        notification_type="DEPOSIT_AUTHORIZED",
-        title="Caution autorisee",
-        message=message,
-        related_object_type="reservation",
-        related_object_id=reservation.id,
+    existing_links = set(
+        owner.notifications.filter(notification_type="DEPOSIT_AUTHORIZED")
+        .filter(
+            Q(related_object_type="deposit", related_object_id=deposit.id)
+            | Q(related_object_type="reservation", related_object_id=reservation.id)
+        )
+        .values_list("related_object_type", "related_object_id")
     )
+
+    if ("deposit", deposit.id) not in existing_links:
+        create_notification(
+            user=owner,
+            notification_type="DEPOSIT_AUTHORIZED",
+            title="Caution autorisee",
+            message=message,
+            related_object_type="deposit",
+            related_object_id=deposit.id,
+        )
+
+    if ("reservation", reservation.id) not in existing_links:
+        create_notification(
+            user=owner,
+            notification_type="DEPOSIT_AUTHORIZED",
+            title="Caution autorisee",
+            message=message,
+            related_object_type="reservation",
+            related_object_id=reservation.id,
+        )
 
 
 def _authorize_simulated(*, reservation: Reservation, deposit: Deposit, owner) -> None:

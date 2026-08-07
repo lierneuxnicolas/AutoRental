@@ -75,6 +75,8 @@ class InspectionPhotoReadSerializer(serializers.ModelSerializer):
 
 
 class InspectionPhotoCreateSerializer(serializers.ModelSerializer):
+	file = serializers.ImageField()
+
 	class Meta:
 		model = InspectionPhoto
 		fields = ["file", "photo_type", "position"]

@@ -44,7 +44,8 @@ class RegistrationTests(APITestCase):
         self.assertTrue(user.check_password("StrongPass123!"))
         self.assertNotEqual(user.password, "StrongPass123!")
 
-        self.assertTrue(ClientProfile.objects.filter(user=user).exists())
+        profile = ClientProfile.objects.get(user=user)
+        self.assertEqual(profile.profile_status, ClientProfile.ProfileStatus.INCOMPLET)
         self.assertTrue(
             Notification.objects.filter(
                 user=user,
@@ -78,6 +79,15 @@ class RegistrationTests(APITestCase):
 
         payload = dict(self.payload)
         payload["email"] = "duplicate@example.com"
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", response.data)
+
+    def test_registration_rejects_invalid_email(self):
+        payload = dict(self.payload)
+        payload["email"] = "not-an-email"
+
         response = self.client.post(self.url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

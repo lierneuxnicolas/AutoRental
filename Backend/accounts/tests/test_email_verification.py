@@ -8,7 +8,10 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from accounts.models import Role
-from accounts.services.email_verification import generate_email_verification_token
+from accounts.services.email_verification import (
+    EMAIL_VERIFICATION_SALT,
+    generate_email_verification_token,
+)
 from notifications.models import Notification
 
 from .utils import ensure_roles
@@ -54,10 +57,33 @@ class EmailVerificationTests(APITestCase):
         response = self.client.post(self.url, {"token": "invalid-token"}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("detail", response.data)
+        self.assertEqual(response.data.get("detail"), "Le jeton de confirmation est invalide.")
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.email_verified)
+        self.assertFalse(
+            Notification.objects.filter(user=self.user, notification_type="EMAIL_VERIFIED").exists()
+        )
 
     def test_email_verification_rejects_expired_token(self):
-        token = generate_email_verification_token(self.user)
+        user_model = get_user_model()
+        expired_user = user_model.objects.create_user(
+            email="expired.token@autorental.local",
+            password="StrongPass123!",
+            first_name="Expired",
+            last_name="Token",
+            phone="0605040302",
+            role=self.roles[Role.Code.CLIENT],
+            email_verified=False,
+            is_active=True,
+        )
+        token = generate_email_verification_token(expired_user)
+
+        # Guardrail: ensure we generated a real, valid token with the production mechanism.
+        from django.core.signing import loads
+
+        payload = loads(token, salt=EMAIL_VERIFICATION_SALT, max_age=86400)
+        self.assertEqual(payload["user_id"], expired_user.id)
+        self.assertEqual(payload["email"], expired_user.email)
 
         with patch(
             "accounts.services.email_verification.loads",
@@ -66,7 +92,12 @@ class EmailVerificationTests(APITestCase):
             response = self.client.post(self.url, {"token": token}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("detail", response.data)
+        self.assertEqual(response.data.get("detail"), "Le lien de confirmation a expire.")
+        expired_user.refresh_from_db()
+        self.assertFalse(expired_user.email_verified)
+        self.assertFalse(
+            Notification.objects.filter(user=expired_user, notification_type="EMAIL_VERIFIED").exists()
+        )
 
     def test_email_verification_rejects_reused_token(self):
         token = generate_email_verification_token(self.user)
@@ -76,6 +107,7 @@ class EmailVerificationTests(APITestCase):
 
         self.assertEqual(first.status_code, status.HTTP_200_OK)
         self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(second.data.get("detail"), "Ce lien de confirmation a deja ete utilise.")
         self.assertEqual(
             Notification.objects.filter(user=self.user, notification_type="EMAIL_VERIFIED").count(),
             1,

@@ -15,7 +15,7 @@ from payments.models import Deposit, Payment
 from reservations.models import Reservation
 from reservations.services.pricing import PricingError, calculate_price_simulation
 from vehicles.models import Vehicle
-from vehicles.services import is_vehicle_available
+from vehicles.services import BOOKABLE_VEHICLE_STATUSES, get_blocking_reservation_statuses
 
 
 @dataclass(frozen=True)
@@ -90,11 +90,32 @@ def _assert_profile_still_valid(reservation: Reservation) -> None:
 
 
 def _assert_vehicle_still_available(reservation: Reservation) -> None:
-    if not is_vehicle_available(
-        vehicle=reservation.vehicle,
-        start=reservation.start_at,
-        end=reservation.end_at,
+    vehicle = reservation.vehicle
+    allowed_statuses = set(BOOKABLE_VEHICLE_STATUSES) | {Vehicle.Status.RESERVE}
+
+    if not (
+        vehicle.is_active
+        and vehicle.brand.is_active
+        and vehicle.category.is_active
+        and vehicle.status in allowed_statuses
     ):
+        _raise_payment_intent_error(
+            "RESERVATION_UNAVAILABLE",
+            "Le vehicule n'est plus disponible pour cette reservation.",
+        )
+
+    has_conflict = (
+        Reservation.objects.filter(
+            vehicle_id=reservation.vehicle_id,
+            status__in=get_blocking_reservation_statuses(),
+            start_at__lt=reservation.end_at,
+            end_at__gt=reservation.start_at,
+        )
+        .exclude(pk=reservation.pk)
+        .exists()
+    )
+
+    if has_conflict:
         _raise_payment_intent_error(
             "RESERVATION_UNAVAILABLE",
             "Le vehicule n'est plus disponible pour cette reservation.",

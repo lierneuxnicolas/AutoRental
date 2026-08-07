@@ -7,7 +7,12 @@ from rest_framework import serializers
 
 from accounts.models import ClientProfile
 from accounts.permissions import IsClient, IsReservationOwner
-from interventions.services.vehicle_access import VehicleAccessError, lock_vehicle, unlock_vehicle
+from interventions.services.vehicle_access import (
+    VehicleAccessError,
+    lock_and_revoke_after_return,
+    lock_vehicle,
+    unlock_vehicle,
+)
 from payments.services import (
     DepositAuthorizationError,
     PaymentIntentError,
@@ -558,11 +563,18 @@ class ReservationLockView(generics.GenericAPIView):
         reservation = self.get_object()
 
         try:
-            result = lock_vehicle(
-                reservation=reservation,
-                requested_by=request.user,
-                request_context=_client_request_context(request),
-            )
+            if reservation.status == Reservation.Status.A_CONTROLER:
+                result = lock_and_revoke_after_return(
+                    reservation=reservation,
+                    requested_by=request.user,
+                    request_context=_client_request_context(request),
+                )
+            else:
+                result = lock_vehicle(
+                    reservation=reservation,
+                    requested_by=request.user,
+                    request_context=_client_request_context(request),
+                )
         except VehicleAccessError as exc:
             return _reservation_access_error_response(exc)
 

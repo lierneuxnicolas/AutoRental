@@ -769,6 +769,13 @@ class VehicleAccessLockServiceTests(VehicleAccessTestDataMixin, TestCase):
 
 	def test_final_lock_after_return_revokes_access_and_logs(self):
 		reservation, access = self._prepare_unlocked_access(status=Reservation.Status.EN_COURS)
+		Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.FINAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=timezone.now(),
+			completed_by=self.client_user_1,
+		)
 		reservation.status = Reservation.Status.A_CONTROLER
 		reservation.save(update_fields=["status", "updated_at"])
 

@@ -2,8 +2,10 @@ from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import override_settings
 from django.urls import reverse
+from datetime import timedelta
 from rest_framework import status
 from rest_framework.test import APITestCase
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import Role
 from accounts.services.email_verification import generate_email_verification_token
@@ -153,6 +155,16 @@ class JwtAuthenticationTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("access", response.data)
+
+    def test_expired_refresh_token(self):
+        refresh = RefreshToken.for_user(self.confirmed_user)
+        refresh.set_exp(lifetime=timedelta(seconds=-1))
+
+        response = self.client.post(self.refresh_url, {"refresh": str(refresh)}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.data.get("code"), "token_not_valid")
+        self.assertNotIn("access", response.data)
 
     def test_logout_blacklists_refresh_and_rejects_future_refresh(self):
         login_response = self.login_confirmed_user()

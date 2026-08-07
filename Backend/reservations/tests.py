@@ -18,6 +18,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from accounts.models import ClientDocument, ClientProfile, Role
+from inspections.models import Inspection
 from interventions.models import LockingLog, VehicleAccess
 from interventions.services.vehicle_access import activate_vehicle_access
 from notifications.models import Notification
@@ -1522,6 +1523,103 @@ class ReservationVehicleAccessTests(ReservationTestDataMixin, TestCase):
 		self.assertIn("state", response.data)
 		self.assertIn("pin", response.data)
 
+	def test_lock_a_controler_with_final_completed_is_allowed(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() - timedelta(hours=3),
+			end_at=timezone.now() - timedelta(minutes=30),
+		)
+		self._make_active_access(reservation)
+		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
+		lock_url = reverse("reservations:reservation-lock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		unlock_response = self.client_api.post(unlock_url, format="json")
+		self.assertEqual(unlock_response.status_code, status.HTTP_200_OK)
+
+		Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.FINAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=timezone.now(),
+			completed_by=self.client_user_1,
+		)
+		reservation.status = Reservation.Status.A_CONTROLER
+		reservation.save(update_fields=["status", "updated_at"])
+
+		response = self.client_api.post(lock_url, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["state"], VehicleAccess.LockState.LOCKED)
+		access = VehicleAccess.objects.get(reservation=reservation)
+		self.assertEqual(access.lock_state, VehicleAccess.LockState.LOCKED)
+		self.assertEqual(access.status, VehicleAccess.Status.REVOKED)
+		self.assertFalse(access.is_active)
+
+	def test_lock_a_controler_without_final_completed_is_refused(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() - timedelta(hours=3),
+			end_at=timezone.now() - timedelta(minutes=30),
+		)
+		self._make_active_access(reservation)
+		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
+		lock_url = reverse("reservations:reservation-lock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		unlock_response = self.client_api.post(unlock_url, format="json")
+		self.assertEqual(unlock_response.status_code, status.HTTP_200_OK)
+
+		reservation.status = Reservation.Status.A_CONTROLER
+		reservation.save(update_fields=["status", "updated_at"])
+
+		response = self.client_api.post(lock_url, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "FINAL_INSPECTION_REQUIRED")
+		self.assertTrue(
+			LockingLog.objects.filter(
+				reservation=reservation,
+				action=LockingLog.Action.LOCK,
+				result=LockingLog.Result.FAILURE,
+				failure_code="FINAL_INSPECTION_REQUIRED",
+			).exists()
+		)
+
+	def test_lock_already_locked_returns_clear_error(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() - timedelta(hours=3),
+			end_at=timezone.now() - timedelta(minutes=30),
+		)
+		self._make_active_access(reservation)
+		lock_url = reverse("reservations:reservation-lock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.post(lock_url, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "ALREADY_LOCKED")
+
+	def test_lock_other_client_reservation_is_refused(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_2,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() - timedelta(hours=3),
+			end_at=timezone.now() - timedelta(minutes=30),
+		)
+		self._make_active_access(reservation)
+		lock_url = reverse("reservations:reservation-lock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.post(lock_url, format="json")
+
+		self.assertIn(response.status_code, {status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND})
+		self.assertEqual(response.data["code"], "NOT_OWNER")
+
 
 class ReservationDepositAuthorizationTests(ReservationTestDataMixin, TestCase):
 	def setUp(self):
@@ -1686,11 +1784,20 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "DEPOSIT_NOT_AUTHORIZED")
 
-	@patch("payments.services.payment_intents.is_vehicle_available", return_value=False)
-	def test_availability_is_rechecked(self, _mock_is_available):
+	@patch(
+		"payments.services.payment_intents._assert_vehicle_still_available",
+		side_effect=Exception(),
+	)
+	def test_availability_is_rechecked(self, _mock_vehicle_check):
 		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
 		self._create_authorized_deposit(reservation)
 		self.client_api.force_authenticate(self.client_user_1)
+
+		from payments.services.payment_intents import PaymentIntentError
+		_mock_vehicle_check.side_effect = PaymentIntentError(
+			code="RESERVATION_UNAVAILABLE",
+			message="Le vehicule n'est plus disponible pour cette reservation.",
+		)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
 			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
@@ -1801,6 +1908,91 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.data["payment_id"], existing.id)
 		self.assertEqual(response.data["client_secret"], "secret_existing")
 		mocked_create.assert_not_called()
+
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_payment_is_allowed_for_its_own_reserved_vehicle(self, mocked_create):
+		reservation = self._create_reservation(
+			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+			vehicle=self.vehicle_reserved,
+		)
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		mocked_create.return_value = SimpleNamespace(
+			id="pi_reserved_ok",
+			status="requires_action",
+			client_secret="secret_reserved_ok",
+		)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["client_secret"], "secret_reserved_ok")
+
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_current_reservation_is_excluded_from_conflict_search(self, mocked_create):
+		start, end = self._period()
+		reservation = self._create_reservation(
+			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+			vehicle=self.vehicle_reserved,
+			start_at=start,
+			end_at=end,
+		)
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		mocked_create.return_value = SimpleNamespace(
+			id="pi_self_ok",
+			status="requires_action",
+			client_secret="secret_self_ok",
+		)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_overlapping_other_reservation_is_still_refused(self, mocked_create):
+		start, end = self._period()
+		reservation = self._create_reservation(
+			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+			vehicle=self.vehicle_reserved,
+			start_at=start,
+			end_at=end,
+		)
+		self._create_authorized_deposit(reservation)
+		self._create_reservation(
+			client=self.client_profile_2,
+			vehicle=self.vehicle_reserved,
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start + timedelta(minutes=15),
+			end_at=end - timedelta(minutes=15),
+		)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "RESERVATION_UNAVAILABLE")
+		mocked_create.assert_not_called()
+
+	def test_non_authorized_deposit_is_still_refused(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		Deposit.objects.create(
+			reservation=reservation,
+			mode=Deposit.Mode.SIMULATED,
+			amount=reservation.deposit_amount,
+			currency="EUR",
+			status=Deposit.Status.EN_ATTENTE,
+		)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "DEPOSIT_NOT_AUTHORIZED")
 
 
 class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase):

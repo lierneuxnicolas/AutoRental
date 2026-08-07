@@ -70,7 +70,18 @@ class ClientDocumentListCreateView(_ClientProfileMixin, generics.ListCreateAPIVi
 
     @extend_schema(
         tags=["Client Documents"],
-        request={"multipart/form-data": ClientDocumentCreateSerializer},
+        request={
+            "multipart/form-data": {
+                "type": "object",
+                "properties": {
+                    "document_type": {"$ref": "#/components/schemas/DocumentTypeEnum"},
+                    "document_number": {"type": "string", "maxLength": 120},
+                    "file": {"type": "string", "format": "binary"},
+                    "expiration_date": {"type": "string", "format": "date", "nullable": True},
+                },
+                "required": ["document_type", "document_number", "file"],
+            }
+        },
         responses={
             201: ClientDocumentReadSerializer,
             400: ErrorDetailResponseSerializer,
