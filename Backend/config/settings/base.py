@@ -158,6 +158,7 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "AutoRental API",
     "DESCRIPTION": "REST API for AutoRental platform",
     "VERSION": "1.0.0",
+    "COMPONENT_SPLIT_REQUEST": True,
 }
 
 

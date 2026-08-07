@@ -24,16 +24,20 @@ Aucun endpoint général n'est créé pour eux.
 
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
-from rest_framework import generics
+from rest_framework import generics, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from accounts.permissions import IsManagerOrAdministrator
 from reservations.models import Reservation
 from reservations.serializers.management import (
     ReservationManagementDetailSerializer,
+    ReservationManagementCompleteRequestSerializer,
+    ReservationManagementCompleteResponseSerializer,
     ReservationManagementListSerializer,
 )
+from reservations.services import ReservationCompletionError, complete_reservation
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou d'autorisation.")
@@ -368,3 +372,54 @@ class ReservationManagementDetailView(generics.RetrieveAPIView):
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+
+
+class ReservationManagementCompleteView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    serializer_class = ReservationManagementCompleteRequestSerializer
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return Reservation.objects.select_related(
+            "client",
+            "client__user",
+            "vehicle",
+            "vehicle__brand",
+            "vehicle__category",
+        )
+
+    @extend_schema(
+        tags=["Reservation Management"],
+        request=ReservationManagementCompleteRequestSerializer,
+        description=(
+            "Cloture une reservation après les vérifications finales. "
+            "La reservation doit être en A_CONTROLER et le véhicule en DISPONIBLE."
+        ),
+        responses={
+            200: ReservationManagementCompleteResponseSerializer,
+            400: ErrorDetailResponseSerializer,
+            401: ErrorDetailResponseSerializer,
+            403: ErrorDetailResponseSerializer,
+            404: ErrorDetailResponseSerializer,
+            409: ErrorDetailResponseSerializer,
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        reservation = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            completed_reservation = complete_reservation(reservation=reservation, requested_by=request.user)
+        except ReservationCompletionError as exc:
+            detail = {"code": exc.code, "message": exc.message}
+            return Response(detail, status=exc.http_status)
+
+        response_serializer = ReservationManagementCompleteResponseSerializer(
+            {"message": "Reservation terminee.", "reservation": completed_reservation}
+        )
+        return Response(response_serializer.data, status=status.HTTP_200_OK)

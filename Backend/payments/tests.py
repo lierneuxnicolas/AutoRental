@@ -577,12 +577,11 @@ class DepositAuthorizationNotificationTests(TestCase):
 			},
 		}
 
-		with self.assertRaisesMessage(Exception, "Unknown payment intent"):
-			process_stripe_event(event)
+		process_stripe_event(event)
 
 		stored_event = StripeEvent.objects.get(stripe_event_id="evt_unknown_payment")
-		self.assertFalse(stored_event.processed)
-		self.assertIn("Unknown payment intent", stored_event.processing_error)
+		self.assertTrue(stored_event.processed)
+		self.assertIsNone(stored_event.processing_error)
 
 	def test_unknown_event_type_is_processed_without_side_effects(self):
 		event = {
@@ -767,8 +766,12 @@ class StripeWebhookEndpointTests(TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(StripeEvent.objects.filter(stripe_event_id="evt_unknown_payment_intent", processed=True).count(), 1)
-		self.assertEqual(Payment.objects.count(), 0)
-		self.assertEqual(Reservation.objects.count(), 0)
+		self.payment.refresh_from_db()
+		self.reservation.refresh_from_db()
+		self.assertEqual(self.payment.status, Payment.Status.EN_ATTENTE)
+		self.assertEqual(self.reservation.status, Reservation.Status.EN_ATTENTE_PAIEMENT)
+		self.assertEqual(Notification.objects.filter(notification_type="PAYMENT_SUCCEEDED").count(), 0)
+		self.assertEqual(Notification.objects.filter(notification_type="RESERVATION_CONFIRMED").count(), 0)
 
 	def test_charge_events_are_ignored_with_http_200(self):
 		for event_type, event_id in (("charge.succeeded", "evt_charge_succeeded"), ("charge.updated", "evt_charge_updated")):
@@ -831,8 +834,8 @@ class StripeWebhookEndpointTests(TestCase):
 					"amount_received": 20000,
 					"currency": "eur",
 					"metadata": {
-						"payment_id": "3",
-						"reservation_id": "2",
+						"payment_id": str(self.payment.id),
+						"reservation_id": str(self.reservation.id),
 					},
 				},
 			},

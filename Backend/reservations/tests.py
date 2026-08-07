@@ -19,7 +19,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import ClientDocument, ClientProfile, Role
 from inspections.models import Inspection
-from interventions.models import LockingLog, VehicleAccess
+from interventions.models import Intervention, LockingLog, VehicleAccess
 from interventions.services.vehicle_access import activate_vehicle_access
 from notifications.models import Notification
 from payments.models import Deposit, Payment
@@ -33,6 +33,7 @@ from reservations.views import (
 	ReservationClientDetailView,
 	ReservationClientListCreateView,
 	ReservationClientPaymentIntentView,
+	ReservationManagementCompleteView,
 	ReservationManagementDetailView,
 	ReservationManagementListView,
 	ReservationLockView,
@@ -848,9 +849,14 @@ class ReservationRoutingTests(TestCase):
 			reverse("reservations:management-reservation-detail", kwargs={"pk": 1}),
 			"/api/v1/management/reservations/1/",
 		)
+		self.assertEqual(
+			reverse("reservations:management-reservation-complete", kwargs={"pk": 1}),
+			"/api/v1/management/reservations/1/complete/",
+		)
 
 		self.assertIs(resolve("/api/v1/management/reservations/").func.view_class, ReservationManagementListView)
 		self.assertIs(resolve("/api/v1/management/reservations/1/").func.view_class, ReservationManagementDetailView)
+		self.assertIs(resolve("/api/v1/management/reservations/1/complete/").func.view_class, ReservationManagementCompleteView)
 
 	def test_simulation_endpoint_is_not_broken(self):
 		self.assertEqual(reverse("reservations:price-simulation"), "/api/v1/simulations/")
@@ -1556,6 +1562,186 @@ class ReservationVehicleAccessTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(access.lock_state, VehicleAccess.LockState.LOCKED)
 		self.assertEqual(access.status, VehicleAccess.Status.REVOKED)
 		self.assertFalse(access.is_active)
+		reservation.refresh_from_db()
+		reservation.vehicle.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.A_CONTROLER)
+		self.assertEqual(reservation.vehicle.status, Vehicle.Status.LOUE)
+		self.assertTrue(
+			LockingLog.objects.filter(
+				reservation=reservation,
+				action=LockingLog.Action.LOCK,
+				result=LockingLog.Result.SUCCESS,
+			).exists()
+		)
+		self.assertTrue(
+			LockingLog.objects.filter(
+				reservation=reservation,
+				action=LockingLog.Action.ACCESS_REVOKED,
+				result=LockingLog.Result.SUCCESS,
+			).exists()
+		)
+
+
+class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+		self.url = lambda reservation_id: reverse("reservations:management-reservation-complete", kwargs={"pk": reservation_id})
+
+	def _make_active_access(self, reservation):
+		if reservation.status != Reservation.Status.EN_COURS:
+			reservation.status = Reservation.Status.EN_COURS
+			reservation.confirmed_at = reservation.confirmed_at or timezone.now()
+			reservation.save(update_fields=["status", "confirmed_at", "updated_at"])
+
+		reservation.vehicle.status = Vehicle.Status.LOUE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+
+		inspection, _ = reservation.inspections.get_or_create(
+			inspection_type="INITIAL",
+			defaults={
+				"status": "TERMINE",
+				"completed_at": timezone.now(),
+				"completed_by": self.client_user_1,
+			},
+		)
+		inspection.status = "TERMINE"
+		inspection.completed_at = inspection.completed_at or timezone.now()
+		inspection.completed_by = inspection.completed_by or self.client_user_1
+		inspection.save(update_fields=["status", "completed_at", "completed_by", "updated_at"])
+
+		return activate_vehicle_access(reservation=reservation, requested_by=self.client_user_1)
+
+	def _prepare_completed_return_workflow(self, reservation):
+		if reservation.status != Reservation.Status.A_CONTROLER:
+			reservation.status = Reservation.Status.A_CONTROLER
+			reservation.save(update_fields=["status", "updated_at"])
+
+		reservation.vehicle.status = Vehicle.Status.DISPONIBLE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+
+		Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.FINAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=timezone.now(),
+			completed_by=self.client_user_1,
+		)
+
+		mechanic = get_user_model().objects.create_user(
+			email="mechanic.complete@example.com",
+			password="password123",
+			first_name="Mech",
+			last_name="Complete",
+		)
+		mechanic.role = self.mechanic_user.role
+		mechanic.save(update_fields=["role"])
+		cleaner = get_user_model().objects.create_user(
+			email="cleaner.complete@example.com",
+			password="password123",
+			first_name="Clean",
+			last_name="Complete",
+		)
+		cleaner.role = self.cleaner_user.role
+		cleaner.save(update_fields=["role"])
+
+		Intervention.objects.create(
+			reservation=reservation,
+			vehicle=reservation.vehicle,
+			created_by=self.manager_user,
+			reference="INT-COMP-001",
+			intervention_type=Intervention.Type.MECANIQUE,
+			status=Intervention.Status.TERMINEE,
+			assigned_to=mechanic,
+			started_at=timezone.now() - timedelta(hours=1),
+			completed_at=timezone.now(),
+		)
+		Intervention.objects.create(
+			reservation=reservation,
+			vehicle=reservation.vehicle,
+			created_by=self.manager_user,
+			reference="INT-COMP-002",
+			intervention_type=Intervention.Type.NETTOYAGE,
+			status=Intervention.Status.TERMINEE,
+			assigned_to=cleaner,
+			started_at=timezone.now() - timedelta(hours=1),
+			completed_at=timezone.now(),
+		)
+
+	def test_management_complete_routes_are_resolved(self):
+		self.assertEqual(reverse("reservations:management-reservation-complete", kwargs={"pk": 1}), "/api/v1/management/reservations/1/complete/")
+		self.assertIs(resolve("/api/v1/management/reservations/1/complete/").func.view_class, ReservationManagementCompleteView)
+
+	def test_manager_can_close_a_controler_reservation_when_vehicle_is_disponible(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.TERMINEE)
+		self.assertEqual(response.data["reservation"]["status"], Reservation.Status.TERMINEE)
+
+	def test_rejects_when_vehicle_is_not_disponible(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		reservation.vehicle.status = Vehicle.Status.LOUE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "VEHICLE_NOT_AVAILABLE")
+
+	def test_rejects_when_final_inspection_is_missing(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		reservation.vehicle.status = Vehicle.Status.DISPONIBLE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "FINAL_INSPECTION_REQUIRED")
+
+	def test_rejects_when_pending_intervention_exists(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		reservation.vehicle.status = Vehicle.Status.DISPONIBLE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+		Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.FINAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=timezone.now(),
+			completed_by=self.client_user_1,
+		)
+		Intervention.objects.create(
+			reservation=reservation,
+			vehicle=reservation.vehicle,
+			created_by=self.manager_user,
+			reference="INT-COMP-003",
+			intervention_type=Intervention.Type.MECANIQUE,
+			status=Intervention.Status.EN_COURS,
+			assigned_to=self.mechanic_user,
+			started_at=timezone.now(),
+		)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "INTERVENTIONS_NOT_COMPLETED")
+
+	def test_rejects_for_non_manager_role(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 	def test_lock_a_controler_without_final_completed_is_refused(self):
 		reservation = self._create_reservation(
@@ -1588,6 +1774,65 @@ class ReservationVehicleAccessTests(ReservationTestDataMixin, TestCase):
 			).exists()
 		)
 
+	def test_lock_a_controler_with_final_not_completed_is_refused(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() - timedelta(hours=3),
+			end_at=timezone.now() - timedelta(minutes=30),
+		)
+		self._make_active_access(reservation)
+		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
+		lock_url = reverse("reservations:reservation-lock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		unlock_response = self.client_api.post(unlock_url, format="json")
+		self.assertEqual(unlock_response.status_code, status.HTTP_200_OK)
+
+		Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.FINAL,
+			status=Inspection.Status.BROUILLON,
+		)
+		reservation.status = Reservation.Status.A_CONTROLER
+		reservation.save(update_fields=["status", "updated_at"])
+
+		response = self.client_api.post(lock_url, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "FINAL_INSPECTION_NOT_COMPLETED")
+
+	def test_lock_a_controler_is_routed_as_final_lock_after_status_refresh(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() - timedelta(hours=3),
+			end_at=timezone.now() - timedelta(minutes=30),
+		)
+		self._make_active_access(reservation)
+		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
+		lock_url = reverse("reservations:reservation-lock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		unlock_response = self.client_api.post(unlock_url, format="json")
+		self.assertEqual(unlock_response.status_code, status.HTTP_200_OK)
+
+		Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.FINAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=timezone.now(),
+			completed_by=self.client_user_1,
+		)
+		stale_reservation = Reservation.objects.get(pk=reservation.pk)
+		Reservation.objects.filter(pk=reservation.pk).update(status=Reservation.Status.A_CONTROLER)
+
+		with patch.object(ReservationLockView, "get_object", return_value=stale_reservation):
+			response = self.client_api.post(lock_url, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["state"], VehicleAccess.LockState.LOCKED)
+
 	def test_lock_already_locked_returns_clear_error(self):
 		reservation = self._create_reservation(
 			client=self.client_profile_1,
@@ -1603,6 +1848,38 @@ class ReservationVehicleAccessTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
 		self.assertEqual(response.data["code"], "ALREADY_LOCKED")
+
+	def test_final_lock_double_call_is_idempotent(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() - timedelta(hours=3),
+			end_at=timezone.now() - timedelta(minutes=30),
+		)
+		self._make_active_access(reservation)
+		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
+		lock_url = reverse("reservations:reservation-lock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		unlock_response = self.client_api.post(unlock_url, format="json")
+		self.assertEqual(unlock_response.status_code, status.HTTP_200_OK)
+
+		Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.FINAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=timezone.now(),
+			completed_by=self.client_user_1,
+		)
+		reservation.status = Reservation.Status.A_CONTROLER
+		reservation.save(update_fields=["status", "updated_at"])
+
+		first_response = self.client_api.post(lock_url, format="json")
+		second_response = self.client_api.post(lock_url, format="json")
+
+		self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+		self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+		self.assertEqual(second_response.data["state"], VehicleAccess.LockState.LOCKED)
 
 	def test_lock_other_client_reservation_is_refused(self):
 		reservation = self._create_reservation(

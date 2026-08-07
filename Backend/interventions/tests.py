@@ -1,10 +1,13 @@
 from datetime import timedelta
 from decimal import Decimal
+import os
+import tempfile
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.db import IntegrityError
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
@@ -248,8 +251,11 @@ class VehicleAccessTestDataMixin:
 		assigned_to=None,
 		report="",
 		final_cost=None,
+		started_at=None,
 	):
 		reference = f"INT-TEST-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+		if status_value in (Intervention.Status.EN_COURS, Intervention.Status.TERMINEE) and started_at is None:
+			started_at = timezone.now()
 		return Intervention.objects.create(
 			reference=reference,
 			vehicle=vehicle or self.vehicle_1,
@@ -260,6 +266,7 @@ class VehicleAccessTestDataMixin:
 			status=status_value,
 			report=report,
 			final_cost=final_cost,
+			started_at=started_at,
 		)
 
 	@staticmethod
@@ -273,6 +280,19 @@ class VehicleAccessTestDataMixin:
 			),
 			content_type="image/gif",
 		)
+
+	@staticmethod
+	def _temporary_image_file(name="test-photo.gif"):
+		content = (
+			b"GIF89a\x01\x00\x01\x00\x80\x00\x00"
+			b"\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,"
+			b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+		)
+		with tempfile.NamedTemporaryFile(suffix=".gif") as temp_file:
+			temp_file.write(content)
+			temp_file.flush()
+			temp_file.seek(0)
+			return SimpleUploadedFile(name, temp_file.read(), content_type="image/gif")
 
 
 class VehicleAccessModelTests(VehicleAccessTestDataMixin, TestCase):
@@ -1216,8 +1236,38 @@ class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 			).exists()
 		)
 
+	def test_mechanic_photo_upload_schema_and_multipart_request(self):
+		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.EN_COURS)
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/mechanic/interventions/{intervention.id}/photos/",
+			{"file": self._temporary_image_file("mechanic-schema.gif"), "caption": "Controle schema"},
+			format="multipart",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+		with tempfile.NamedTemporaryFile(mode="r", encoding="utf-8", suffix=".yml", delete=False) as schema_file:
+			schema_path = schema_file.name
+
+		try:
+			call_command("spectacular", "--file", schema_path)
+			with open(schema_path, "r", encoding="utf-8") as generated_schema:
+				schema = generated_schema.read()
+		finally:
+			if os.path.exists(schema_path):
+				os.remove(schema_path)
+
+		self.assertIn("/api/v1/mechanic/interventions/{id}/photos/:", schema)
+		self.assertIn("/api/v1/cleaning/interventions/{id}/photos/:", schema)
+		self.assertIn("InterventionWorkerPhotoUploadRequestRequest:", schema)
+		self.assertIn("format: binary", schema)
+
 	def test_mechanic_close_intervention(self):
 		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.EN_COURS)
+		intervention.started_at = timezone.now() - timedelta(minutes=30)
+		intervention.save(update_fields=["started_at", "updated_at"])
 		self.client_api.force_authenticate(self.mechanic_user_1)
 
 		response = self.client_api.post(
@@ -1230,6 +1280,7 @@ class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(intervention.status, Intervention.Status.TERMINEE)
 		self.assertEqual(intervention.report, "Intervention terminee")
+		self.assertIsNotNone(intervention.started_at)
 
 
 class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
@@ -1283,8 +1334,22 @@ class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 			).exists()
 		)
 
+	def test_cleaner_photo_upload_accepts_multipart_image(self):
+		intervention = self._assigned_cleaning_intervention(status_value=Intervention.Status.EN_COURS)
+		self.client_api.force_authenticate(self.cleaner_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/cleaning/interventions/{intervention.id}/photos/",
+			{"file": self._temporary_image_file("cleaning-schema.gif"), "caption": "Controle nettoyage"},
+			format="multipart",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
 	def test_cleaner_close_intervention(self):
 		intervention = self._assigned_cleaning_intervention(status_value=Intervention.Status.EN_COURS)
+		intervention.started_at = timezone.now() - timedelta(minutes=30)
+		intervention.save(update_fields=["started_at", "updated_at"])
 		self.client_api.force_authenticate(self.cleaner_user_1)
 
 		response = self.client_api.post(
@@ -1297,6 +1362,7 @@ class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(intervention.status, Intervention.Status.TERMINEE)
 		self.assertEqual(intervention.report, "Nettoyage termine")
+		self.assertIsNotNone(intervention.started_at)
 
 
 class InterventionWorkflowServiceTests(VehicleAccessTestDataMixin, TestCase):

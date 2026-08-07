@@ -1,5 +1,6 @@
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema, inline_serializer
 from rest_framework import generics, status
+from rest_framework import serializers
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -29,6 +30,13 @@ from interventions.services import (
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou d'autorisation.")
+InterventionWorkerPhotoUploadRequestSerializer = inline_serializer(
+	name="InterventionWorkerPhotoUploadRequest",
+	fields={
+		"file": serializers.ImageField(required=True),
+		"caption": serializers.CharField(required=False, allow_blank=True, default=""),
+	},
+)
 
 
 class InterventionManagementCreateListView(generics.GenericAPIView):
@@ -227,7 +235,7 @@ class _InterventionWorkerPhotoCreateView(_InterventionWorkerBaseView):
 
 	@extend_schema(
 		tags=["Interventions"],
-		request={"multipart/form-data": InterventionWorkerPhotoCreateSerializer},
+		request={"multipart/form-data": InterventionWorkerPhotoUploadRequestSerializer},
 		responses={
 			201: InterventionWorkerPhotoResponseSerializer,
 			400: ErrorDetailResponseSerializer,
