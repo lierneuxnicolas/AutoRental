@@ -561,6 +561,7 @@ class ReservationLockView(generics.GenericAPIView):
         serializer.is_valid(raise_exception=True)
 
         reservation = self.get_object()
+        reservation.refresh_from_db(fields=["status"])
 
         try:
             if reservation.status == Reservation.Status.A_CONTROLER:

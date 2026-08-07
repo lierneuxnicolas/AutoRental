@@ -89,7 +89,10 @@ class Intervention(models.Model):
 				name="interv_completed_at_only_done",
 			),
 			models.CheckConstraint(
-				condition=Q(started_at__isnull=True) | Q(status="EN_COURS"),
+				condition=(
+					Q(status__in=["A_ATTRIBUER", "ATTRIBUEE", "ANNULEE"], started_at__isnull=True)
+					| Q(status__in=["EN_COURS", "TERMINEE"], started_at__isnull=False)
+				),
 				name="interv_started_at_only_in_progress",
 			),
 			models.CheckConstraint(

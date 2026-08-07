@@ -162,13 +162,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Login'
+              $ref: '#/components/schemas/LoginRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/Login'
+              $ref: '#/components/schemas/LoginRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Login'
+              $ref: '#/components/schemas/LoginRequest'
         required: true
       responses:
         '200':
@@ -192,13 +192,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Logout'
+              $ref: '#/components/schemas/LogoutRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/Logout'
+              $ref: '#/components/schemas/LogoutRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Logout'
+              $ref: '#/components/schemas/LogoutRequest'
         required: true
       security:
       - jwtAuth: []
@@ -250,13 +250,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PasswordResetRequest'
+              $ref: '#/components/schemas/PasswordResetRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PasswordResetRequest'
+              $ref: '#/components/schemas/PasswordResetRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PasswordResetRequest'
+              $ref: '#/components/schemas/PasswordResetRequestRequest'
         required: true
       responses:
         '200':
@@ -274,13 +274,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PasswordResetConfirm'
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PasswordResetConfirm'
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PasswordResetConfirm'
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
         required: true
       responses:
         '200':
@@ -304,13 +304,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Register'
+              $ref: '#/components/schemas/RegisterRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/Register'
+              $ref: '#/components/schemas/RegisterRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Register'
+              $ref: '#/components/schemas/RegisterRequest'
         required: true
       responses:
         '201':
@@ -337,13 +337,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TokenRefreshRequest'
+              $ref: '#/components/schemas/TokenRefreshRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TokenRefreshRequest'
+              $ref: '#/components/schemas/TokenRefreshRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TokenRefreshRequest'
+              $ref: '#/components/schemas/TokenRefreshRequestRequest'
         required: true
       responses:
         '200':
@@ -367,13 +367,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/VerifyEmail'
+              $ref: '#/components/schemas/VerifyEmailRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/VerifyEmail'
+              $ref: '#/components/schemas/VerifyEmailRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/VerifyEmail'
+              $ref: '#/components/schemas/VerifyEmailRequest'
         required: true
       responses:
         '200':
@@ -466,13 +466,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InterventionWorkerComplete'
+              $ref: '#/components/schemas/InterventionWorkerCompleteRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/InterventionWorkerComplete'
+              $ref: '#/components/schemas/InterventionWorkerCompleteRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/InterventionWorkerComplete'
+              $ref: '#/components/schemas/InterventionWorkerCompleteRequest'
       security:
       - jwtAuth: []
       responses:
@@ -507,7 +507,7 @@ paths:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/InterventionWorkerPhotoCreate'
+              $ref: '#/components/schemas/InterventionWorkerPhotoUploadRequestRequest'
         required: true
       security:
       - jwtAuth: []
@@ -543,13 +543,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InterventionManagementResponse'
+              $ref: '#/components/schemas/InterventionManagementResponseRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/InterventionManagementResponse'
+              $ref: '#/components/schemas/InterventionManagementResponseRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/InterventionManagementResponse'
+              $ref: '#/components/schemas/InterventionManagementResponseRequest'
         required: true
       security:
       - jwtAuth: []
@@ -588,13 +588,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CompleteDepartureInspectionRequest'
+              $ref: '#/components/schemas/CompleteDepartureInspectionRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/CompleteDepartureInspectionRequest'
+              $ref: '#/components/schemas/CompleteDepartureInspectionRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/CompleteDepartureInspectionRequest'
+              $ref: '#/components/schemas/CompleteDepartureInspectionRequestRequest'
         required: true
       security:
       - jwtAuth: []
@@ -628,13 +628,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InspectionDamageCreate'
+              $ref: '#/components/schemas/InspectionDamageCreateRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/InspectionDamageCreate'
+              $ref: '#/components/schemas/InspectionDamageCreateRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/InspectionDamageCreate'
+              $ref: '#/components/schemas/InspectionDamageCreateRequest'
         required: true
       security:
       - jwtAuth: []
@@ -668,8 +668,28 @@ paths:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/InspectionPhotoCreate'
-        required: true
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                photo_type:
+                  type: string
+                  enum:
+                  - AVANT
+                  - ARRIERE
+                  - COTE_GAUCHE
+                  - COTE_DROIT
+                  - INTERIEUR
+                  - TABLEAU_DE_BORD
+                  - DOMMAGE
+                  - AUTRE
+                position:
+                  type: integer
+                  minimum: 0
+              required:
+              - file
+              - photo_type
       security:
       - jwtAuth: []
       responses:
@@ -847,13 +867,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ManagerRejectDocument'
+              $ref: '#/components/schemas/ManagerRejectDocumentRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/ManagerRejectDocument'
+              $ref: '#/components/schemas/ManagerRejectDocumentRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/ManagerRejectDocument'
+              $ref: '#/components/schemas/ManagerRejectDocumentRequest'
         required: true
       security:
       - jwtAuth: []
@@ -945,13 +965,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InterventionManagementCreate'
+              $ref: '#/components/schemas/InterventionManagementCreateRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/InterventionManagementCreate'
+              $ref: '#/components/schemas/InterventionManagementCreateRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/InterventionManagementCreate'
+              $ref: '#/components/schemas/InterventionManagementCreateRequest'
         required: true
       security:
       - jwtAuth: []
@@ -983,13 +1003,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedInterventionManagementAssign'
+              $ref: '#/components/schemas/PatchedInterventionManagementAssignRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedInterventionManagementAssign'
+              $ref: '#/components/schemas/PatchedInterventionManagementAssignRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedInterventionManagementAssign'
+              $ref: '#/components/schemas/PatchedInterventionManagementAssignRequest'
       security:
       - jwtAuth: []
       responses:
@@ -1192,13 +1212,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/VehicleManagementWrite'
+              $ref: '#/components/schemas/VehicleManagementWriteRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/VehicleManagementWrite'
+              $ref: '#/components/schemas/VehicleManagementWriteRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/VehicleManagementWrite'
+              $ref: '#/components/schemas/VehicleManagementWriteRequest'
         required: true
       security:
       - jwtAuth: []
@@ -1230,13 +1250,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedVehicleManagementWrite'
+              $ref: '#/components/schemas/PatchedVehicleManagementWriteRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedVehicleManagementWrite'
+              $ref: '#/components/schemas/PatchedVehicleManagementWriteRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedVehicleManagementWrite'
+              $ref: '#/components/schemas/PatchedVehicleManagementWriteRequest'
       security:
       - jwtAuth: []
       responses:
@@ -1269,7 +1289,7 @@ paths:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/VehiclePhotoCreate'
+              $ref: '#/components/schemas/VehiclePhotoCreateRequest'
         required: true
       security:
       - jwtAuth: []
@@ -1330,13 +1350,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedVehicleStatusUpdate'
+              $ref: '#/components/schemas/PatchedVehicleStatusUpdateRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedVehicleStatusUpdate'
+              $ref: '#/components/schemas/PatchedVehicleStatusUpdateRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedVehicleStatusUpdate'
+              $ref: '#/components/schemas/PatchedVehicleStatusUpdateRequest'
       security:
       - jwtAuth: []
       responses:
@@ -1432,13 +1452,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InterventionWorkerComplete'
+              $ref: '#/components/schemas/InterventionWorkerCompleteRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/InterventionWorkerComplete'
+              $ref: '#/components/schemas/InterventionWorkerCompleteRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/InterventionWorkerComplete'
+              $ref: '#/components/schemas/InterventionWorkerCompleteRequest'
       security:
       - jwtAuth: []
       responses:
@@ -1473,7 +1493,7 @@ paths:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/InterventionWorkerPhotoCreate'
+              $ref: '#/components/schemas/InterventionWorkerPhotoUploadRequestRequest'
         required: true
       security:
       - jwtAuth: []
@@ -1509,13 +1529,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InterventionManagementResponse'
+              $ref: '#/components/schemas/InterventionManagementResponseRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/InterventionManagementResponse'
+              $ref: '#/components/schemas/InterventionManagementResponseRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/InterventionManagementResponse'
+              $ref: '#/components/schemas/InterventionManagementResponseRequest'
         required: true
       security:
       - jwtAuth: []
@@ -1773,13 +1793,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReservationCreateRequest'
+              $ref: '#/components/schemas/ReservationCreateRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/ReservationCreateRequest'
+              $ref: '#/components/schemas/ReservationCreateRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/ReservationCreateRequest'
+              $ref: '#/components/schemas/ReservationCreateRequestRequest'
         required: true
       security:
       - jwtAuth: []
@@ -1838,13 +1858,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReservationCancelRequest'
+              $ref: '#/components/schemas/ReservationCancelRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/ReservationCancelRequest'
+              $ref: '#/components/schemas/ReservationCancelRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/ReservationCancelRequest'
+              $ref: '#/components/schemas/ReservationCancelRequestRequest'
         required: true
       security:
       - jwtAuth: []
@@ -1881,13 +1901,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReservationDepositRequest'
+              $ref: '#/components/schemas/ReservationDepositRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/ReservationDepositRequest'
+              $ref: '#/components/schemas/ReservationDepositRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/ReservationDepositRequest'
+              $ref: '#/components/schemas/ReservationDepositRequestRequest'
         required: true
       security:
       - jwtAuth: []
@@ -1920,17 +1940,6 @@ paths:
         required: true
       tags:
       - Inspections
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DepartureInspectionResponse'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/DepartureInspectionResponse'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/DepartureInspectionResponse'
       security:
       - jwtAuth: []
       responses:
@@ -1978,17 +1987,6 @@ paths:
         required: true
       tags:
       - Inspections
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DepartureInspectionResponse'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/DepartureInspectionResponse'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/DepartureInspectionResponse'
       security:
       - jwtAuth: []
       responses:
@@ -2130,13 +2128,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PriceSimulationRequest'
+              $ref: '#/components/schemas/PriceSimulationRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PriceSimulationRequest'
+              $ref: '#/components/schemas/PriceSimulationRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PriceSimulationRequest'
+              $ref: '#/components/schemas/PriceSimulationRequestRequest'
         required: true
       responses:
         '200':
@@ -2183,13 +2181,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedClientProfileMe'
+              $ref: '#/components/schemas/PatchedClientProfileMeRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedClientProfileMe'
+              $ref: '#/components/schemas/PatchedClientProfileMeRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedClientProfileMe'
+              $ref: '#/components/schemas/PatchedClientProfileMeRequest'
       security:
       - jwtAuth: []
       responses:
@@ -2659,7 +2657,7 @@ components:
       - identity_card_valid
       - percentage
       - personal_information_complete
-    CompleteDepartureInspectionRequest:
+    CompleteDepartureInspectionRequestRequest:
       type: object
       properties:
         mileage:
@@ -2750,15 +2748,17 @@ components:
           type: string
       required:
       - detail
-    InspectionDamageCreate:
+    InspectionDamageCreateRequest:
       type: object
       properties:
         description:
           type: string
+          minLength: 1
         severity:
           $ref: '#/components/schemas/SeverityEnum'
         location:
           type: string
+          minLength: 1
           maxLength: 120
         photo_ids:
           type: array
@@ -2810,22 +2810,6 @@ components:
       - severity
       - updated_at
       - vehicle
-    InspectionPhotoCreate:
-      type: object
-      properties:
-        file:
-          type: string
-          format: uri
-        photo_type:
-          $ref: '#/components/schemas/PhotoTypeEnum'
-        position:
-          type: integer
-          maximum: 4294967295
-          minimum: 0
-          format: int64
-      required:
-      - file
-      - photo_type
     InspectionPhotoRead:
       type: object
       properties:
@@ -2911,6 +2895,46 @@ components:
       - inspection_type
       - reservation
       - updated_at
+    InspectionSummaryRequest:
+      type: object
+      properties:
+        reservation:
+          type: integer
+        inspection_type:
+          $ref: '#/components/schemas/InspectionTypeEnum'
+        status:
+          $ref: '#/components/schemas/InspectionSummaryStatusEnum'
+        mileage:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+          nullable: true
+        energy_level_percent:
+          type: integer
+          maximum: 65535
+          minimum: 0
+          nullable: true
+        comments:
+          type: string
+        has_critical_issue:
+          type: boolean
+        critical_issue_description:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_by:
+          type: integer
+          nullable: true
+      required:
+      - inspection_type
+      - reservation
     InspectionSummaryStatusEnum:
       enum:
       - BROUILLON
@@ -2956,7 +2980,7 @@ components:
       - id
       - last_name
       - role
-    InterventionManagementCreate:
+    InterventionManagementCreateRequest:
       type: object
       properties:
         vehicle_id:
@@ -3027,6 +3051,22 @@ components:
       - type
       - updated_at
       - vehicle
+    InterventionManagementResponseRequest:
+      type: object
+      properties:
+        reference:
+          type: string
+          minLength: 1
+          maxLength: 40
+        intervention_type:
+          $ref: '#/components/schemas/InterventionTypeEnum'
+        status:
+          $ref: '#/components/schemas/InterventionManagementResponseStatusEnum'
+        description:
+          type: string
+      required:
+      - intervention_type
+      - reference
     InterventionManagementResponseStatusEnum:
       enum:
       - A_ATTRIBUER
@@ -3081,23 +3121,12 @@ components:
       - id
       - model_name
       - registration_number
-    InterventionWorkerComplete:
+    InterventionWorkerCompleteRequest:
       type: object
       properties:
         report:
           type: string
           default: ''
-    InterventionWorkerPhotoCreate:
-      type: object
-      properties:
-        file:
-          type: string
-          format: uri
-        caption:
-          type: string
-          default: ''
-      required:
-      - file
     InterventionWorkerPhotoResponse:
       type: object
       properties:
@@ -3121,6 +3150,17 @@ components:
       - created_at
       - file
       - id
+    InterventionWorkerPhotoUploadRequestRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+        caption:
+          type: string
+          default: ''
+      required:
+      - file
     InvoiceDetail:
       type: object
       properties:
@@ -3283,15 +3323,17 @@ components:
         * `DAMAGE` - Dommage
         * `FINE` - Amende
         * `CORRECTION` - Correction
-    Login:
+    LoginRequest:
       type: object
       properties:
         email:
           type: string
           writeOnly: true
+          minLength: 1
         password:
           type: string
           writeOnly: true
+          minLength: 1
       required:
       - email
       - password
@@ -3308,12 +3350,13 @@ components:
       - access
       - refresh
       - user
-    Logout:
+    LogoutRequest:
       type: object
       properties:
         refresh:
           type: string
           writeOnly: true
+          minLength: 1
       required:
       - refresh
     ManagerClientDocumentDetail:
@@ -3449,11 +3492,12 @@ components:
       - id
       - uploaded_at
       - validated_by_email
-    ManagerRejectDocument:
+    ManagerRejectDocumentRequest:
       type: object
       properties:
         reason:
           type: string
+          minLength: 1
       required:
       - reason
     MessageResponse:
@@ -3742,92 +3786,63 @@ components:
       - id
       - name
       - public_capacity
-    PasswordResetConfirm:
+    PasswordResetConfirmRequest:
       type: object
       properties:
         uid:
           type: string
+          minLength: 1
         token:
           type: string
+          minLength: 1
         new_password:
           type: string
           writeOnly: true
+          minLength: 1
         new_password_confirm:
           type: string
           writeOnly: true
+          minLength: 1
       required:
       - new_password
       - new_password_confirm
       - token
       - uid
-    PasswordResetRequest:
+    PasswordResetRequestRequest:
       type: object
       properties:
         email:
           type: string
           format: email
+          minLength: 1
       required:
       - email
-    PatchedClientProfileMe:
+    PatchedClientProfileMeRequest:
       type: object
       properties:
-        id:
-          type: integer
-          readOnly: true
-        email:
-          type: string
-          format: email
-          readOnly: true
         first_name:
           type: string
+          minLength: 1
         last_name:
           type: string
+          minLength: 1
         phone:
           type: string
           maxLength: 30
-        email_verified:
-          type: boolean
-          readOnly: true
-        role:
-          type: string
-          nullable: true
-          readOnly: true
-        date_joined:
-          type: string
-          format: date-time
-          readOnly: true
         date_of_birth:
           type: string
           format: date
           nullable: true
         address:
           type: string
-        profile_status:
-          allOf:
-          - $ref: '#/components/schemas/ProfileStatusEnum'
-          readOnly: true
-        rejection_reason:
-          type: string
-          readOnly: true
-        created_at:
-          type: string
-          format: date-time
-          readOnly: true
-        updated_at:
-          type: string
-          format: date-time
-          readOnly: true
-    PatchedInterventionManagementAssign:
+    PatchedInterventionManagementAssignRequest:
       type: object
       properties:
         assigned_user_id:
           type: integer
-    PatchedVehicleManagementWrite:
+    PatchedVehicleManagementWriteRequest:
       type: object
       properties:
-        id:
-          type: integer
-          readOnly: true
         brand:
           type: integer
         category:
@@ -3836,9 +3851,11 @@ components:
           type: integer
         registration_number:
           type: string
+          minLength: 1
           maxLength: 30
         model_name:
           type: string
+          minLength: 1
           maxLength: 150
         year:
           type: integer
@@ -3847,11 +3864,14 @@ components:
           format: int64
         color:
           type: string
+          minLength: 1
           maxLength: 60
         fuel_type:
           type: string
+          minLength: 1
         transmission:
           type: string
+          minLength: 1
           maxLength: 60
         seats:
           type: integer
@@ -3874,7 +3894,7 @@ components:
           $ref: '#/components/schemas/Status081Enum'
         is_active:
           type: boolean
-    PatchedVehicleStatusUpdate:
+    PatchedVehicleStatusUpdateRequest:
       type: object
       properties:
         status:
@@ -3909,7 +3929,7 @@ components:
           type: string
       required:
       - detail
-    PriceSimulationRequest:
+    PriceSimulationRequestRequest:
       type: object
       properties:
         vehicle_id:
@@ -3968,23 +3988,28 @@ components:
         * `VALIDE` - Valide
         * `REFUSE` - Refuse
         * `EXPIRE` - Expire
-    Register:
+    RegisterRequest:
       type: object
       properties:
         email:
           type: string
           format: email
+          minLength: 1
         password:
           type: string
           writeOnly: true
+          minLength: 1
         password_confirm:
           type: string
           writeOnly: true
+          minLength: 1
         first_name:
           type: string
+          minLength: 1
           maxLength: 150
         last_name:
           type: string
+          minLength: 1
           maxLength: 150
         phone:
           type: string
@@ -4005,11 +4030,12 @@ components:
       required:
       - message
       - user
-    ReservationCancelRequest:
+    ReservationCancelRequestRequest:
       type: object
       properties:
         reason:
           type: string
+          minLength: 1
       required:
       - reason
     ReservationCancelResponse:
@@ -4023,7 +4049,7 @@ components:
       required:
       - message
       - reservation
-    ReservationCreateRequest:
+    ReservationCreateRequestRequest:
       type: object
       properties:
         vehicle_id:
@@ -4093,7 +4119,7 @@ components:
       - rental_amount
       - start_at
       - vehicle
-    ReservationDepositRequest:
+    ReservationDepositRequestRequest:
       type: object
       properties:
         mode:
@@ -4511,11 +4537,12 @@ components:
           type: string
       required:
       - message
-    TokenRefreshRequest:
+    TokenRefreshRequestRequest:
       type: object
       properties:
         refresh:
           type: string
+          minLength: 1
       required:
       - refresh
     TokenRefreshResponse:
@@ -4569,12 +4596,9 @@ components:
       - daily_rate
       - id
       - name
-    VehicleManagementWrite:
+    VehicleManagementWriteRequest:
       type: object
       properties:
-        id:
-          type: integer
-          readOnly: true
         brand:
           type: integer
         category:
@@ -4583,9 +4607,11 @@ components:
           type: integer
         registration_number:
           type: string
+          minLength: 1
           maxLength: 30
         model_name:
           type: string
+          minLength: 1
           maxLength: 150
         year:
           type: integer
@@ -4594,11 +4620,14 @@ components:
           format: int64
         color:
           type: string
+          minLength: 1
           maxLength: 60
         fuel_type:
           type: string
+          minLength: 1
         transmission:
           type: string
+          minLength: 1
           maxLength: 60
         seats:
           type: integer
@@ -4627,7 +4656,6 @@ components:
       - color
       - doors
       - fuel_type
-      - id
       - model_name
       - parking_space
       - registration_number
@@ -4635,12 +4663,12 @@ components:
       - status
       - transmission
       - year
-    VehiclePhotoCreate:
+    VehiclePhotoCreateRequest:
       type: object
       properties:
         file:
           type: string
-          format: uri
+          format: binary
         is_primary:
           type: boolean
         position:
@@ -4798,12 +4826,13 @@ components:
       - seats
       - transmission
       - year
-    VerifyEmail:
+    VerifyEmailRequest:
       type: object
       properties:
         token:
           type: string
           writeOnly: true
+          minLength: 1
       required:
       - token
   securitySchemes:

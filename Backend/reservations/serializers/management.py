@@ -111,3 +111,12 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
             "cancelled_at",
             "cancellation_reason",
         ]
+
+
+class ReservationManagementCompleteRequestSerializer(serializers.Serializer):
+    confirm_vehicle_available = serializers.BooleanField(required=False, default=True)
+
+
+class ReservationManagementCompleteResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(read_only=True)
+    reservation = ReservationManagementDetailSerializer(read_only=True)
