@@ -1,4 +1,4 @@
-import { Advantages, Hero, HowItWorks, SearchSection } from '../../components/home'
+import { Advantages, Hero, HowItWorks, PopularVehicles, SearchSection } from '../../components/home'
 
 export default function HomePage() {
   return (
@@ -7,6 +7,7 @@ export default function HomePage() {
       <SearchSection />
       <HowItWorks />
       <Advantages />
+      <PopularVehicles />
     </>
   )
 }
