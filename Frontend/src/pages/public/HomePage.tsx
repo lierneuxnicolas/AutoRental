@@ -1,3 +1,12 @@
+import { Advantages, Hero, HowItWorks, SearchSection } from '../../components/home'
+
 export default function HomePage() {
-  return <h1>Accueil</h1>
+  return (
+    <>
+      <Hero />
+      <SearchSection />
+      <HowItWorks />
+      <Advantages />
+    </>
+  )
 }
