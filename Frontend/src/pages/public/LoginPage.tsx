@@ -8,7 +8,7 @@ import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
-import { login as loginUser } from '../../services/authService'
+import { useAuth } from '../../hooks/useAuth'
 import type { LoginCredentials } from '../../types/auth'
 
 const loginSchema = z.object({
@@ -26,6 +26,7 @@ const roleRedirectMap: Record<string, string> = {
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [serverError, setServerError] = useState<string | null>(null)
 
   const {
@@ -44,13 +45,9 @@ export default function LoginPage() {
     setServerError(null)
 
     try {
-      const response = await loginUser(credentials)
+      const user = await login(credentials)
 
-      localStorage.setItem('accessToken', response.access)
-      localStorage.setItem('refreshToken', response.refresh)
-      localStorage.setItem('authUser', JSON.stringify(response.user))
-
-      const normalizedRole = response.user.role?.toUpperCase()
+      const normalizedRole = user.role?.toUpperCase()
       const redirectPath = roleRedirectMap[normalizedRole] ?? '/client'
 
       navigate(redirectPath)
@@ -79,8 +76,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-[70vh] items-center justify-center bg-[radial-gradient(circle_at_top,_#EFF6FF,_#FFFFFF_70%)] px-4 py-12">
-      <div className="w-full max-w-5xl overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-[0_20px_60px_-20px_rgba(37,99,235,0.35)]">
+    <div className="flex min-h-[70vh] items-center justify-center bg-[radial-gradient(circle_at_top,#EFF6FF,#FFFFFF_70%)] px-4 py-12">
+      <div className="w-full max-w-5xl overflow-hidden rounded-4xl border border-slate-200 bg-white shadow-[0_20px_60px_-20px_rgba(37,99,235,0.35)]">
         <div className="grid gap-0 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="bg-[#0F172A] p-8 text-white sm:p-10 lg:p-12">
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-blue-200">AutoRental</p>

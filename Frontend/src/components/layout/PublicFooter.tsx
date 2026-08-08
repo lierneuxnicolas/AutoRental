@@ -24,7 +24,7 @@ export default function PublicFooter() {
 
         <div className="grid gap-4 text-sm text-slate-600 sm:grid-cols-2 lg:min-w-[420px] lg:grid-cols-3">
           {footerLinks.map((item) => (
-            <Link key={item.to} to={item.to} className="transition hover:text-[#2563EB]">
+            <Link key={`${item.to}-${item.label}`} to={item.to} className="transition hover:text-[#2563EB]">
               {item.label}
             </Link>
           ))}
