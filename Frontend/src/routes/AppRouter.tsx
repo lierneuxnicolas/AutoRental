@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import PublicLayout from '../components/layout/PublicLayout'
+import ProtectedRoute from './ProtectedRoute'
 import ClientLayout from '../components/layout/ClientLayout'
 import ManagerLayout from '../components/layout/ManagerLayout'
 import MechanicLayout from '../components/layout/MechanicLayout'
@@ -54,24 +55,34 @@ export default function AppRouter() {
           <Route path="/terms" element={<TermsPage />} />
         </Route>
 
-        <Route path="/client" element={<ClientLayout />}>
-          <Route index element={<ClientDashboard />} />
+        <Route element={<ProtectedRoute allowedRoles={['CLIENT']} />}>
+          <Route path="/client" element={<ClientLayout />}>
+            <Route index element={<ClientDashboard />} />
+          </Route>
         </Route>
 
-        <Route path="/manager" element={<ManagerLayout />}>
-          <Route index element={<ManagerDashboard />} />
+        <Route element={<ProtectedRoute allowedRoles={['GESTIONNAIRE_COMPTABLE', 'ADMINISTRATEUR']} />}>
+          <Route path="/manager" element={<ManagerLayout />}>
+            <Route index element={<ManagerDashboard />} />
+          </Route>
         </Route>
 
-        <Route path="/mechanic" element={<MechanicLayout />}>
-          <Route index element={<MechanicDashboard />} />
+        <Route element={<ProtectedRoute allowedRoles={['MECANICIEN']} />}>
+          <Route path="/mechanic" element={<MechanicLayout />}>
+            <Route index element={<MechanicDashboard />} />
+          </Route>
         </Route>
 
-        <Route path="/cleaning" element={<CleaningLayout />}>
-          <Route index element={<CleaningDashboard />} />
+        <Route element={<ProtectedRoute allowedRoles={['NETTOYEUR']} />}>
+          <Route path="/cleaning" element={<CleaningLayout />}>
+            <Route index element={<CleaningDashboard />} />
+          </Route>
         </Route>
 
-        <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<AdminDashboard />} />
+        <Route element={<ProtectedRoute allowedRoles={['ADMINISTRATEUR']} />}>
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route index element={<AdminDashboard />} />
+          </Route>
         </Route>
 
         <Route path="*" element={<NotFoundPage />} />

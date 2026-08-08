@@ -9,10 +9,11 @@ export interface AuthUser {
 
 export interface AuthTokens {
   access: string
-  refresh: string
+  refresh?: string
 }
 
 export interface AuthResponse extends AuthTokens {
+  refresh: string
   user: AuthUser
 }
 
