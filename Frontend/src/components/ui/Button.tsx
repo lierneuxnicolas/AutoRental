@@ -1,8 +1,8 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { cn } from './cn'
 
-type ButtonVariant = 'primary' | 'secondary' | 'success' | 'danger'
-type ButtonSize = 'sm' | 'md' | 'lg'
+export type ButtonVariant = 'primary' | 'secondary' | 'success' | 'danger'
+export type ButtonSize = 'sm' | 'md' | 'lg'
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
@@ -11,10 +11,10 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-600',
-  secondary: 'bg-slate-100 text-slate-800 hover:bg-slate-200 focus-visible:ring-slate-400',
-  success: 'bg-green-500 text-white hover:bg-green-600 focus-visible:ring-green-500',
-  danger: 'bg-red-500 text-white hover:bg-red-600 focus-visible:ring-red-500',
+  primary: 'bg-[#2563EB] text-white hover:bg-[#1D4ED8] focus-visible:ring-[#2563EB]',
+  secondary: 'bg-[#F5F5F5] text-[#1F2937] hover:bg-[#E5E7EB] focus-visible:ring-[#2563EB]',
+  success: 'bg-[#22C55E] text-white hover:bg-[#16A34A] focus-visible:ring-[#22C55E]',
+  danger: 'bg-[#EF4444] text-white hover:bg-[#DC2626] focus-visible:ring-[#EF4444]',
 }
 
 const sizeClasses: Record<ButtonSize, string> = {
