@@ -8,6 +8,7 @@ export interface AlertProps {
   title?: string
   message?: ReactNode
   children?: ReactNode
+  className?: string
 }
 
 const variantClasses: Record<AlertVariant, string> = {
@@ -17,11 +18,11 @@ const variantClasses: Record<AlertVariant, string> = {
   danger: 'border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]',
 }
 
-export default function Alert({ variant = 'info', title, message, children }: AlertProps) {
+export default function Alert({ variant = 'info', title, message, children, className }: AlertProps) {
   const content = children ?? message
 
   return (
-    <div className={cn('rounded-3xl border px-4 py-3 shadow-sm', variantClasses[variant])} role="alert" aria-live="polite">
+    <div className={cn('rounded-3xl border px-4 py-3 shadow-sm', variantClasses[variant], className)} role="alert" aria-live="polite">
       {title ? <p className="mb-1 font-semibold">{title}</p> : null}
       {content ? (
         typeof content === 'string' ? (
