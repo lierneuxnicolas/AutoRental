@@ -37,6 +37,10 @@ export default function VehicleCard({
 }: VehicleCardProps) {
   const imageAlt = `${brand} ${modelName}`
   const hasImage = Boolean(imageUrl)
+  const normalizedStatus = status?.replaceAll('_', ' ').toLowerCase()
+  const statusLabel = normalizedStatus
+    ? `${normalizedStatus.charAt(0).toUpperCase()}${normalizedStatus.slice(1)}`
+    : null
 
   return (
     <Card className="h-full rounded-2xl border-slate-200 shadow-[0_6px_20px_rgba(15,23,42,0.06)]">
@@ -68,7 +72,11 @@ export default function VehicleCard({
           <h3 className="mt-1 text-xl font-semibold text-[#1F2937]">
             {brand} {modelName}
           </h3>
-          {status ? <p className="mt-1 text-sm text-slate-500">{status}</p> : null}
+          {statusLabel ? (
+            <p className="mt-2 inline-flex rounded-full border border-[#BFDBFE] bg-[#EFF6FF] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#1D4ED8]">
+              {statusLabel}
+            </p>
+          ) : null}
 
           <dl className="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-600">
             <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">

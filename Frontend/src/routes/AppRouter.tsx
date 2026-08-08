@@ -14,6 +14,8 @@ import SearchPage from '../pages/public/SearchPage'
 import LoginPage from '../pages/public/LoginPage'
 import RegisterPage from '../pages/public/RegisterPage'
 import ForgotPasswordPage from '../pages/public/ForgotPasswordPage'
+import VerifyEmailPage from '../pages/public/VerifyEmailPage'
+import ResetPasswordPage from '../pages/public/ResetPasswordPage'
 import TermsPage from '../pages/public/TermsPage'
 
 function ClientDashboard() {
@@ -51,7 +53,9 @@ export default function AppRouter() {
           <Route path="/search" element={<SearchPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/terms" element={<TermsPage />} />
         </Route>
 
