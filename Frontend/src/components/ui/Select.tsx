@@ -1,4 +1,4 @@
-import type { SelectHTMLAttributes } from 'react'
+import { useId, type SelectHTMLAttributes } from 'react'
 import { cn } from './cn'
 
 export interface SelectOption {
@@ -11,6 +11,7 @@ export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   options: SelectOption[]
   error?: string
   helperText?: string
+  placeholder?: string
 }
 
 export default function Select({
@@ -18,20 +19,22 @@ export default function Select({
   options,
   error,
   helperText,
+  placeholder,
   id,
   required,
   disabled,
   className,
   ...props
 }: SelectProps) {
-  const selectId = id ?? props.name
+  const generatedId = useId()
+  const selectId = id ?? props.name ?? generatedId
 
   return (
     <div className="space-y-2">
       {label ? (
-        <label htmlFor={selectId} className="block text-sm font-medium text-slate-700">
+        <label htmlFor={selectId} className="block text-sm font-medium text-[#1F2937]">
           {label}
-          {required ? <span className="ml-1 text-red-500">*</span> : null}
+          {required ? <span className="ml-1 text-[#EF4444]">*</span> : null}
         </label>
       ) : null}
 
@@ -40,14 +43,19 @@ export default function Select({
         required={required}
         disabled={disabled}
         className={cn(
-          'block w-full rounded-2xl border bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500',
-          error ? 'border-red-500 focus:border-red-500 focus:ring-red-100' : 'border-slate-300',
+          'block w-full rounded-2xl border bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-slate-500',
+          error ? 'border-[#EF4444] focus:border-[#EF4444] focus:ring-red-100' : 'border-[#E5E7EB]',
           className,
         )}
         aria-invalid={error ? true : undefined}
         aria-describedby={error || helperText ? `${selectId}-help` : undefined}
         {...props}
       >
+        {placeholder ? (
+          <option value="" disabled>
+            {placeholder}
+          </option>
+        ) : null}
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
@@ -56,7 +64,7 @@ export default function Select({
       </select>
 
       {error ? (
-        <p id={`${selectId}-help`} className="text-sm text-red-600">
+        <p id={`${selectId}-help`} className="text-sm text-[#EF4444]">
           {error}
         </p>
       ) : helperText ? (

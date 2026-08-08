@@ -1,23 +1,15 @@
 import { Outlet } from 'react-router-dom'
+import PublicHeader from './PublicHeader'
+import PublicFooter from './PublicFooter'
 
 export default function PublicLayout() {
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <span className="text-2xl font-bold text-blue-700">AutoRental</span>
-
-          <nav className="flex gap-6 text-sm font-medium text-slate-700">
-            <a href="/">Accueil</a>
-            <a href="/vehicles">Véhicules</a>
-            <a href="/login">Connexion</a>
-          </nav>
-        </div>
-      </header>
-
-      <main>
+    <div className="min-h-screen bg-[#F5F5F5] text-[#1F2937]">
+      <PublicHeader />
+      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <Outlet />
       </main>
+      <PublicFooter />
     </div>
   )
 }
