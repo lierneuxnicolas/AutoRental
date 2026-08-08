@@ -1,5 +1,5 @@
 import api from './api'
-import type { VehiclesApiResponse } from '../types/vehicle'
+import type { PublicVehicle, VehiclesApiResponse } from '../types/vehicle'
 
 export interface GetVehiclesParams {
   page?: number
@@ -12,5 +12,10 @@ export async function getVehicles(params?: GetVehiclesParams): Promise<VehiclesA
     params,
   })
 
+  return data
+}
+
+export async function getVehicleById(id: number | string): Promise<PublicVehicle> {
+  const { data } = await api.get<PublicVehicle>(`/vehicles/${id}/`)
   return data
 }
