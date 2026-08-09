@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Alert, EmptyState, LoadingSpinner } from '../../components/feedback'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
@@ -245,7 +245,12 @@ export default function SearchPage() {
         </header>
 
         {vehicleId ? (
-          <Alert variant="info" title="Recherche liée au véhicule" message={`Le véhicule sélectionné est conservé dans l’URL pour une future simulation : ${vehicleId}.`} className="mt-6" />
+          <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <Alert variant="info" title="Recherche liée au véhicule" message={`Le véhicule sélectionné est conservé dans l’URL pour une future simulation : ${vehicleId}.`} className="border-0 bg-transparent p-0" />
+            <Link to={`/simulation?vehicleId=${vehicleId}${searchedStart ? `&start=${encodeURIComponent(searchedStart)}` : ''}${searchedEnd ? `&end=${encodeURIComponent(searchedEnd)}` : ''}`} className="inline-flex">
+              <Button variant="danger">Simuler le prix</Button>
+            </Link>
+          </div>
         ) : null}
 
         <Card className="mt-6 border-slate-200">
