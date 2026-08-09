@@ -5,7 +5,6 @@ import { Alert, EmptyState, LoadingSpinner } from '../../components/feedback'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import Input from '../../components/ui/Input'
-import { useAuth } from '../../hooks/useAuth'
 import { getVehicleById, simulatePrice } from '../../services/vehicleService'
 import type { PriceSimulationResponse } from '../../types/simulation'
 import type { PublicVehicle } from '../../types/vehicle'
@@ -71,7 +70,6 @@ function formatCurrency(value: string | number): string {
 export default function SimulationPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { isAuthenticated } = useAuth()
 
   const vehicleIdParam = searchParams.get('vehicleId')
   const startParam = searchParams.get('start')
@@ -220,12 +218,16 @@ export default function SimulationPage() {
   }
 
   const handleReservationClick = () => {
-    if (isAuthenticated) {
-      navigate('/client')
+    if (!vehicleIdParam || !startParam || !endParam) {
       return
     }
 
-    navigate('/login')
+    const nextParams = new URLSearchParams()
+    nextParams.set('vehicleId', vehicleIdParam)
+    nextParams.set('start', startParam)
+    nextParams.set('end', endParam)
+
+    navigate(`/reservation?${nextParams.toString()}`)
   }
 
   const hasSearchDates = Boolean(startParam && endParam)
