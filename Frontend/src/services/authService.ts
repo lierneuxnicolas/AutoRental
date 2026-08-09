@@ -3,6 +3,8 @@ import type {
   AuthResponse,
   AuthTokens,
   AuthUser,
+  ClientProfileMe,
+  ClientProfileProgress,
   LoginCredentials,
   PasswordResetConfirmRequest,
   PasswordResetRequest,
@@ -49,4 +51,14 @@ export async function refreshAccessToken(refreshToken: string): Promise<AuthToke
 
 export async function logout(refreshToken: string): Promise<void> {
   await api.post('/auth/logout/', { refresh: refreshToken })
+}
+
+export async function getClientProfileMe(): Promise<ClientProfileMe> {
+  const { data } = await api.get<ClientProfileMe>('/users/me/')
+  return data
+}
+
+export async function getClientProfileProgress(): Promise<ClientProfileProgress> {
+  const { data } = await api.get<ClientProfileProgress>('/users/me/profile-progress/')
+  return data
 }

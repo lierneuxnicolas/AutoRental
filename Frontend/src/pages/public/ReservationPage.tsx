@@ -6,14 +6,27 @@ import { Alert, LoadingSpinner } from '../../components/feedback'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import { useAuth } from '../../hooks/useAuth'
+import { getClientProfileMe, getClientProfileProgress } from '../../services/authService'
 import { createReservation } from '../../services/reservationService'
 import { getVehicleById, simulatePrice } from '../../services/vehicleService'
 import type { ReservationCreateRequest } from '../../types/reservation'
+import type { ClientProfileMe, ClientProfileProgress } from '../../types/auth'
 
 type ApiErrorPayload = {
   detail?: string
   non_field_errors?: string[]
   [key: string]: unknown
+}
+
+type ProfileEligibilityReason = {
+  key: string
+  label: string
+}
+
+type ProfileEligibility = {
+  canReserve: boolean
+  reasons: ProfileEligibilityReason[]
+  shouldShowDocumentsCta: boolean
 }
 
 function formatDateTimeLabel(value: string): string {
@@ -97,6 +110,63 @@ function toErrorMessage(error: unknown): string {
   return fallback
 }
 
+function buildProfileEligibility(
+  profile: ClientProfileMe | undefined,
+  progress: ClientProfileProgress | undefined,
+): ProfileEligibility {
+  if (!profile || !progress) {
+    return {
+      canReserve: false,
+      reasons: [
+        {
+          key: 'PROFILE_LOADING_FAILED',
+          label: 'Impossible de verifier votre profil client pour le moment.',
+        },
+      ],
+      shouldShowDocumentsCta: true,
+    }
+  }
+
+  const reasons: ProfileEligibilityReason[] = []
+
+  if (!progress.email_verified) {
+    reasons.push({ key: 'EMAIL_NOT_VERIFIED', label: 'E-mail non verifie.' })
+  }
+
+  if (!progress.personal_information_complete) {
+    reasons.push({ key: 'PROFILE_INCOMPLETE', label: 'Informations personnelles incompletes.' })
+  }
+
+  if (!progress.identity_card_valid) {
+    reasons.push({ key: 'IDENTITY_CARD_INVALID', label: "Carte d'identite manquante ou non validee." })
+  }
+
+  if (!progress.driving_license_valid) {
+    reasons.push({ key: 'DRIVING_LICENSE_INVALID', label: 'Permis manquant ou non valide.' })
+  }
+
+  if (profile.profile_status === 'EN_ATTENTE_VALIDATION') {
+    reasons.push({ key: 'PROFILE_PENDING_VALIDATION', label: 'Documents en attente de validation.' })
+  }
+
+  if (profile.profile_status === 'REFUSE') {
+    const refusalReason = profile.rejection_reason?.trim()
+    reasons.push({
+      key: 'PROFILE_REJECTED',
+      label: refusalReason ? `Profil refuse: ${refusalReason}` : 'Profil refuse.',
+    })
+  }
+
+  const canReserve = reasons.length === 0 && profile.profile_status === 'VALIDE'
+  const shouldShowDocumentsCta = !progress.identity_card_valid || !progress.driving_license_valid || profile.profile_status === 'EN_ATTENTE_VALIDATION'
+
+  return {
+    canReserve,
+    reasons,
+    shouldShowDocumentsCta,
+  }
+}
+
 export default function ReservationPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -117,6 +187,18 @@ export default function ReservationPage() {
     enabled: Boolean(reservationPayload),
   })
 
+  const profileQuery = useQuery({
+    queryKey: ['client-profile-me', isAuthenticated],
+    queryFn: getClientProfileMe,
+    enabled: isAuthenticated,
+  })
+
+  const profileProgressQuery = useQuery({
+    queryKey: ['client-profile-progress', isAuthenticated],
+    queryFn: getClientProfileProgress,
+    enabled: isAuthenticated,
+  })
+
   const createReservationMutation = useMutation({
     mutationFn: (payload: ReservationCreateRequest) => createReservation(payload),
     onSuccess: (reservation) => {
@@ -135,6 +217,11 @@ export default function ReservationPage() {
           from: `${location.pathname}${location.search}`,
         },
       })
+      return
+    }
+
+    const eligibility = buildProfileEligibility(profileQuery.data, profileProgressQuery.data)
+    if (!eligibility.canReserve) {
       return
     }
 
@@ -161,7 +248,19 @@ export default function ReservationPage() {
   }
 
   const isLoadingData = vehicleQuery.isLoading || simulationQuery.isLoading
+  const isLoadingEligibility = isAuthenticated && (profileQuery.isLoading || profileProgressQuery.isLoading)
   const dataError = vehicleQuery.error ?? simulationQuery.error
+  const eligibilityError = isAuthenticated ? (profileQuery.error ?? profileProgressQuery.error) : null
+  const profileEligibility = isAuthenticated && !eligibilityError
+    ? buildProfileEligibility(profileQuery.data, profileProgressQuery.data)
+    : null
+  const canConfirmReservation = Boolean(
+    isAuthenticated
+    && !isAuthLoading
+    && !isLoadingEligibility
+    && !eligibilityError
+    && profileEligibility?.canReserve,
+  )
 
   return (
     <section className="py-8 sm:py-10" aria-labelledby="reservation-page-title">
@@ -242,6 +341,57 @@ export default function ReservationPage() {
                   />
                 ) : null}
 
+                {isAuthenticated && isLoadingEligibility ? (
+                  <Alert
+                    variant="info"
+                    title="Verification du profil"
+                    message="Verification de votre eligibilite a la reservation en cours..."
+                  />
+                ) : null}
+
+                {eligibilityError ? (
+                  <Alert
+                    variant="danger"
+                    title="Verification du profil impossible"
+                    message={toErrorMessage(eligibilityError)}
+                  />
+                ) : null}
+
+                {isAuthenticated && !isLoadingEligibility && !eligibilityError && profileEligibility && !profileEligibility.canReserve ? (
+                  <Alert
+                    variant="warning"
+                    title="Profil client incomplet ou non valide"
+                    message={(
+                      <div className="space-y-3">
+                        <p>Votre profil ne permet pas encore de confirmer cette reservation.</p>
+                        <ul className="list-disc space-y-1 pl-5">
+                          {profileEligibility.reasons.map((reason) => (
+                            <li key={reason.key}>{reason.label}</li>
+                          ))}
+                        </ul>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <Button variant="secondary" onClick={() => navigate('/client/profile')}>
+                            Completer mon profil
+                          </Button>
+                          {profileEligibility.shouldShowDocumentsCta ? (
+                            <Button variant="secondary" onClick={() => navigate('/client/documents')}>
+                              Ajouter mes documents
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    )}
+                  />
+                ) : null}
+
+                {isAuthenticated && !isLoadingEligibility && !eligibilityError && profileEligibility?.canReserve ? (
+                  <Alert
+                    variant="success"
+                    title="Profil valide"
+                    message="Votre profil est valide. Vous pouvez confirmer la reservation."
+                  />
+                ) : null}
+
                 {createReservationMutation.isError ? (
                   <Alert
                     variant="danger"
@@ -262,7 +412,7 @@ export default function ReservationPage() {
                   variant="danger"
                   className="w-full"
                   onClick={handleConfirmReservation}
-                  disabled={createReservationMutation.isPending || isAuthLoading}
+                  disabled={createReservationMutation.isPending || isAuthLoading || !canConfirmReservation}
                 >
                   {createReservationMutation.isPending ? (
                     <span className="flex items-center justify-center gap-2">
