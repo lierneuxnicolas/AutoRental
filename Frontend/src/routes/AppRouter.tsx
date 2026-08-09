@@ -5,12 +5,10 @@ import {
   ClipboardList,
   CreditCard,
   FileCheck,
-  FileText,
   History,
   Receipt,
   Settings,
   Shield,
-  UserCircle2,
   Users,
   Wrench,
 } from 'lucide-react'
@@ -32,6 +30,8 @@ import ResetPasswordPage from '../pages/public/ResetPasswordPage'
 import TermsPage from '../pages/public/TermsPage'
 import ReservationPage from '../pages/public/ReservationPage'
 import PaymentPage from '../pages/client/PaymentPage'
+import ClientProfilePage from '../pages/client/ClientProfilePage'
+import ClientDocumentsPage from '../pages/client/ClientDocumentsPage'
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -86,27 +86,11 @@ export default function AppRouter() {
             />
             <Route
               path="profile"
-              element={
-                <FeaturePlaceholderPage
-                  title="Mon profil"
-                  description="Gérez vos informations personnelles et vos préférences de compte."
-                  icon={UserCircle2}
-                  backLink="/client"
-                  backLabel="Retour au tableau de bord"
-                />
-              }
+              element={<ClientProfilePage />}
             />
             <Route
               path="documents"
-              element={
-                <FeaturePlaceholderPage
-                  title="Mes documents"
-                  description="Retrouvez vos documents d'identité et justificatifs transmis."
-                  icon={FileText}
-                  backLink="/client"
-                  backLabel="Retour au tableau de bord"
-                />
-              }
+              element={<ClientDocumentsPage />}
             />
             <Route
               path="invoices"

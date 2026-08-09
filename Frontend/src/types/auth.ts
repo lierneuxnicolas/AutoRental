@@ -7,7 +7,7 @@ export interface AuthUser {
   email_verified: boolean
 }
 
-export type ClientProfileStatus = 'INCOMPLET' | 'EN_ATTENTE_VALIDATION' | 'VALIDE' | 'REFUSE'
+export type ClientProfileStatus = 'INCOMPLET' | 'EN_ATTENTE' | 'EN_ATTENTE_VALIDATION' | 'VALIDE' | 'REFUSE' | 'EXPIRE'
 
 export interface ClientProfileMe {
   id: number
@@ -26,6 +26,14 @@ export interface ClientProfileMe {
   updated_at: string
 }
 
+export interface ClientProfileUpdateRequest {
+  first_name: string
+  last_name: string
+  phone: string
+  date_of_birth: string | null
+  address: string
+}
+
 export interface ClientProfileProgress {
   percentage: number
   account_created: boolean
@@ -33,6 +41,29 @@ export interface ClientProfileProgress {
   personal_information_complete: boolean
   identity_card_valid: boolean
   driving_license_valid: boolean
+}
+
+export type ClientDocumentType = 'CARTE_IDENTITE' | 'PERMIS_CONDUIRE'
+export type ClientDocumentStatus = 'EN_ATTENTE' | 'VALIDE' | 'REFUSE' | 'EXPIRE'
+
+export interface ClientDocument {
+  id: number
+  document_type: ClientDocumentType
+  document_number: string
+  expiration_date: string | null
+  status: ClientDocumentStatus
+  rejection_reason: string
+  uploaded_at: string
+  validated_at: string | null
+  is_active: boolean
+  file: string | null
+}
+
+export interface ClientDocumentListResponse {
+  count: number
+  next: string | null
+  previous: string | null
+  results: ClientDocument[]
 }
 
 export interface AuthTokens {
