@@ -1,6 +1,8 @@
 import { NavLink, Link } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import { useState } from 'react'
+import { useAuth } from '../../hooks/useAuth'
+import UserSessionMenu from './UserSessionMenu'
 
 const navItems = [
   { label: 'Accueil', to: '/' },
@@ -14,9 +16,11 @@ const linkStyles = 'text-sm font-medium transition-colors'
 
 export default function PublicHeader() {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const { isAuthenticated, user, isLoading } = useAuth()
+  const hasSession = isAuthenticated && Boolean(user)
 
   return (
-    <header className="border-b border-slate-200 bg-white/95 backdrop-blur">
+    <header className="relative z-[1000] border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
         <Link to="/" className="text-xl font-semibold tracking-tight text-[#1F2937]">
           <span className="text-[#2563EB]">Auto</span>Rental
@@ -37,18 +41,24 @@ export default function PublicHeader() {
         </nav>
 
         <div className="hidden items-center gap-3 md:flex">
-          <Link
-            to="/login"
-            className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-medium text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB]"
-          >
-            Connexion
-          </Link>
-          <Link
-            to="/register"
-            className="rounded-2xl bg-[#F97316] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#EA580C]"
-          >
-            Créer un compte
-          </Link>
+          {!isLoading && hasSession ? (
+            <UserSessionMenu />
+          ) : (
+            <>
+              <Link
+                to="/login"
+                className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-medium text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB]"
+              >
+                Connexion
+              </Link>
+              <Link
+                to="/register"
+                className="rounded-2xl bg-[#F97316] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#EA580C]"
+              >
+                Créer un compte
+              </Link>
+            </>
+          )}
         </div>
 
         <button
@@ -82,12 +92,18 @@ export default function PublicHeader() {
           </nav>
 
           <div className="mt-4 flex flex-col gap-2">
-            <Link to="/login" className="rounded-2xl border border-slate-200 px-3 py-2 text-center text-sm font-medium text-[#1F2937]" onClick={() => setMobileOpen(false)}>
-              Connexion
-            </Link>
-            <Link to="/register" className="rounded-2xl bg-[#F97316] px-3 py-2 text-center text-sm font-medium text-white" onClick={() => setMobileOpen(false)}>
-              Créer un compte
-            </Link>
+            {!isLoading && hasSession ? (
+              <UserSessionMenu isMobile onAction={() => setMobileOpen(false)} />
+            ) : (
+              <>
+                <Link to="/login" className="rounded-2xl border border-slate-200 px-3 py-2 text-center text-sm font-medium text-[#1F2937]" onClick={() => setMobileOpen(false)}>
+                  Connexion
+                </Link>
+                <Link to="/register" className="rounded-2xl bg-[#F97316] px-3 py-2 text-center text-sm font-medium text-white" onClick={() => setMobileOpen(false)}>
+                  Créer un compte
+                </Link>
+              </>
+            )}
           </div>
         </div>
       ) : null}
