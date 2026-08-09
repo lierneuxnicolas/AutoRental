@@ -25,7 +25,6 @@ const roleConfigs: Record<string, RoleConfig> = {
       { label: 'Mon espace', to: '/client' },
       { label: 'Mes réservations', to: '/client/reservations' },
       { label: 'Mon profil', to: '/client/profile' },
-      { label: 'Mes documents', to: '/client/documents' },
       { label: 'Mes factures', to: '/client/invoices' },
     ],
   },
@@ -77,6 +76,7 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
 
   const role = (user?.role ?? '').toUpperCase()
   const roleConfig = roleConfigs[role]
+  const isClient = role === 'CLIENT'
 
   const firstName = useMemo(() => {
     const trimmed = user?.first_name?.trim()
@@ -87,6 +87,16 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
 
     return user?.email ?? 'Utilisateur'
   }, [user?.email, user?.first_name])
+
+  const clientMenuItems: MenuItem[] = useMemo(
+    () => [
+      { label: 'Tableau de bord', to: '/client' },
+      { label: 'Mes réservations', to: '/client/reservations' },
+      { label: 'Mon profil', to: '/client/profile' },
+      { label: 'Mes factures', to: '/client/invoices' },
+    ],
+    [],
+  )
 
   useEffect(() => {
     if (!open) {
@@ -160,29 +170,57 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
 
       {open ? (
         <div className={menuClassName} role="menu" aria-label="Menu de session utilisateur">
-          <div className="flex flex-col">
-            {roleConfig.menuItems.map((item) => (
-              <Link
-                key={item.label}
-                to={item.to}
-                role="menuitem"
-                onClick={closeMenu}
-                className="rounded-xl px-3 py-2 text-sm text-[#1F2937] transition hover:bg-slate-100"
-              >
-                {item.label}
-              </Link>
-            ))}
+          {isClient ? (
+            <div className="flex flex-col">
+              {clientMenuItems.map((item) => (
+                <Link
+                  key={item.label}
+                  to={item.to}
+                  role="menuitem"
+                  onClick={closeMenu}
+                  className="rounded-xl px-3 py-2 text-sm text-[#1F2937] transition hover:bg-slate-100"
+                >
+                  {item.label}
+                </Link>
+              ))}
 
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => void handleLogout()}
-              disabled={isLoggingOut}
-              className="rounded-xl px-3 py-2 text-left text-sm font-medium text-[#DC2626] transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {isLoggingOut ? 'Déconnexion...' : 'Déconnexion'}
-            </button>
-          </div>
+              <div className="my-1 h-px bg-slate-200" aria-hidden="true" />
+
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void handleLogout()}
+                disabled={isLoggingOut}
+                className="rounded-xl px-3 py-2 text-left text-sm font-medium text-[#DC2626] transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isLoggingOut ? 'Déconnexion...' : 'Déconnexion'}
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col">
+              {roleConfig.menuItems.map((item) => (
+                <Link
+                  key={item.label}
+                  to={item.to}
+                  role="menuitem"
+                  onClick={closeMenu}
+                  className="rounded-xl px-3 py-2 text-sm text-[#1F2937] transition hover:bg-slate-100"
+                >
+                  {item.label}
+                </Link>
+              ))}
+
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void handleLogout()}
+                disabled={isLoggingOut}
+                className="rounded-xl px-3 py-2 text-left text-sm font-medium text-[#DC2626] transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isLoggingOut ? 'Déconnexion...' : 'Déconnexion'}
+              </button>
+            </div>
+          )}
         </div>
       ) : null}
     </div>

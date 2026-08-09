@@ -374,7 +374,7 @@ export default function ReservationPage() {
                             Completer mon profil
                           </Button>
                           {profileEligibility.shouldShowDocumentsCta ? (
-                            <Button variant="secondary" onClick={() => navigate('/client/documents')}>
+                            <Button variant="secondary" onClick={() => navigate('/client/profile')}>
                               Ajouter mes documents
                             </Button>
                           ) : null}
