@@ -1,12 +1,12 @@
 import axios from 'axios'
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import Alert from '../../components/feedback/Alert'
-import EmptyState from '../../components/feedback/EmptyState'
-import LoadingSpinner from '../../components/feedback/LoadingSpinner'
-import Card from '../../components/ui/Card'
-import StatusBadge from '../../components/ui/StatusBadge'
-import DocumentUpload from '../../components/documents/DocumentUpload'
+import Alert from '../feedback/Alert'
+import EmptyState from '../feedback/EmptyState'
+import LoadingSpinner from '../feedback/LoadingSpinner'
+import Card from '../ui/Card'
+import StatusBadge from '../ui/StatusBadge'
+import DocumentUpload from '../documents/DocumentUpload'
 import { getClientDocuments } from '../../services/authService'
 import type { ClientDocument } from '../../types/auth'
 
@@ -40,7 +40,7 @@ function extractApiErrorMessage(error: unknown): string {
   return 'Les documents n’ont pas pu être récupérés.'
 }
 
-export default function ClientDocumentsPage() {
+export default function ProfileDocumentsTab() {
   const documentsQuery = useQuery({
     queryKey: ['client-documents'],
     queryFn: getClientDocuments,
@@ -52,22 +52,14 @@ export default function ClientDocumentsPage() {
 
   if (documentsQuery.isLoading) {
     return (
-      <section className="mx-auto flex min-h-[60vh] max-w-6xl items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
+      <div className="flex min-h-[40vh] items-center justify-center py-8">
         <LoadingSpinner size="lg" aria-label="Chargement des documents" />
-      </section>
+      </div>
     )
   }
 
   return (
-    <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Mes documents</p>
-        <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Documents d’identification</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-          Déposez et gérez vos documents nécessaires à la validation de votre profil.
-        </p>
-      </div>
-
+    <div>
       {documentsQuery.error ? (
         <Alert variant="danger" title="Chargement impossible" message={extractApiErrorMessage(documentsQuery.error)} />
       ) : null}
@@ -87,6 +79,6 @@ export default function ClientDocumentsPage() {
           <EmptyState title="Aucun document transmis" description="Ajoutez votre carte d’identité et votre permis de conduire pour finaliser votre profil." />
         </div>
       ) : null}
-    </section>
+    </div>
   )
 }

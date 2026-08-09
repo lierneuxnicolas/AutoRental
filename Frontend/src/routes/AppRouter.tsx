@@ -31,7 +31,6 @@ import TermsPage from '../pages/public/TermsPage'
 import ReservationPage from '../pages/public/ReservationPage'
 import PaymentPage from '../pages/client/PaymentPage'
 import ClientProfilePage from '../pages/client/ClientProfilePage'
-import ClientDocumentsPage from '../pages/client/ClientDocumentsPage'
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -68,7 +67,7 @@ export default function AppRouter() {
                 <PrivateAreaPage
                   title="Mon espace"
                   roleLabel="client"
-                  sections={['Informations personnelles', 'Mes réservations', 'Mes documents', 'Mes factures']}
+                  sections={['Informations personnelles', 'Mes réservations', 'Mes factures']}
                 />
               }
             />
@@ -87,10 +86,6 @@ export default function AppRouter() {
             <Route
               path="profile"
               element={<ClientProfilePage />}
-            />
-            <Route
-              path="documents"
-              element={<ClientDocumentsPage />}
             />
             <Route
               path="invoices"
