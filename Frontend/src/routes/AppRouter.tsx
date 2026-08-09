@@ -34,6 +34,7 @@ import ClientReservationsPage from '../pages/client/ClientReservationsPage'
 import ClientReservationDetailPage from '../pages/client/ClientReservationDetailPage'
 import ClientInvoicesPage from '../pages/client/ClientInvoicesPage'
 import ClientInvoiceDetailPage from '../pages/client/ClientInvoiceDetailPage'
+import ClientNotificationsPage from '../pages/client/ClientNotificationsPage'
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -85,6 +86,10 @@ export default function AppRouter() {
             <Route
               path="profile"
               element={<ClientProfilePage />}
+            />
+            <Route
+              path="notifications"
+              element={<ClientNotificationsPage />}
             />
             <Route
               path="invoices"

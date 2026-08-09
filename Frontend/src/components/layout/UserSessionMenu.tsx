@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { ChevronDown } from 'lucide-react'
+import { Bell, ChevronDown } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
+import { getUnreadNotificationCount } from '../../services/notificationService'
 
 interface MenuItem {
   label: string
@@ -78,6 +80,17 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
   const roleConfig = roleConfigs[role]
   const isClient = role === 'CLIENT'
 
+  const unreadCountQuery = useQuery({
+    queryKey: ['client-notifications-count'],
+    queryFn: getUnreadNotificationCount,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    enabled: isClient,
+  })
+
+  const unreadCount = unreadCountQuery.data?.unread_count ?? 0
+  const unreadCountLabel = unreadCount > 9 ? '9+' : unreadCount.toString()
+
   const firstName = useMemo(() => {
     const trimmed = user?.first_name?.trim()
 
@@ -92,6 +105,7 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
     () => [
       { label: 'Tableau de bord', to: '/client' },
       { label: 'Mes réservations', to: '/client/reservations' },
+      { label: 'Notifications', to: '/client/notifications' },
       { label: 'Mon profil', to: '/client/profile' },
       { label: 'Mes factures', to: '/client/invoices' },
     ],
@@ -157,6 +171,25 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
 
   return (
     <div ref={containerRef} className={wrapperClassName}>
+      {isClient ? (
+        <Link
+          to="/client/notifications"
+          onClick={() => {
+            closeMenu()
+            onAction?.()
+          }}
+          className="relative inline-flex items-center justify-center rounded-2xl border border-slate-200 p-2 text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB]"
+          aria-label={`Voir les notifications (${unreadCount} non lues)`}
+        >
+          <Bell className="h-4 w-4" />
+          {unreadCount > 0 ? (
+            <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#DC2626] px-1 text-[11px] font-semibold text-white">
+              {unreadCountLabel}
+            </span>
+          ) : null}
+        </Link>
+      ) : null}
+
       <button
         type="button"
         className={triggerClassName}
