@@ -4,6 +4,13 @@ export interface ReservationCreateRequest {
   end_at: string
 }
 
+export interface ReservationListQueryParams {
+  ordering?: string
+  page?: number
+  search?: string
+  status?: string
+}
+
 export type ReservationStatus =
   | 'BROUILLON'
   | 'EN_ATTENTE_CAUTION'
@@ -44,3 +51,19 @@ export interface ReservationCreateResponse {
 }
 
 export type ReservationDetail = ReservationCreateResponse
+
+export interface PaginatedReservationListResponse {
+  count: number
+  next: string | null
+  previous: string | null
+  results: ReservationDetail[]
+}
+
+export interface ReservationCancelRequest {
+  reason: string
+}
+
+export interface ReservationCancelResponse {
+  message: string
+  reservation: ReservationDetail
+}
