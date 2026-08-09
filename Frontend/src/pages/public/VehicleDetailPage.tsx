@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AxiosError } from 'axios'
 import { Alert, EmptyState, LoadingSpinner } from '../../components/feedback'
 import Button from '../../components/ui/Button'
@@ -54,6 +54,8 @@ function formatRate(rate: string): string {
 
 export default function VehicleDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [vehicle, setVehicle] = useState<PublicVehicle | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -110,6 +112,30 @@ export default function VehicleDetailPage() {
 
   const gallery = useMemo(() => (vehicle ? buildGallery(vehicle) : null), [vehicle])
   const status = useMemo(() => (vehicle ? statusToBadge(vehicle.public_status) : null), [vehicle])
+
+  const handleAvailabilityClick = () => {
+    const start = searchParams.get('start')
+    const end = searchParams.get('end')
+
+    if (start && end) {
+      navigate(`/search?vehicleId=${vehicle?.id ?? id}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`)
+      return
+    }
+
+    navigate(`/search?vehicleId=${vehicle?.id ?? id}`)
+  }
+
+  const handleSimulationClick = () => {
+    const start = searchParams.get('start')
+    const end = searchParams.get('end')
+
+    if (start && end) {
+      navigate(`/simulation?vehicleId=${vehicle?.id ?? id}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`)
+      return
+    }
+
+    navigate(`/simulation?vehicleId=${vehicle?.id ?? id}`)
+  }
 
   if (isLoading) {
     return (
@@ -188,7 +214,7 @@ export default function VehicleDetailPage() {
                 className="h-64 w-full rounded-2xl object-cover sm:h-80"
               />
             ) : (
-              <div className="flex h-64 w-full items-center justify-center rounded-2xl bg-gradient-to-br from-slate-50 to-slate-200 sm:h-80">
+              <div className="flex h-64 w-full items-center justify-center rounded-2xl bg-linear-to-br from-slate-50 to-slate-200 sm:h-80">
                 <p className="rounded-full bg-white/90 px-4 py-2 text-sm font-medium text-slate-600">
                   Aucune photo principale disponible
                 </p>
@@ -214,12 +240,8 @@ export default function VehicleDetailPage() {
             header={<h2 className="text-lg font-semibold text-[#1F2937]">Tarif journalier</h2>}
             footer={
               <div className="flex flex-col gap-3">
-                <Link to={`/search?vehicleId=${vehicle.id}`} className="w-full">
-                  <Button className="w-full">Verifier la disponibilite</Button>
-                </Link>
-                <Link to={`/search?vehicleId=${vehicle.id}`} className="w-full">
-                  <Button variant="secondary" className="w-full">Simuler le prix</Button>
-                </Link>
+                <Button className="w-full" onClick={handleAvailabilityClick}>Verifier la disponibilite</Button>
+                <Button variant="secondary" className="w-full" onClick={handleSimulationClick}>Simuler le prix</Button>
               </div>
             }
           >

@@ -11,6 +11,7 @@ import HomePage from '../pages/public/HomePage'
 import VehiclesPage from '../pages/public/VehiclesPage'
 import VehicleDetailPage from '../pages/public/VehicleDetailPage'
 import SearchPage from '../pages/public/SearchPage'
+import SimulationPage from '../pages/public/SimulationPage'
 import LoginPage from '../pages/public/LoginPage'
 import RegisterPage from '../pages/public/RegisterPage'
 import ForgotPasswordPage from '../pages/public/ForgotPasswordPage'
@@ -51,6 +52,7 @@ export default function AppRouter() {
           <Route path="/vehicles" element={<VehiclesPage />} />
           <Route path="/vehicles/:id" element={<VehicleDetailPage />} />
           <Route path="/search" element={<SearchPage />} />
+          <Route path="/simulation" element={<SimulationPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />

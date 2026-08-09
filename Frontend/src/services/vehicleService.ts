@@ -1,5 +1,6 @@
 import api from './api'
 import type { PaginatedResponse, PublicVehicle, VehiclesApiResponse } from '../types/vehicle'
+import type { PriceSimulationRequest, PriceSimulationResponse } from '../types/simulation'
 
 export interface GetVehiclesParams {
   page?: number
@@ -30,5 +31,10 @@ export async function getAvailableVehicles(params?: GetAvailableVehiclesParams):
 
 export async function getVehicleById(id: number | string): Promise<PublicVehicle> {
   const { data } = await api.get<PublicVehicle>(`/vehicles/${id}/`)
+  return data
+}
+
+export async function simulatePrice(payload: PriceSimulationRequest): Promise<PriceSimulationResponse> {
+  const { data } = await api.post<PriceSimulationResponse>('/simulations/', payload)
   return data
 }
