@@ -42,3 +42,5 @@ export interface ReservationCreateResponse {
   cancelled_at?: string | null
   cancellation_reason?: string
 }
+
+export type ReservationDetail = ReservationCreateResponse
