@@ -1,11 +1,23 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import {
+  CarFront,
+  CircleGauge,
+  ClipboardList,
+  CreditCard,
+  FileCheck,
+  FileText,
+  History,
+  Receipt,
+  Settings,
+  Shield,
+  UserCircle2,
+  Users,
+  Wrench,
+} from 'lucide-react'
 import PublicLayout from '../components/layout/PublicLayout'
 import ProtectedRoute from './ProtectedRoute'
-import ClientLayout from '../components/layout/ClientLayout'
-import ManagerLayout from '../components/layout/ManagerLayout'
-import MechanicLayout from '../components/layout/MechanicLayout'
-import CleaningLayout from '../components/layout/CleaningLayout'
-import AdminLayout from '../components/layout/AdminLayout'
+import FeaturePlaceholderPage from '../pages/private/FeaturePlaceholderPage'
+import PrivateAreaPage from '../pages/private/PrivateAreaPage'
 
 import HomePage from '../pages/public/HomePage'
 import VehiclesPage from '../pages/public/VehiclesPage'
@@ -20,26 +32,6 @@ import ResetPasswordPage from '../pages/public/ResetPasswordPage'
 import TermsPage from '../pages/public/TermsPage'
 import ReservationPage from '../pages/public/ReservationPage'
 import PaymentPage from '../pages/client/PaymentPage'
-
-function ClientDashboard() {
-  return <div className="text-3xl font-bold">Dashboard client</div>
-}
-
-function ManagerDashboard() {
-  return <div className="text-3xl font-bold">Dashboard gestionnaire</div>
-}
-
-function MechanicDashboard() {
-  return <div className="text-3xl font-bold">Dashboard mécanicien</div>
-}
-
-function CleaningDashboard() {
-  return <div className="text-3xl font-bold">Dashboard nettoyage</div>
-}
-
-function AdminDashboard() {
-  return <div className="text-3xl font-bold">Dashboard administrateur</div>
-}
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -66,32 +58,284 @@ export default function AppRouter() {
         </Route>
 
         <Route element={<ProtectedRoute allowedRoles={['CLIENT']} />}>
-          <Route path="/client" element={<ClientLayout />}>
-            <Route index element={<ClientDashboard />} />
+          <Route
+            path="/client"
+            element={<PublicLayout />}
+          >
+            <Route
+              index
+              element={
+                <PrivateAreaPage
+                  title="Mon espace"
+                  roleLabel="client"
+                  sections={['Informations personnelles', 'Mes réservations', 'Mes documents', 'Mes factures']}
+                />
+              }
+            />
+            <Route
+              path="reservations"
+              element={
+                <FeaturePlaceholderPage
+                  title="Mes réservations"
+                  description="Consultez l'historique et le suivi de vos réservations."
+                  icon={ClipboardList}
+                  backLink="/client"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="profile"
+              element={
+                <FeaturePlaceholderPage
+                  title="Mon profil"
+                  description="Gérez vos informations personnelles et vos préférences de compte."
+                  icon={UserCircle2}
+                  backLink="/client"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="documents"
+              element={
+                <FeaturePlaceholderPage
+                  title="Mes documents"
+                  description="Retrouvez vos documents d'identité et justificatifs transmis."
+                  icon={FileText}
+                  backLink="/client"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="invoices"
+              element={
+                <FeaturePlaceholderPage
+                  title="Mes factures"
+                  description="Accédez à vos factures et à vos justificatifs de paiement."
+                  icon={Receipt}
+                  backLink="/client"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
           </Route>
         </Route>
 
         <Route element={<ProtectedRoute allowedRoles={['GESTIONNAIRE_COMPTABLE', 'ADMINISTRATEUR']} />}>
-          <Route path="/manager" element={<ManagerLayout />}>
-            <Route index element={<ManagerDashboard />} />
+          <Route path="/manager" element={<PublicLayout />}>
+            <Route
+              index
+              element={
+                <PrivateAreaPage
+                  title="Tableau de bord"
+                  roleLabel="gestionnaire"
+                  sections={['Gestion des véhicules', 'Réservations', 'Documents à valider', 'Paiements']}
+                />
+              }
+            />
+            <Route
+              path="vehicles"
+              element={
+                <FeaturePlaceholderPage
+                  title="Gestion des véhicules"
+                  description="Pilotez l'état et la disponibilité de la flotte."
+                  icon={CarFront}
+                  backLink="/manager"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="reservations"
+              element={
+                <FeaturePlaceholderPage
+                  title="Réservations"
+                  description="Suivez et administrez les réservations clients."
+                  icon={ClipboardList}
+                  backLink="/manager"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="documents"
+              element={
+                <FeaturePlaceholderPage
+                  title="Documents à valider"
+                  description="Validez les documents déposés par les clients."
+                  icon={FileCheck}
+                  backLink="/manager"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="payments"
+              element={
+                <FeaturePlaceholderPage
+                  title="Paiements"
+                  description="Consultez les opérations de paiement et leur statut."
+                  icon={CreditCard}
+                  backLink="/manager"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
           </Route>
         </Route>
 
         <Route element={<ProtectedRoute allowedRoles={['MECANICIEN']} />}>
-          <Route path="/mechanic" element={<MechanicLayout />}>
-            <Route index element={<MechanicDashboard />} />
+          <Route path="/mechanic" element={<PublicLayout />}>
+            <Route
+              index
+              element={
+                <PrivateAreaPage
+                  title="Tableau de bord"
+                  roleLabel="mécanicien"
+                  sections={['Véhicules à réparer', 'Interventions', 'Historique']}
+                />
+              }
+            />
+            <Route
+              path="vehicles"
+              element={
+                <FeaturePlaceholderPage
+                  title="Véhicules à réparer"
+                  description="Visualisez les véhicules nécessitant une intervention mécanique."
+                  icon={CarFront}
+                  backLink="/mechanic"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="interventions"
+              element={
+                <FeaturePlaceholderPage
+                  title="Interventions"
+                  description="Suivez vos interventions en cours et planifiées."
+                  icon={Wrench}
+                  backLink="/mechanic"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="history"
+              element={
+                <FeaturePlaceholderPage
+                  title="Historique"
+                  description="Consultez les interventions mécaniques terminées."
+                  icon={History}
+                  backLink="/mechanic"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
           </Route>
         </Route>
 
         <Route element={<ProtectedRoute allowedRoles={['NETTOYEUR']} />}>
-          <Route path="/cleaning" element={<CleaningLayout />}>
-            <Route index element={<CleaningDashboard />} />
+          <Route path="/cleaning" element={<PublicLayout />}>
+            <Route
+              index
+              element={
+                <PrivateAreaPage
+                  title="Tableau de bord"
+                  roleLabel="nettoyage"
+                  sections={['Véhicules à nettoyer', 'Historique']}
+                />
+              }
+            />
+            <Route
+              path="vehicles"
+              element={
+                <FeaturePlaceholderPage
+                  title="Véhicules à nettoyer"
+                  description="Retrouvez les véhicules à traiter pour la mise à disposition."
+                  icon={CarFront}
+                  backLink="/cleaning"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="history"
+              element={
+                <FeaturePlaceholderPage
+                  title="Historique"
+                  description="Consultez les opérations de nettoyage déjà effectuées."
+                  icon={History}
+                  backLink="/cleaning"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
           </Route>
         </Route>
 
         <Route element={<ProtectedRoute allowedRoles={['ADMINISTRATEUR']} />}>
-          <Route path="/admin" element={<AdminLayout />}>
-            <Route index element={<AdminDashboard />} />
+          <Route path="/admin" element={<PublicLayout />}>
+            <Route
+              index
+              element={
+                <PrivateAreaPage
+                  title="Tableau de bord"
+                  roleLabel="administrateur"
+                  sections={['Utilisateurs', 'Rôles', 'Paramètres', 'Statistiques']}
+                />
+              }
+            />
+            <Route
+              path="users"
+              element={
+                <FeaturePlaceholderPage
+                  title="Utilisateurs"
+                  description="Gérez les comptes utilisateurs et leurs informations clés."
+                  icon={Users}
+                  backLink="/admin"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="roles"
+              element={
+                <FeaturePlaceholderPage
+                  title="Rôles"
+                  description="Administrez les rôles et leurs droits d'accès."
+                  icon={Shield}
+                  backLink="/admin"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="settings"
+              element={
+                <FeaturePlaceholderPage
+                  title="Paramètres"
+                  description="Configurez les paramètres de fonctionnement de la plateforme."
+                  icon={Settings}
+                  backLink="/admin"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
+            <Route
+              path="statistics"
+              element={
+                <FeaturePlaceholderPage
+                  title="Statistiques"
+                  description="Analysez les indicateurs de performance de l'activité."
+                  icon={CircleGauge}
+                  backLink="/admin"
+                  backLabel="Retour au tableau de bord"
+                />
+              }
+            />
           </Route>
         </Route>
 

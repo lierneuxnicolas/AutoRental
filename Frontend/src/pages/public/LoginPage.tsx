@@ -16,14 +16,6 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Le mot de passe est obligatoire.'),
 })
 
-const roleRedirectMap: Record<string, string> = {
-  CLIENT: '/client',
-  GESTIONNAIRE_COMPTABLE: '/manager',
-  MECANICIEN: '/mechanic',
-  NETTOYEUR: '/cleaning',
-  ADMINISTRATEUR: '/admin',
-}
-
 export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -46,7 +38,7 @@ export default function LoginPage() {
     setServerError(null)
 
     try {
-      const user = await login(credentials)
+      await login(credentials)
       const fromPath = (location.state as { from?: string } | null)?.from
 
       if (typeof fromPath === 'string' && fromPath.startsWith('/')) {
@@ -54,10 +46,7 @@ export default function LoginPage() {
         return
       }
 
-      const normalizedRole = user.role?.toUpperCase()
-      const redirectPath = roleRedirectMap[normalizedRole] ?? '/client'
-
-      navigate(redirectPath)
+      navigate('/')
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const status = error.response?.status
