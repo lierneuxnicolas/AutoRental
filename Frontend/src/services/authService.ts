@@ -3,8 +3,11 @@ import type {
   AuthResponse,
   AuthTokens,
   AuthUser,
+  ClientDocument,
+  ClientDocumentListResponse,
   ClientProfileMe,
   ClientProfileProgress,
+  ClientProfileUpdateRequest,
   LoginCredentials,
   PasswordResetConfirmRequest,
   PasswordResetRequest,
@@ -60,5 +63,24 @@ export async function getClientProfileMe(): Promise<ClientProfileMe> {
 
 export async function getClientProfileProgress(): Promise<ClientProfileProgress> {
   const { data } = await api.get<ClientProfileProgress>('/users/me/profile-progress/')
+  return data
+}
+
+export async function updateClientProfile(payload: ClientProfileUpdateRequest): Promise<ClientProfileMe> {
+  const { data } = await api.patch<ClientProfileMe>('/users/me/', payload)
+  return data
+}
+
+export async function getClientDocuments(): Promise<ClientDocumentListResponse> {
+  const { data } = await api.get<ClientDocumentListResponse>('/users/me/documents/')
+  return data
+}
+
+export async function createClientDocument(formData: FormData): Promise<ClientDocument> {
+  const { data } = await api.post<ClientDocument>('/users/me/documents/', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
   return data
 }
