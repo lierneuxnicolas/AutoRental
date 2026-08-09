@@ -6,7 +6,6 @@ import {
   CreditCard,
   FileCheck,
   History,
-  Receipt,
   Settings,
   Shield,
   Users,
@@ -31,6 +30,10 @@ import TermsPage from '../pages/public/TermsPage'
 import ReservationPage from '../pages/public/ReservationPage'
 import PaymentPage from '../pages/client/PaymentPage'
 import ClientProfilePage from '../pages/client/ClientProfilePage'
+import ClientReservationsPage from '../pages/client/ClientReservationsPage'
+import ClientReservationDetailPage from '../pages/client/ClientReservationDetailPage'
+import ClientInvoicesPage from '../pages/client/ClientInvoicesPage'
+import ClientInvoiceDetailPage from '../pages/client/ClientInvoiceDetailPage'
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -73,15 +76,11 @@ export default function AppRouter() {
             />
             <Route
               path="reservations"
-              element={
-                <FeaturePlaceholderPage
-                  title="Mes réservations"
-                  description="Consultez l'historique et le suivi de vos réservations."
-                  icon={ClipboardList}
-                  backLink="/client"
-                  backLabel="Retour au tableau de bord"
-                />
-              }
+              element={<ClientReservationsPage />}
+            />
+            <Route
+              path="reservations/:id"
+              element={<ClientReservationDetailPage />}
             />
             <Route
               path="profile"
@@ -89,15 +88,11 @@ export default function AppRouter() {
             />
             <Route
               path="invoices"
-              element={
-                <FeaturePlaceholderPage
-                  title="Mes factures"
-                  description="Accédez à vos factures et à vos justificatifs de paiement."
-                  icon={Receipt}
-                  backLink="/client"
-                  backLabel="Retour au tableau de bord"
-                />
-              }
+              element={<ClientInvoicesPage />}
+            />
+            <Route
+              path="invoices/:id"
+              element={<ClientInvoiceDetailPage />}
             />
           </Route>
         </Route>
