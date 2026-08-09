@@ -18,6 +18,8 @@ import ForgotPasswordPage from '../pages/public/ForgotPasswordPage'
 import VerifyEmailPage from '../pages/public/VerifyEmailPage'
 import ResetPasswordPage from '../pages/public/ResetPasswordPage'
 import TermsPage from '../pages/public/TermsPage'
+import ReservationPage from '../pages/public/ReservationPage'
+import PaymentPage from '../pages/client/PaymentPage'
 
 function ClientDashboard() {
   return <div className="text-3xl font-bold">Dashboard client</div>
@@ -59,6 +61,8 @@ export default function AppRouter() {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/terms" element={<TermsPage />} />
+          <Route path="/reservation" element={<ReservationPage />} />
+          <Route path="/payment" element={<PaymentPage />} />
         </Route>
 
         <Route element={<ProtectedRoute allowedRoles={['CLIENT']} />}>

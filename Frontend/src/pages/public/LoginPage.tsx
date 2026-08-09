@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useLocation } from 'react-router-dom'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import axios from 'axios'
@@ -26,6 +26,7 @@ const roleRedirectMap: Record<string, string> = {
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { login } = useAuth()
   const [serverError, setServerError] = useState<string | null>(null)
 
@@ -46,6 +47,12 @@ export default function LoginPage() {
 
     try {
       const user = await login(credentials)
+      const fromPath = (location.state as { from?: string } | null)?.from
+
+      if (typeof fromPath === 'string' && fromPath.startsWith('/')) {
+        navigate(fromPath)
+        return
+      }
 
       const normalizedRole = user.role?.toUpperCase()
       const redirectPath = roleRedirectMap[normalizedRole] ?? '/client'
