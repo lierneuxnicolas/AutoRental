@@ -32,6 +32,8 @@ import PaymentPage from '../pages/client/PaymentPage'
 import ClientProfilePage from '../pages/client/ClientProfilePage'
 import ClientReservationsPage from '../pages/client/ClientReservationsPage'
 import ClientReservationDetailPage from '../pages/client/ClientReservationDetailPage'
+import DepartureInspectionPage from '../pages/client/DepartureInspectionPage'
+import ReturnInspectionPage from '../pages/client/ReturnInspectionPage'
 import ClientInvoicesPage from '../pages/client/ClientInvoicesPage'
 import ClientInvoiceDetailPage from '../pages/client/ClientInvoiceDetailPage'
 import ClientNotificationsPage from '../pages/client/ClientNotificationsPage'
@@ -82,6 +84,14 @@ export default function AppRouter() {
             <Route
               path="reservations/:id"
               element={<ClientReservationDetailPage />}
+            />
+            <Route
+              path="reservations/:id/departure-inspection"
+              element={<DepartureInspectionPage />}
+            />
+            <Route
+              path="reservations/:id/return-inspection"
+              element={<ReturnInspectionPage />}
             />
             <Route
               path="profile"
