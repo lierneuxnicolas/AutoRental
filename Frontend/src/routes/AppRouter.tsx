@@ -4,7 +4,6 @@ import {
   CircleGauge,
   ClipboardList,
   CreditCard,
-  FileCheck,
   History,
   Settings,
   Shield,
@@ -37,6 +36,7 @@ import ReturnInspectionPage from '../pages/client/ReturnInspectionPage'
 import ClientInvoicesPage from '../pages/client/ClientInvoicesPage'
 import ClientInvoiceDetailPage from '../pages/client/ClientInvoiceDetailPage'
 import ClientNotificationsPage from '../pages/client/ClientNotificationsPage'
+import ManagerDocumentsPage from '../pages/manager/ManagerDocumentsPage'
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -150,15 +150,7 @@ export default function AppRouter() {
             />
             <Route
               path="documents"
-              element={
-                <FeaturePlaceholderPage
-                  title="Documents à valider"
-                  description="Validez les documents déposés par les clients."
-                  icon={FileCheck}
-                  backLink="/manager"
-                  backLabel="Retour au tableau de bord"
-                />
-              }
+              element={<ManagerDocumentsPage />}
             />
             <Route
               path="payments"
