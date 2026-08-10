@@ -1,11 +1,13 @@
 import api from './api'
 import type { PaginatedResponse, PublicVehicle, VehiclesApiResponse } from '../types/vehicle'
 import type { PriceSimulationRequest, PriceSimulationResponse } from '../types/simulation'
+import type { VehicleManagementStatus } from '../types/managementVehicle'
 
 export interface GetVehiclesParams {
   page?: number
   search?: string
   ordering?: string
+  status?: VehicleManagementStatus
 }
 
 export interface GetAvailableVehiclesParams {

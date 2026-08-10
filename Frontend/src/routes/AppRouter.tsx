@@ -38,6 +38,7 @@ import ClientInvoiceDetailPage from '../pages/client/ClientInvoiceDetailPage'
 import ClientNotificationsPage from '../pages/client/ClientNotificationsPage'
 import ManagerDocumentsPage from '../pages/manager/ManagerDocumentsPage'
 import ManagerDocumentDetailPage from '../pages/manager/ManagerDocumentDetailPage'
+import ManagerVehiclesPage from '../pages/manager/ManagerVehiclesPage'
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -127,15 +128,7 @@ export default function AppRouter() {
             />
             <Route
               path="vehicles"
-              element={
-                <FeaturePlaceholderPage
-                  title="Gestion des véhicules"
-                  description="Pilotez l'état et la disponibilité de la flotte."
-                  icon={CarFront}
-                  backLink="/manager"
-                  backLabel="Retour au tableau de bord"
-                />
-              }
+              element={<ManagerVehiclesPage />}
             />
             <Route
               path="reservations"
