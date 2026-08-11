@@ -1,6 +1,8 @@
 from django.urls import path
 
 from accounts.views import (
+    AdminUserListView,
+    AdminUserStatusUpdateView,
     ClientDocumentDetailView,
     ClientDocumentListCreateView,
     ClientProfileMeView,
@@ -34,6 +36,8 @@ urlpatterns = [
         name="auth-password-reset-confirm",
     ),
     path("auth/me/", MeView.as_view(), name="auth-me"),
+    path("admin/users/", AdminUserListView.as_view(), name="admin-users"),
+    path("admin/users/<int:pk>/status/", AdminUserStatusUpdateView.as_view(), name="admin-users-status"),
     path("users/me/", ClientProfileMeView.as_view(), name="users-me"),
     path("users/me/documents/", ClientDocumentListCreateView.as_view(), name="users-me-documents"),
     path(

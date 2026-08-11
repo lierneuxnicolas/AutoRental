@@ -6,7 +6,6 @@ import {
   History,
   Settings,
   Shield,
-  Users,
 } from 'lucide-react'
 import PublicLayout from '../components/layout/PublicLayout'
 import ProtectedRoute from './ProtectedRoute'
@@ -47,6 +46,9 @@ import CleaningInterventionDetailPage from '../pages/cleaning/CleaningInterventi
 import CleaningInterventionsPage from '../pages/cleaning/CleaningInterventionsPage'
 import MechanicInterventionDetailPage from '../pages/mechanic/MechanicInterventionDetailPage'
 import MechanicInterventionsPage from '../pages/mechanic/MechanicInterventionsPage'
+import AdminDashboardPage from '../pages/admin/AdminDashboardPage'
+import AdminInvoicesPage from '../pages/admin/AdminInvoicesPage'
+import AdminUsersPage from '../pages/admin/AdminUsersPage'
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -281,27 +283,42 @@ export default function AppRouter() {
 
         <Route element={<ProtectedRoute allowedRoles={['ADMINISTRATEUR']} />}>
           <Route path="/admin" element={<PublicLayout />}>
+            <Route index element={<AdminDashboardPage />} />
             <Route
-              index
-              element={
-                <PrivateAreaPage
-                  title="Tableau de bord"
-                  roleLabel="administrateur"
-                  sections={['Utilisateurs', 'Rôles', 'Paramètres', 'Statistiques']}
-                />
-              }
+              path="reservations"
+              element={<ManagerReservationsPage basePath="/admin" />}
+            />
+            <Route
+              path="reservations/:id"
+              element={<ManagerReservationDetailPage basePath="/admin" />}
+            />
+            <Route
+              path="vehicles"
+              element={<ManagerVehiclesPage basePath="/admin" />}
+            />
+            <Route
+              path="vehicles/new"
+              element={<ManagerVehicleCreatePage basePath="/admin" />}
+            />
+            <Route
+              path="vehicles/:id/edit"
+              element={<ManagerVehicleEditPage basePath="/admin" />}
+            />
+            <Route
+              path="vehicles/:id/photos"
+              element={<ManagerVehiclePhotosPage basePath="/admin" />}
+            />
+            <Route
+              path="interventions"
+              element={<ManagerInterventionsPage />}
+            />
+            <Route
+              path="invoices"
+              element={<AdminInvoicesPage />}
             />
             <Route
               path="users"
-              element={
-                <FeaturePlaceholderPage
-                  title="Utilisateurs"
-                  description="Gérez les comptes utilisateurs et leurs informations clés."
-                  icon={Users}
-                  backLink="/admin"
-                  backLabel="Retour au tableau de bord"
-                />
-              }
+              element={<AdminUsersPage />}
             />
             <Route
               path="roles"

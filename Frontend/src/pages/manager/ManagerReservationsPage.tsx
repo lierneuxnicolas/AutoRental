@@ -11,6 +11,10 @@ import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge
 import { getManagementReservations } from '../../services/managementReservationService'
 import type { ManagementReservationStatus, ReservationManagementDetail } from '../../types/managementReservation'
 
+interface ManagerReservationsPageProps {
+  basePath?: string
+}
+
 type ReservationFilter =
   | 'all'
   | 'BROUILLON'
@@ -84,7 +88,7 @@ function clientLabel(reservation: ReservationManagementDetail): string | null {
   return reservation.client_summary.email || null
 }
 
-export default function ManagerReservationsPage() {
+export default function ManagerReservationsPage({ basePath = '/manager' }: ManagerReservationsPageProps) {
   const [search, setSearch] = useState('')
   const [activeFilter, setActiveFilter] = useState<ReservationFilter>('all')
 
@@ -247,7 +251,7 @@ export default function ManagerReservationsPage() {
                 </div>
 
                 <div className="mt-5 flex justify-end">
-                  <Link to={`/manager/reservations/${reservation.id}`}>
+                  <Link to={`${basePath}/reservations/${reservation.id}`}>
                     <Button variant="secondary" size="sm">
                       Voir le detail
                     </Button>

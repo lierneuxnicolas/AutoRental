@@ -16,6 +16,10 @@ import type { VehicleManagementStatus, VehicleManagementStatusUpdateRequest } fr
 import type { PaginatedResponse, PublicVehicle } from '../../types/vehicle'
 import { resolveMediaUrl } from '../../utils/media'
 
+interface ManagerVehiclesPageProps {
+  basePath?: string
+}
+
 type StatusFilter = 'all' | VehicleManagementStatus
 
 type VehicleWithOptionalRegistration = PublicVehicle & {
@@ -102,9 +106,10 @@ function toPaginationPayload(payload: Awaited<ReturnType<typeof getVehicles>>): 
 interface VehicleCardProps {
   vehicle: PublicVehicle
   onChangeStatus: (vehicle: PublicVehicle) => void
+  basePath: string
 }
 
-function VehicleMobileCard({ vehicle, onChangeStatus }: VehicleCardProps) {
+function VehicleMobileCard({ vehicle, onChangeStatus, basePath }: VehicleCardProps) {
   const statusUi = mapStatusToUi(vehicle.public_status)
   const registrationNumber = getRegistrationNumber(vehicle)
   const mainPhotoUrl = resolveMediaUrl(vehicle.main_photo?.file)
@@ -148,10 +153,10 @@ function VehicleMobileCard({ vehicle, onChangeStatus }: VehicleCardProps) {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Link to={`/manager/vehicles/${vehicle.id}/edit`}>
+          <Link to={`${basePath}/vehicles/${vehicle.id}/edit`}>
             <Button variant="secondary" size="sm">Modifier</Button>
           </Link>
-          <Link to={`/manager/vehicles/${vehicle.id}/photos`}>
+          <Link to={`${basePath}/vehicles/${vehicle.id}/photos`}>
             <Button variant="secondary" size="sm">Gérer les photos</Button>
           </Link>
           <Button variant="secondary" size="sm" onClick={() => onChangeStatus(vehicle)}>Changer le statut</Button>
@@ -161,7 +166,7 @@ function VehicleMobileCard({ vehicle, onChangeStatus }: VehicleCardProps) {
   )
 }
 
-function VehicleDesktopRow({ vehicle, onChangeStatus }: VehicleCardProps) {
+function VehicleDesktopRow({ vehicle, onChangeStatus, basePath }: VehicleCardProps) {
   const statusUi = mapStatusToUi(vehicle.public_status)
   const registrationNumber = getRegistrationNumber(vehicle)
   const mainPhotoUrl = resolveMediaUrl(vehicle.main_photo?.file)
@@ -198,10 +203,10 @@ function VehicleDesktopRow({ vehicle, onChangeStatus }: VehicleCardProps) {
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-2">
-          <Link to={`/manager/vehicles/${vehicle.id}/edit`}>
+          <Link to={`${basePath}/vehicles/${vehicle.id}/edit`}>
             <Button variant="secondary" size="sm">Modifier</Button>
           </Link>
-          <Link to={`/manager/vehicles/${vehicle.id}/photos`}>
+          <Link to={`${basePath}/vehicles/${vehicle.id}/photos`}>
             <Button variant="secondary" size="sm">Gérer les photos</Button>
           </Link>
           <Button variant="secondary" size="sm" onClick={() => onChangeStatus(vehicle)}>Changer le statut</Button>
@@ -245,7 +250,7 @@ function getStatusSubmitError(error: unknown): string {
   return 'Impossible de changer le statut pour le moment.'
 }
 
-export default function ManagerVehiclesPage() {
+export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVehiclesPageProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
@@ -345,7 +350,7 @@ export default function ManagerVehiclesPage() {
           </p>
         </div>
 
-        <Link to="/manager/vehicles/new">
+        <Link to={`${basePath}/vehicles/new`}>
           <Button>Ajouter un véhicule</Button>
         </Link>
       </div>
@@ -461,7 +466,7 @@ export default function ManagerVehiclesPage() {
         <>
           <div className="flex flex-col gap-4 lg:hidden">
             {vehicles.map((vehicle) => (
-              <VehicleMobileCard key={vehicle.id} vehicle={vehicle} onChangeStatus={handleOpenStatusForm} />
+              <VehicleMobileCard key={vehicle.id} vehicle={vehicle} onChangeStatus={handleOpenStatusForm} basePath={basePath} />
             ))}
           </div>
 
@@ -481,7 +486,7 @@ export default function ManagerVehiclesPage() {
               </thead>
               <tbody>
                 {vehicles.map((vehicle) => (
-                  <VehicleDesktopRow key={vehicle.id} vehicle={vehicle} onChangeStatus={handleOpenStatusForm} />
+                  <VehicleDesktopRow key={vehicle.id} vehicle={vehicle} onChangeStatus={handleOpenStatusForm} basePath={basePath} />
                 ))}
               </tbody>
             </table>

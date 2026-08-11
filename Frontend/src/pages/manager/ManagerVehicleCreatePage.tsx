@@ -8,6 +8,10 @@ import VehicleManagementForm from '../../components/vehicles/VehicleManagementFo
 import { createVehicle, uploadVehiclePhoto } from '../../services/managementVehicleService'
 import type { VehicleManagementCreateRequest, VehicleManagementStatus } from '../../types/managementVehicle'
 
+interface ManagerVehicleCreatePageProps {
+  basePath?: string
+}
+
 interface BackendValidationErrorPayload {
   detail?: string
   non_field_errors?: string[]
@@ -106,7 +110,7 @@ function mapBackendFieldErrors(payload: BackendValidationErrorPayload | undefine
   return fieldErrors
 }
 
-export default function ManagerVehicleCreatePage() {
+export default function ManagerVehicleCreatePage({ basePath = '/manager' }: ManagerVehicleCreatePageProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [apiError, setApiError] = useState<string | null>(null)
@@ -156,7 +160,7 @@ export default function ManagerVehicleCreatePage() {
             : `Le vehicule a ete ajoute. Photos importees: ${uploadedPhotos}/${selectedPhotos.length}.`
           : 'Le vehicule a ete ajoute avec succes.'
 
-      navigate('/manager/vehicles', {
+      navigate(`${basePath}/vehicles`, {
         state: { successMessage },
       })
     } catch (error) {
@@ -204,7 +208,7 @@ export default function ManagerVehicleCreatePage() {
       />
 
       <div className="flex justify-end">
-        <Link to="/manager/vehicles">
+        <Link to={`${basePath}/vehicles`}>
           <Button type="button" variant="secondary">Annuler</Button>
         </Link>
       </div>

@@ -46,9 +46,10 @@ const roleConfigs: Record<string, RoleConfig> = {
     menuItems: [
       { label: 'Tableau de bord', to: '/admin' },
       { label: 'Utilisateurs', to: '/admin/users' },
-      { label: 'Rôles', to: '/admin/roles' },
-      { label: 'Paramètres', to: '/admin/settings' },
-      { label: 'Statistiques', to: '/admin/statistics' },
+      { label: 'Réservations', to: '/admin/reservations' },
+      { label: 'Véhicules', to: '/admin/vehicles' },
+      { label: 'Interventions', to: '/admin/interventions' },
+      { label: 'Factures', to: '/admin/invoices' },
     ],
   },
   MECANICIEN: {
