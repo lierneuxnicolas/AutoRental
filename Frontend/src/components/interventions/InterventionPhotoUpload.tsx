@@ -4,12 +4,13 @@ import axios from 'axios'
 import Alert from '../feedback/Alert'
 import LoadingSpinner from '../feedback/LoadingSpinner'
 import Button from '../ui/Button'
-import { uploadMechanicInterventionPhoto } from '../../services/mechanicInterventionService'
-import type { MechanicInterventionPhotoResponse } from '../../types/mechanicIntervention'
+import { uploadInterventionPhoto } from '../../services/workerInterventionService'
+import type { WorkerInterventionPhotoResponse, WorkerInterventionRole } from '../../types/workerIntervention'
 
 export interface InterventionPhotoUploadProps {
   interventionId: number
-  onUploadSuccess?: (photo: MechanicInterventionPhotoResponse) => void
+  role?: WorkerInterventionRole
+  onUploadSuccess?: (photo: WorkerInterventionPhotoResponse) => void
 }
 
 interface ApiErrorPayload {
@@ -72,7 +73,7 @@ function extractUploadErrorMessage(error: unknown): string {
   return "La photo n'a pas pu etre envoyee. Veuillez reessayer."
 }
 
-export default function InterventionPhotoUpload({ interventionId, onUploadSuccess }: InterventionPhotoUploadProps) {
+export default function InterventionPhotoUpload({ interventionId, role = 'mechanic', onUploadSuccess }: InterventionPhotoUploadProps) {
   const fileInputId = useId()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -102,7 +103,7 @@ export default function InterventionPhotoUpload({ interventionId, onUploadSucces
         throw new Error('NO_FILE_SELECTED')
       }
 
-      return uploadMechanicInterventionPhoto(interventionId, {
+      return uploadInterventionPhoto(role, interventionId, {
         file: selectedFile,
         caption: caption.trim() || undefined,
       })

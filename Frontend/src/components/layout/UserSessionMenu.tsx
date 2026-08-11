@@ -65,6 +65,7 @@ const roleConfigs: Record<string, RoleConfig> = {
     menuItems: [
       { label: 'Tableau de bord', to: '/cleaning' },
       { label: 'Véhicules à nettoyer', to: '/cleaning/vehicles' },
+      { label: 'Mes interventions', to: '/cleaning/interventions' },
       { label: 'Historique', to: '/cleaning/history' },
     ],
   },

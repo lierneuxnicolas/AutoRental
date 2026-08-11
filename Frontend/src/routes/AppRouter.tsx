@@ -43,6 +43,8 @@ import ManagerVehiclePhotosPage from '../pages/manager/ManagerVehiclePhotosPage'
 import ManagerReservationsPage from '../pages/manager/ManagerReservationsPage'
 import ManagerReservationDetailPage from '../pages/manager/ManagerReservationDetailPage'
 import ManagerInterventionsPage from '../pages/manager/ManagerInterventionsPage'
+import CleaningInterventionDetailPage from '../pages/cleaning/CleaningInterventionDetailPage'
+import CleaningInterventionsPage from '../pages/cleaning/CleaningInterventionsPage'
 import MechanicInterventionDetailPage from '../pages/mechanic/MechanicInterventionDetailPage'
 import MechanicInterventionsPage from '../pages/mechanic/MechanicInterventionsPage'
 
@@ -253,6 +255,14 @@ export default function AppRouter() {
                   backLabel="Retour au tableau de bord"
                 />
               }
+            />
+            <Route
+              path="interventions"
+              element={<CleaningInterventionsPage />}
+            />
+            <Route
+              path="interventions/:id"
+              element={<CleaningInterventionDetailPage />}
             />
             <Route
               path="history"

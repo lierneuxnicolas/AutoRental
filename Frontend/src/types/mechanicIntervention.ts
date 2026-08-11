@@ -1,59 +1,32 @@
-export type MechanicInterventionType = 'MECANIQUE' | 'NETTOYAGE'
+import type {
+  PaginatedWorkerInterventionListResponse,
+  WorkerInterventionAssigneeSummary,
+  WorkerInterventionCompleteRequest,
+  WorkerInterventionListQueryParams,
+  WorkerInterventionPhotoResponse,
+  WorkerInterventionPhotoUploadRequest,
+  WorkerInterventionReservationSummary,
+  WorkerInterventionResponse,
+  WorkerInterventionStatus,
+  WorkerInterventionType,
+  WorkerInterventionVehicleSummary,
+} from './workerIntervention'
 
-export type MechanicInterventionStatus =
-  | 'A_ATTRIBUER'
-  | 'ATTRIBUEE'
-  | 'EN_COURS'
-  | 'TERMINEE'
-  | 'ANNULEE'
+export type MechanicInterventionType = WorkerInterventionType
 
-export interface MechanicInterventionVehicleSummary {
-  id: number
-  registration_number: string
-  brand: string
-  model_name: string
-}
+export type MechanicInterventionStatus = WorkerInterventionStatus
 
-export interface MechanicInterventionReservationSummary {
-  id: number
-  reference: string
-}
+export type MechanicInterventionVehicleSummary = WorkerInterventionVehicleSummary
 
-export interface MechanicInterventionAssigneeSummary {
-  id: number
-  email: string
-  first_name: string
-  last_name: string
-  role: string
-}
+export type MechanicInterventionReservationSummary = WorkerInterventionReservationSummary
 
-export interface MechanicInterventionResponse {
-  id: number
-  reference: string
-  type: string
-  intervention_type: MechanicInterventionType
-  status: MechanicInterventionStatus
-  description: string
-  vehicle: MechanicInterventionVehicleSummary
-  reservation: MechanicInterventionReservationSummary | null
-  assigned_to: MechanicInterventionAssigneeSummary | null
-  created_by: MechanicInterventionAssigneeSummary
-  created_at: string
-  updated_at: string
-}
+export type MechanicInterventionAssigneeSummary = WorkerInterventionAssigneeSummary
 
-export interface PaginatedMechanicInterventionListResponse {
-  count: number
-  next: string | null
-  previous: string | null
-  results: MechanicInterventionResponse[]
-}
+export type MechanicInterventionResponse = WorkerInterventionResponse
 
-export interface MechanicInterventionListQueryParams {
-  ordering?: string
-  page?: number
-  search?: string
-}
+export type PaginatedMechanicInterventionListResponse = PaginatedWorkerInterventionListResponse
+
+export type MechanicInterventionListQueryParams = WorkerInterventionListQueryParams
 
 export interface MechanicInterventionStartRequest {
   reference: string
@@ -62,18 +35,8 @@ export interface MechanicInterventionStartRequest {
   description?: string
 }
 
-export interface MechanicInterventionCompleteRequest {
-  report?: string
-}
+export type MechanicInterventionCompleteRequest = WorkerInterventionCompleteRequest
 
-export interface MechanicInterventionPhotoUploadRequest {
-  file: File
-  caption?: string
-}
+export type MechanicInterventionPhotoUploadRequest = WorkerInterventionPhotoUploadRequest
 
-export interface MechanicInterventionPhotoResponse {
-  id: number
-  file: string | null
-  caption: string
-  created_at: string
-}
+export type MechanicInterventionPhotoResponse = WorkerInterventionPhotoResponse
