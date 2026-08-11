@@ -7,6 +7,7 @@ import Card from '../../components/ui/Card'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import { getVehicleById } from '../../services/vehicleService'
 import type { PublicVehicle, VehiclePhoto } from '../../types/vehicle'
+import { resolveMediaUrl } from '../../utils/media'
 
 function statusToBadge(status: string): { label: string; variant: StatusVariant } {
   const upperStatus = status.toUpperCase()
@@ -207,9 +208,9 @@ export default function VehicleDetailPage() {
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <Card className="lg:col-span-2">
-            {gallery.main ? (
+            {gallery.main && resolveMediaUrl(gallery.main.file) ? (
               <img
-                src={gallery.main.file}
+                src={resolveMediaUrl(gallery.main.file) ?? undefined}
                 alt={`${vehicle.brand} ${vehicle.model_name}`}
                 className="h-64 w-full rounded-2xl object-cover sm:h-80"
               />
@@ -226,7 +227,7 @@ export default function VehicleDetailPage() {
                 {gallery.secondary.map((photo) => (
                   <img
                     key={photo.id}
-                    src={photo.file}
+                    src={resolveMediaUrl(photo.file) ?? undefined}
                     alt={`Photo du vehicule ${vehicle.brand} ${vehicle.model_name}`}
                     className="h-28 w-full rounded-xl object-cover"
                     loading="lazy"

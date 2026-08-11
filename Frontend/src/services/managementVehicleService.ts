@@ -1,5 +1,6 @@
 import api from './api'
 import type {
+  ManagementVehicleDetailResponse,
   ManagementVehicleResponse,
   VehicleManagementCreateRequest,
   VehicleManagementStatusUpdateRequest,
@@ -12,6 +13,13 @@ export async function createVehicle(
   payload: VehicleManagementCreateRequest,
 ): Promise<ManagementVehicleResponse> {
   const { data } = await api.post<ManagementVehicleResponse>('/management/vehicles/', payload)
+  return data
+}
+
+export async function getManagementVehicleById(
+  id: number | string,
+): Promise<ManagementVehicleDetailResponse> {
+  const { data } = await api.get<ManagementVehicleDetailResponse>(`/management/vehicles/${id}/`)
   return data
 }
 
@@ -42,7 +50,11 @@ export async function uploadVehiclePhoto(
     formData.append('caption', payload.caption)
   }
 
-  const { data } = await api.post<VehiclePhotoRead>(`/management/vehicles/${id}/photos/`, formData)
+  const { data } = await api.post<VehiclePhotoRead>(`/management/vehicles/${id}/photos/`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
   return data
 }
 

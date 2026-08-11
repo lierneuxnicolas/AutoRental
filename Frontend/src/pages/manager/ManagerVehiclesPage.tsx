@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
@@ -11,6 +11,7 @@ import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge
 import { getVehicles } from '../../services/vehicleService'
 import type { VehicleManagementStatus } from '../../types/managementVehicle'
 import type { PaginatedResponse, PublicVehicle } from '../../types/vehicle'
+import { resolveMediaUrl } from '../../utils/media'
 
 type StatusFilter = 'all' | VehicleManagementStatus
 
@@ -102,14 +103,15 @@ interface VehicleCardProps {
 function VehicleMobileCard({ vehicle }: VehicleCardProps) {
   const statusUi = mapStatusToUi(vehicle.public_status)
   const registrationNumber = getRegistrationNumber(vehicle)
+  const mainPhotoUrl = resolveMediaUrl(vehicle.main_photo?.file)
 
   return (
     <Card>
       <div className="flex flex-col gap-4">
         <div className="flex items-start gap-4">
-          {vehicle.main_photo?.file ? (
+          {mainPhotoUrl ? (
             <img
-              src={vehicle.main_photo.file}
+              src={mainPhotoUrl}
               alt={`${vehicle.brand} ${vehicle.model_name}`}
               className="h-20 w-28 rounded-2xl border border-[#E5E7EB] object-cover"
               loading="lazy"
@@ -158,13 +160,14 @@ function VehicleMobileCard({ vehicle }: VehicleCardProps) {
 function VehicleDesktopRow({ vehicle }: VehicleCardProps) {
   const statusUi = mapStatusToUi(vehicle.public_status)
   const registrationNumber = getRegistrationNumber(vehicle)
+  const mainPhotoUrl = resolveMediaUrl(vehicle.main_photo?.file)
 
   return (
     <tr className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F9FAFB]">
       <td className="px-4 py-3">
-        {vehicle.main_photo?.file ? (
+        {mainPhotoUrl ? (
           <img
-            src={vehicle.main_photo.file}
+            src={mainPhotoUrl}
             alt={`${vehicle.brand} ${vehicle.model_name}`}
             className="h-14 w-20 rounded-xl border border-[#E5E7EB] object-cover"
             loading="lazy"
@@ -205,10 +208,16 @@ function VehicleDesktopRow({ vehicle }: VehicleCardProps) {
 }
 
 export default function ManagerVehiclesPage() {
+  const navigate = useNavigate()
+  const location = useLocation()
+
   const [page, setPage] = useState(1)
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+
+  const state = location.state as { successMessage?: string } | null
+  const successMessage = state?.successMessage
 
   const vehiclesQuery = useQuery({
     queryKey: ['manager-vehicles', page, searchQuery, statusFilter],
@@ -293,6 +302,25 @@ export default function ManagerVehiclesPage() {
           </form>
         </div>
       </Card>
+
+      {successMessage ? (
+        <Alert
+          variant="success"
+          title="Operation reussie"
+          message={
+            <div className="flex items-center justify-between gap-3">
+              <span>{successMessage}</span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => navigate(location.pathname, { replace: true, state: null })}
+              >
+                Fermer
+              </Button>
+            </div>
+          }
+        />
+      ) : null}
 
       {vehiclesQuery.isLoading ? (
         <div className="flex min-h-[35vh] items-center justify-center">
