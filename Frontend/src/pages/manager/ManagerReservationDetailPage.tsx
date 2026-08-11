@@ -17,6 +17,10 @@ import type {
   ReservationManagementDetail,
 } from '../../types/managementReservation'
 
+interface ManagerReservationDetailPageProps {
+  basePath?: string
+}
+
 function mapStatusToUi(status: ManagementReservationStatus): { label: string; variant: StatusVariant } {
   switch (status) {
     case 'BROUILLON':
@@ -150,7 +154,7 @@ function Field({ label, value }: { label: string; value: string }) {
   )
 }
 
-export default function ManagerReservationDetailPage() {
+export default function ManagerReservationDetailPage({ basePath = '/manager' }: ManagerReservationDetailPageProps) {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
   const [showClosureConfirm, setShowClosureConfirm] = useState(false)
@@ -193,7 +197,7 @@ export default function ManagerReservationDetailPage() {
           title="Reservation invalide"
           message="L'identifiant de reservation est invalide."
         />
-        <Link to="/manager/reservations" className="inline-flex">
+        <Link to={`${basePath}/reservations`} className="inline-flex">
           <Button variant="secondary">Retour aux reservations</Button>
         </Link>
       </section>
@@ -222,7 +226,7 @@ export default function ManagerReservationDetailPage() {
           <Button variant="secondary" onClick={() => void detailQuery.refetch()}>
             Reessayer
           </Button>
-          <Link to="/manager/reservations">
+          <Link to={`${basePath}/reservations`}>
             <Button variant="secondary">Retour aux reservations</Button>
           </Link>
         </div>
@@ -243,7 +247,7 @@ export default function ManagerReservationDetailPage() {
           <h1 className="text-2xl font-bold text-[#0F172A]">Detail de reservation</h1>
           <p className="mt-1 text-sm text-slate-500">Consultez les informations completes de la reservation.</p>
         </div>
-        <Link to="/manager/reservations">
+        <Link to={`${basePath}/reservations`}>
           <Button variant="secondary">Retour aux reservations</Button>
         </Link>
       </div>

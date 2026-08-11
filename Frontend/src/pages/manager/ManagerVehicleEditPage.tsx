@@ -13,6 +13,10 @@ import type {
   VehicleManagementUpdateRequest,
 } from '../../types/managementVehicle'
 
+interface ManagerVehicleEditPageProps {
+  basePath?: string
+}
+
 interface BackendValidationErrorPayload {
   detail?: string
   non_field_errors?: string[]
@@ -177,7 +181,7 @@ function toPatchPayload(values: VehicleManagementCreateRequest): VehicleManageme
   }
 }
 
-export default function ManagerVehicleEditPage() {
+export default function ManagerVehicleEditPage({ basePath = '/manager' }: ManagerVehicleEditPageProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { id } = useParams<{ id: string }>()
@@ -248,7 +252,7 @@ export default function ManagerVehicleEditPage() {
           queryClient.invalidateQueries({ queryKey: ['manager-vehicle-edit', vehicleId] }),
         ])
 
-        navigate('/manager/vehicles', {
+        navigate(`${basePath}/vehicles`, {
           state: { successMessage },
         })
 
@@ -260,7 +264,7 @@ export default function ManagerVehicleEditPage() {
         queryClient.invalidateQueries({ queryKey: ['manager-vehicle-edit', vehicleId] }),
       ])
 
-      navigate('/manager/vehicles', {
+      navigate(`${basePath}/vehicles`, {
         state: { successMessage: 'Le vehicule a ete modifie avec succes.' },
       })
     } catch (error) {
@@ -304,7 +308,7 @@ export default function ManagerVehicleEditPage() {
     return (
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <Alert variant="danger" title="Identifiant invalide" message="L\'identifiant du vehicule est invalide." />
-        <Link to="/manager/vehicles">
+        <Link to={`${basePath}/vehicles`}>
           <Button type="button" variant="secondary">Retour a la liste</Button>
         </Link>
       </section>
@@ -325,7 +329,7 @@ export default function ManagerVehicleEditPage() {
     return (
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <Alert variant={is404 ? 'warning' : 'danger'} title={title} message={message} />
-        <Link to="/manager/vehicles">
+        <Link to={`${basePath}/vehicles`}>
           <Button type="button" variant="secondary">Retour a la liste</Button>
         </Link>
       </section>
@@ -336,7 +340,7 @@ export default function ManagerVehicleEditPage() {
     return (
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <Alert variant="danger" title="Erreur API" message="Aucune donnee vehicule disponible." />
-        <Link to="/manager/vehicles">
+        <Link to={`${basePath}/vehicles`}>
           <Button type="button" variant="secondary">Retour a la liste</Button>
         </Link>
       </section>
@@ -354,7 +358,7 @@ export default function ManagerVehicleEditPage() {
           <p className="mt-2 text-sm text-slate-600">Modifiez les informations du vehicule puis enregistrez.</p>
         </div>
 
-        <Link to="/manager/vehicles">
+        <Link to={`${basePath}/vehicles`}>
           <Button type="button" variant="secondary">Annuler</Button>
         </Link>
       </div>

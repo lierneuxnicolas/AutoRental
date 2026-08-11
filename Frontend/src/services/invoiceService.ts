@@ -10,6 +10,11 @@ export async function getInvoices(params?: InvoiceListQueryParams): Promise<Pagi
   return data
 }
 
+export async function getManagementInvoices(params?: InvoiceListQueryParams): Promise<PaginatedInvoiceListResponse> {
+  const { data } = await api.get<PaginatedInvoiceListResponse>('/management/invoices/', { params })
+  return data
+}
+
 export async function getInvoiceById(id: number | string): Promise<InvoiceDetail> {
   const { data } = await api.get<InvoiceDetail>(`/invoices/${id}/`)
   return data

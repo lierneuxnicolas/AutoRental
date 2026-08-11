@@ -150,6 +150,94 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/v1/admin/users/:
+    get:
+      operationId: v1_admin_users_list
+      parameters:
+      - in: query
+        name: email_verified
+        schema:
+          type: boolean
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: role
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - Admin Users
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminUserListList'
+          description: ''
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+  /api/v1/admin/users/{id}/status/:
+    patch:
+      operationId: v1_admin_users_status_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Admin Users
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminUserStatusUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminUserStatusUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAdminUserStatusUpdateRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserList'
+          description: ''
+        '400':
+          description: Erreur de validation ou d'autorisation.
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+        '404':
+          description: Erreur de validation ou d'autorisation.
   /api/v1/auth/login/:
     post:
       operationId: v1_auth_login_create
@@ -1203,6 +1291,49 @@ paths:
           description: Erreur de validation ou d'autorisation.
         '404':
           description: Erreur de validation ou d'autorisation.
+  /api/v1/management/reservations/{id}/complete/:
+    post:
+      operationId: v1_management_reservations_complete_create
+      description: Cloture une reservation après les vérifications finales. La reservation
+        doit être en A_CONTROLER et le véhicule en DISPONIBLE.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Reservation Management
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationManagementCompleteRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReservationManagementCompleteRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReservationManagementCompleteRequestRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationManagementCompleteResponse'
+          description: ''
+        '400':
+          description: Erreur de validation ou d'autorisation.
+        '401':
+          description: Erreur de validation ou d'autorisation.
+        '403':
+          description: Erreur de validation ou d'autorisation.
+        '404':
+          description: Erreur de validation ou d'autorisation.
+        '409':
+          description: Erreur de validation ou d'autorisation.
   /api/v1/management/vehicles/:
     post:
       operationId: v1_management_vehicles_create
@@ -1236,6 +1367,31 @@ paths:
         '403':
           description: Erreur de validation ou ressource introuvable.
   /api/v1/management/vehicles/{id}/:
+    get:
+      operationId: v1_management_vehicles_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Vehicle Management
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleManagementWrite'
+          description: ''
+        '401':
+          description: Erreur de validation ou ressource introuvable.
+        '403':
+          description: Erreur de validation ou ressource introuvable.
+        '404':
+          description: Erreur de validation ou ressource introuvable.
     patch:
       operationId: v1_management_vehicles_partial_update
       parameters:
@@ -2510,6 +2666,49 @@ paths:
           description: ''
 components:
   schemas:
+    AdminUserList:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          type: string
+          format: email
+          title: Email address
+          maxLength: 254
+        first_name:
+          type: string
+          maxLength: 150
+        last_name:
+          type: string
+          maxLength: 150
+        phone:
+          type: string
+          maxLength: 30
+        role:
+          type: string
+          nullable: true
+          readOnly: true
+        email_verified:
+          type: boolean
+        is_active:
+          type: boolean
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - date_joined
+      - email
+      - first_name
+      - id
+      - last_name
+      - role
     AuthUserResponse:
       type: object
       properties:
@@ -3596,6 +3795,29 @@ components:
           minimum: 0
       required:
       - unread_count
+    PaginatedAdminUserListList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminUserList'
     PaginatedClientDocumentReadList:
       type: object
       required:
@@ -3817,6 +4039,11 @@ components:
           minLength: 1
       required:
       - email
+    PatchedAdminUserStatusUpdateRequest:
+      type: object
+      properties:
+        is_active:
+          type: boolean
     PatchedClientProfileMeRequest:
       type: object
       properties:
@@ -4278,6 +4505,25 @@ components:
       - last_name
       - phone
       - profile_status
+    ReservationManagementCompleteRequestRequest:
+      type: object
+      properties:
+        confirm_vehicle_available:
+          type: boolean
+          default: true
+    ReservationManagementCompleteResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          readOnly: true
+        reservation:
+          allOf:
+          - $ref: '#/components/schemas/ReservationManagementDetail'
+          readOnly: true
+      required:
+      - message
+      - reservation
     ReservationManagementDetail:
       type: object
       description: Réservation en détail pour le management.
@@ -4596,6 +4842,72 @@ components:
       - daily_rate
       - id
       - name
+    VehicleManagementWrite:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        brand:
+          type: integer
+        category:
+          type: integer
+        parking_space:
+          type: integer
+        registration_number:
+          type: string
+          maxLength: 30
+        model_name:
+          type: string
+          maxLength: 150
+        year:
+          type: integer
+          maximum: 4294967295
+          minimum: 1886
+          format: int64
+        color:
+          type: string
+          maxLength: 60
+        fuel_type:
+          type: string
+        transmission:
+          type: string
+          maxLength: 60
+        seats:
+          type: integer
+          maximum: 4294967295
+          minimum: 1
+          format: int64
+        doors:
+          type: integer
+          maximum: 4294967295
+          minimum: 1
+          format: int64
+        mileage:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/Status081Enum'
+        is_active:
+          type: boolean
+      required:
+      - brand
+      - category
+      - color
+      - doors
+      - fuel_type
+      - id
+      - model_name
+      - parking_space
+      - registration_number
+      - seats
+      - status
+      - transmission
+      - year
     VehicleManagementWriteRequest:
       type: object
       properties:

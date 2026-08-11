@@ -7,6 +7,7 @@ from .auth import (
 	RegisterSerializer,
 	VerifyEmailSerializer,
 )
+from .admin_users import AdminUserListSerializer
 from .documents import (
 	ClientDocumentCreateSerializer,
 	ClientDocumentReadSerializer,
@@ -24,6 +25,7 @@ __all__ = [
 	"LogoutSerializer",
 	"PasswordResetRequestSerializer",
 	"PasswordResetConfirmSerializer",
+	"AdminUserListSerializer",
 	"ClientDocumentCreateSerializer",
 	"ClientDocumentReadSerializer",
 	"ManagerClientDocumentListSerializer",

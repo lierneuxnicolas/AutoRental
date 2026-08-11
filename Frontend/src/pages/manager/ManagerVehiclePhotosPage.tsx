@@ -14,6 +14,10 @@ import type { VehiclePhotoPublic } from '../../types/managementVehicle'
 import type { PublicVehicle } from '../../types/vehicle'
 import { resolveMediaUrl } from '../../utils/media'
 
+interface ManagerVehiclePhotosPageProps {
+  basePath?: string
+}
+
 interface UploadPhotoFormState {
   file: File | null
   caption: string
@@ -136,7 +140,7 @@ function toPhotoGallery(photos: PublicVehicle['photos']): VehiclePhotoPublic[] {
   }))
 }
 
-export default function ManagerVehiclePhotosPage() {
+export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: ManagerVehiclePhotosPageProps) {
   const queryClient = useQueryClient()
   const { id } = useParams<{ id: string }>()
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -286,7 +290,7 @@ export default function ManagerVehiclePhotosPage() {
     return (
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <Alert variant="danger" title="Identifiant invalide" message="L\'identifiant du vehicule est invalide." />
-        <Link to="/manager/vehicles">
+        <Link to={`${basePath}/vehicles`}>
           <Button type="button" variant="secondary">Retour a la liste</Button>
         </Link>
       </section>
@@ -307,7 +311,7 @@ export default function ManagerVehiclePhotosPage() {
     return (
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <Alert variant={is404 ? 'warning' : 'danger'} title={title} message={message} />
-        <Link to="/manager/vehicles">
+        <Link to={`${basePath}/vehicles`}>
           <Button type="button" variant="secondary">Retour a la liste</Button>
         </Link>
       </section>
@@ -340,10 +344,10 @@ export default function ManagerVehiclePhotosPage() {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <Link to={`/manager/vehicles/${vehicle.id}/edit`}>
+          <Link to={`${basePath}/vehicles/${vehicle.id}/edit`}>
             <Button type="button" variant="secondary">Retour a la fiche</Button>
           </Link>
-          <Link to="/manager/vehicles">
+          <Link to={`${basePath}/vehicles`}>
             <Button type="button" variant="secondary">Retour a la liste</Button>
           </Link>
         </div>
