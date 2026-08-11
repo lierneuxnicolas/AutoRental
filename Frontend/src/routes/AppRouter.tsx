@@ -7,7 +7,6 @@ import {
   Settings,
   Shield,
   Users,
-  Wrench,
 } from 'lucide-react'
 import PublicLayout from '../components/layout/PublicLayout'
 import ProtectedRoute from './ProtectedRoute'
@@ -44,6 +43,8 @@ import ManagerVehiclePhotosPage from '../pages/manager/ManagerVehiclePhotosPage'
 import ManagerReservationsPage from '../pages/manager/ManagerReservationsPage'
 import ManagerReservationDetailPage from '../pages/manager/ManagerReservationDetailPage'
 import ManagerInterventionsPage from '../pages/manager/ManagerInterventionsPage'
+import MechanicInterventionDetailPage from '../pages/mechanic/MechanicInterventionDetailPage'
+import MechanicInterventionsPage from '../pages/mechanic/MechanicInterventionsPage'
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -208,15 +209,11 @@ export default function AppRouter() {
             />
             <Route
               path="interventions"
-              element={
-                <FeaturePlaceholderPage
-                  title="Interventions"
-                  description="Suivez vos interventions en cours et planifiées."
-                  icon={Wrench}
-                  backLink="/mechanic"
-                  backLabel="Retour au tableau de bord"
-                />
-              }
+              element={<MechanicInterventionsPage />}
+            />
+            <Route
+              path="interventions/:id"
+              element={<MechanicInterventionDetailPage />}
             />
             <Route
               path="history"
