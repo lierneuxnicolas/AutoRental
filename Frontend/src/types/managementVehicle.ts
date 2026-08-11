@@ -44,6 +44,25 @@ export interface VehicleManagementUpdateRequest {
   is_active?: boolean
 }
 
+export interface ManagementVehicleDetailResponse {
+  id: number
+  brand: number
+  category: number
+  parking_space: number
+  registration_number: string
+  model_name: string
+  year: number
+  color: string
+  fuel_type: string
+  transmission: string
+  seats: number
+  doors: number
+  status: VehicleManagementStatus
+  mileage?: number
+  description?: string
+  is_active?: boolean
+}
+
 export interface VehicleManagementStatusUpdateRequest {
   status?: VehicleManagementStatus
   reason?: string

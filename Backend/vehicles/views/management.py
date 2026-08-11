@@ -46,12 +46,26 @@ class VehicleManagementUpdateView(generics.UpdateAPIView):
 	serializer_class = VehicleManagementWriteSerializer
 	lookup_field = "id"
 	lookup_url_kwarg = "pk"
-	http_method_names = ["patch"]
+	http_method_names = ["get", "patch"]
 
 	def get_queryset(self):
 		if getattr(self, "swagger_fake_view", False):
 			return Vehicle.objects.none()
 		return Vehicle.objects.select_related("brand", "category", "parking_space", "parking_space__parking")
+
+	@extend_schema(
+		tags=["Vehicle Management"],
+		responses={
+			200: VehicleManagementWriteSerializer,
+			401: ErrorDetailResponseSerializer,
+			403: ErrorDetailResponseSerializer,
+			404: ErrorDetailResponseSerializer,
+		},
+	)
+	def get(self, request, *args, **kwargs):
+		vehicle = self.get_object()
+		serializer = self.get_serializer(vehicle)
+		return Response(serializer.data, status=status.HTTP_200_OK)
 
 	@extend_schema(
 		tags=["Vehicle Management"],
