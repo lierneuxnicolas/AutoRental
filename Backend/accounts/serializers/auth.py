@@ -7,6 +7,8 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from accounts.models import User
+from common.models import SystemLog
+from common.services import create_system_log
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -68,6 +70,17 @@ class VerifyEmailSerializer(serializers.Serializer):
     token = serializers.CharField(write_only=True)
 
 
+def _extract_request_ip(request) -> str | None:
+    if request is None:
+        return None
+
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+
+    return request.META.get("REMOTE_ADDR")
+
+
 class LoginSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         email = attrs.get(self.username_field, "")
@@ -76,6 +89,17 @@ class LoginSerializer(TokenObtainPairSerializer):
         try:
             data = super().validate(attrs)
         except AuthenticationFailed as exc:
+            try:
+                create_system_log(
+                    user=None,
+                    action="LOGIN_FAILED",
+                    message="Tentative de connexion échouée.",
+                    level=SystemLog.Level.WARNING,
+                    ip_address=_extract_request_ip(self.context.get("request")),
+                )
+            except Exception:
+                # Logging must never alter the existing authentication response.
+                pass
             raise AuthenticationFailed("Identifiants invalides.") from exc
 
         user = self.user
@@ -84,6 +108,14 @@ class LoginSerializer(TokenObtainPairSerializer):
 
         if not user.email_verified and not user.is_superuser:
             raise AuthenticationFailed("Confirmez votre adresse e-mail avant de vous connecter.")
+
+        create_system_log(
+            user=user,
+            action="LOGIN_SUCCESS",
+            message="Utilisateur connecte avec succes.",
+            level=SystemLog.Level.INFO,
+            ip_address=_extract_request_ip(self.context.get("request")),
+        )
 
         data["user"] = {
             "id": user.id,

@@ -49,6 +49,7 @@ import MechanicInterventionsPage from '../pages/mechanic/MechanicInterventionsPa
 import AdminDashboardPage from '../pages/admin/AdminDashboardPage'
 import AdminInvoicesPage from '../pages/admin/AdminInvoicesPage'
 import AdminUsersPage from '../pages/admin/AdminUsersPage'
+import AdminSystemLogsPage from '../pages/admin/AdminSystemLogsPage'
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -319,6 +320,10 @@ export default function AppRouter() {
             <Route
               path="users"
               element={<AdminUsersPage />}
+            />
+            <Route
+              path="system-logs"
+              element={<AdminSystemLogsPage />}
             />
             <Route
               path="roles"

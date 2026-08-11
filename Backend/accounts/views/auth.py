@@ -31,6 +31,8 @@ from accounts.services.email_verification import (
 )
 from accounts.services.registration import RegistrationError, register_client_user
 from django.contrib.auth.tokens import default_token_generator
+from common.models import SystemLog
+from common.services import create_system_log
 from notifications.services import create_notification
 
 
@@ -82,6 +84,14 @@ TokenRefreshResponseSerializer = inline_serializer(
     name="TokenRefreshResponse",
     fields={"access": drf_serializers.CharField()},
 )
+
+
+def _extract_request_ip(request) -> str | None:
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+
+    return request.META.get("REMOTE_ADDR")
 
 
 class RegisterView(APIView):
@@ -220,6 +230,14 @@ class LogoutView(APIView):
             token.blacklist()
         except TokenError:
             return Response({"detail": "Refresh token invalide."}, status=status.HTTP_400_BAD_REQUEST)
+
+        create_system_log(
+            user=request.user,
+            action="LOGOUT",
+            message="Utilisateur déconnecté avec succès.",
+            level=SystemLog.Level.INFO,
+            ip_address=_extract_request_ip(request),
+        )
 
         return Response({"message": "Deconnexion reussie."}, status=status.HTTP_205_RESET_CONTENT)
 

@@ -3,6 +3,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from accounts.models import Role
+from common.models import SystemLog
 
 from .utils import create_user, ensure_roles
 
@@ -168,6 +169,11 @@ class AdminUsersApiTests(APITestCase):
         self.assertFalse(self.client_user.is_active)
         self.assertFalse(response.data["is_active"])
 
+        log = SystemLog.objects.filter(action="USER_DEACTIVATED").latest("created_at")
+        self.assertEqual(log.user, self.admin_user)
+        self.assertEqual(log.level, SystemLog.Level.WARNING)
+        self.assertIn(self.client_user.email, log.message)
+
     def test_admin_can_reactivate_client(self):
         self.client_user.is_active = False
         self.client_user.save(update_fields=["is_active"])
@@ -184,6 +190,11 @@ class AdminUsersApiTests(APITestCase):
         self.client_user.refresh_from_db()
         self.assertTrue(self.client_user.is_active)
         self.assertTrue(response.data["is_active"])
+
+        log = SystemLog.objects.filter(action="USER_ACTIVATED").latest("created_at")
+        self.assertEqual(log.user, self.admin_user)
+        self.assertEqual(log.level, SystemLog.Level.INFO)
+        self.assertIn(self.client_user.email, log.message)
 
     def test_client_cannot_change_status(self):
         self._authenticate(self.client_user)

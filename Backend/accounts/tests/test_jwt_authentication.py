@@ -9,6 +9,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import Role
 from accounts.services.email_verification import generate_email_verification_token
+from common.models import SystemLog
 
 from .utils import ensure_roles
 
@@ -120,6 +121,20 @@ class JwtAuthenticationTests(APITestCase):
         self.assertEqual(response.data["user"]["email"], "confirmed@example.com")
         self.assertNotIn("password", response.data["user"])
 
+    def test_login_success_creates_system_log(self):
+        response = self.login_confirmed_user()
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("access", response.data)
+        self.assertIn("refresh", response.data)
+        self.assertIn("user", response.data)
+
+        log = SystemLog.objects.filter(action="LOGIN_SUCCESS", user=self.confirmed_user).latest("created_at")
+
+        self.assertEqual(log.level, SystemLog.Level.INFO)
+        self.assertEqual(log.user, self.confirmed_user)
+        self.assertTrue(bool(log.message.strip()))
+
     def test_login_rejects_wrong_password(self):
         response = self.client.post(
             self.login_url,
@@ -128,6 +143,33 @@ class JwtAuthenticationTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.data.get("detail"), "Identifiants invalides.")
+        self.assertNotIn("access", response.data)
+        self.assertNotIn("refresh", response.data)
+
+        log = SystemLog.objects.filter(action="LOGIN_FAILED").latest("created_at")
+        self.assertEqual(log.level, SystemLog.Level.WARNING)
+        self.assertIsNone(log.user)
+        self.assertEqual(log.message, "Tentative de connexion échouée.")
+
+    def test_login_failed_log_does_not_expose_password_or_tokens(self):
+        wrong_password = "WrongPass123!"
+
+        response = self.client.post(
+            self.login_url,
+            {"email": "confirmed@example.com", "password": wrong_password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        log = SystemLog.objects.filter(action="LOGIN_FAILED").latest("created_at")
+        self.assertNotIn(wrong_password, log.action)
+        self.assertNotIn(wrong_password, log.message)
+        self.assertNotIn("access", log.action.lower())
+        self.assertNotIn("access", log.message.lower())
+        self.assertNotIn("refresh", log.action.lower())
+        self.assertNotIn("refresh", log.message.lower())
 
     def test_login_rejects_inactive_user(self):
         response = self.client.post(
@@ -177,6 +219,21 @@ class JwtAuthenticationTests(APITestCase):
 
         refresh_response = self.client.post(self.refresh_url, {"refresh": refresh}, format="json")
         self.assertNotEqual(refresh_response.status_code, status.HTTP_200_OK)
+
+    def test_logout_success_creates_system_log(self):
+        login_response = self.login_confirmed_user()
+        access = login_response.data["access"]
+        refresh = login_response.data["refresh"]
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        response = self.client.post(self.logout_url, {"refresh": refresh}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_205_RESET_CONTENT)
+        self.assertEqual(response.data.get("message"), "Deconnexion reussie.")
+
+        log = SystemLog.objects.filter(action="LOGOUT", user=self.confirmed_user).latest("created_at")
+        self.assertEqual(log.level, SystemLog.Level.INFO)
+        self.assertEqual(log.user, self.confirmed_user)
 
     def test_logout_rejects_invalid_refresh_token(self):
         login_response = self.login_confirmed_user()

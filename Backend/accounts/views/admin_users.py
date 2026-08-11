@@ -10,6 +10,8 @@ from rest_framework.views import APIView
 from accounts.models import User
 from accounts.permissions import IsAdministrator
 from accounts.serializers.admin_users import AdminUserListSerializer, AdminUserStatusUpdateSerializer
+from common.models import SystemLog
+from common.services import create_system_log
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou d'autorisation.")
@@ -55,6 +57,14 @@ class AdminUserListView(generics.ListAPIView):
 class AdminUserStatusUpdateView(APIView):
     permission_classes = [IsAuthenticated, IsAdministrator]
 
+    @staticmethod
+    def _extract_request_ip(request) -> str | None:
+        forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+
+        return request.META.get("REMOTE_ADDR")
+
     @extend_schema(
         tags=["Admin Users"],
         request=AdminUserStatusUpdateSerializer,
@@ -82,6 +92,21 @@ class AdminUserStatusUpdateView(APIView):
         if user.is_active != new_is_active:
             user.is_active = new_is_active
             user.save(update_fields=["is_active"])
+
+            if new_is_active:
+                action = "USER_ACTIVATED"
+                level = SystemLog.Level.INFO
+            else:
+                action = "USER_DEACTIVATED"
+                level = SystemLog.Level.WARNING
+
+            create_system_log(
+                user=request.user,
+                action=action,
+                message=f"User status changed for {user.email}.",
+                level=level,
+                ip_address=self._extract_request_ip(request),
+            )
 
         response_serializer = AdminUserListSerializer(user)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
