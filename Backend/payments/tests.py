@@ -12,6 +12,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from accounts.models import ClientDocument, ClientProfile, Role
+from common.models import SystemLog
 from invoicing.models import Invoice
 from accounts.tests.utils import create_user, ensure_roles
 from notifications.models import Notification
@@ -285,6 +286,11 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		self.assertEqual(notification.related_object_type, "payment")
 		self.assertEqual(notification.related_object_id, self.payment.id)
 		self.assertEqual(StripeEvent.objects.filter(stripe_event_id="evt_success", processed=True).count(), 1)
+		log = SystemLog.objects.filter(action="PAYMENT_SUCCESS", user=self.client_user).latest("created_at")
+		self.assertEqual(log.level, SystemLog.Level.INFO)
+		self.assertIn(f"id={self.payment.id}", log.message)
+		self.assertIn(self.reservation.reference, log.message)
+		self.assertIn(str(self.payment.amount), log.message)
 		mocked_invoice.assert_called_once_with(self.reservation)
 
 	@patch("payments.services.webhooks.create_invoice_for_reservation", side_effect=InvoiceIntegrationPending("Invoice model is not available yet."))
@@ -305,6 +311,7 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		self.assertEqual(self.reservation.status, Reservation.Status.EN_ATTENTE_PAIEMENT)
 		self.assertEqual(self.vehicle.status, Vehicle.Status.DISPONIBLE)
 		self.assertFalse(Notification.objects.filter(notification_type="PAYMENT_SUCCEEDED").exists())
+		self.assertFalse(SystemLog.objects.filter(action="PAYMENT_SUCCESS").exists())
 		mocked_invoice.assert_called_once()
 
 	@patch("payments.services.webhooks.create_invoice_for_reservation", return_value=object())
@@ -365,6 +372,20 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		self.assertEqual(notification.related_object_id, self.payment.id)
 		self.assertNotIn("card_declined", notification.message)
 		self.assertNotIn("Carte refusee", notification.message)
+		log = SystemLog.objects.filter(action="PAYMENT_FAILED", user=self.client_user).latest("created_at")
+		self.assertEqual(log.level, SystemLog.Level.ERROR)
+		self.assertIn(f"id={self.payment.id}", log.message)
+		self.assertIn(self.reservation.reference, log.message)
+		for forbidden in [
+			"card_number",
+			"cvc",
+			"client_secret",
+			"sk_",
+			"pm_",
+			"PaymentMethod",
+		]:
+			self.assertNotIn(forbidden, log.action)
+			self.assertNotIn(forbidden, log.message)
 
 	def test_payment_intent_canceled_marks_payment_and_reservation_and_notifies_once(self):
 		event = self._build_event(

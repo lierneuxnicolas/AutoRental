@@ -6,6 +6,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.permissions import IsCleaner, IsManagerOrAdministrator, IsMechanic
+from common.models import SystemLog
+from common.services import create_system_log
 from interventions.models import Intervention
 from interventions.serializers import (
 	InterventionManagementAssignSerializer,
@@ -37,6 +39,14 @@ InterventionWorkerPhotoUploadRequestSerializer = inline_serializer(
 		"caption": serializers.CharField(required=False, allow_blank=True, default=""),
 	},
 )
+
+
+def _extract_request_ip(request) -> str | None:
+	forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+	if forwarded_for:
+		return forwarded_for.split(",")[0].strip()
+
+	return request.META.get("REMOTE_ADDR")
 
 
 class InterventionManagementCreateListView(generics.GenericAPIView):
@@ -80,6 +90,18 @@ class InterventionManagementCreateListView(generics.GenericAPIView):
 			)
 		except InterventionCreationError as exc:
 			return Response({"code": exc.code, "detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+
+		create_system_log(
+			user=request.user,
+			action="INTERVENTION_CREATED",
+			message=(
+				f"Intervention {intervention.reference} (id={intervention.id}) "
+				f"type={intervention.intervention_type} "
+				f"vehicle={intervention.vehicle.registration_number} created."
+			),
+			level=SystemLog.Level.INFO,
+			ip_address=_extract_request_ip(request),
+		)
 
 		response_serializer = InterventionManagementResponseSerializer(intervention, context={"request": request})
 		return Response(response_serializer.data, status=status.HTTP_201_CREATED)
@@ -143,6 +165,22 @@ class InterventionManagementAssignView(generics.GenericAPIView):
 			)
 		except InterventionAssignmentError as exc:
 			return Response({"code": exc.code, "detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+
+		assigned_user_label = (
+			updated_intervention.assigned_to.email
+			if updated_intervention.assigned_to is not None
+			else f"id={serializer.validated_data['assigned_user_id']}"
+		)
+		create_system_log(
+			user=request.user,
+			action="INTERVENTION_ASSIGNED",
+			message=(
+				f"Intervention {updated_intervention.reference} (id={updated_intervention.id}) "
+				f"assigned to {assigned_user_label}."
+			),
+			level=SystemLog.Level.INFO,
+			ip_address=_extract_request_ip(request),
+		)
 
 		response_serializer = InterventionManagementResponseSerializer(updated_intervention, context={"request": request})
 		return Response(response_serializer.data, status=status.HTTP_200_OK)
@@ -290,6 +328,17 @@ class _InterventionWorkerCompleteView(_InterventionWorkerBaseView):
 			)
 		except InterventionWorkflowError as exc:
 			return Response({"code": exc.code, "detail": exc.message}, status=self._map_workflow_error_status(exc))
+
+		create_system_log(
+			user=request.user,
+			action="INTERVENTION_COMPLETED",
+			message=(
+				f"Intervention {updated.reference} (id={updated.id}) completed. "
+				f"type={updated.intervention_type}."
+			),
+			level=SystemLog.Level.INFO,
+			ip_address=_extract_request_ip(request),
+		)
 
 		response_serializer = InterventionManagementResponseSerializer(updated, context={"request": request})
 		return Response(response_serializer.data, status=status.HTTP_200_OK)

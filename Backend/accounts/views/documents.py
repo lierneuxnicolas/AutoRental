@@ -19,9 +19,19 @@ from accounts.serializers.documents import (
     ManagerRejectDocumentSerializer,
 )
 from accounts.services.document_review import reject_document, validate_document
+from common.models import SystemLog
+from common.services import create_system_log
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou d'autorisation.")
+
+
+def _extract_request_ip(request) -> str | None:
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+
+    return request.META.get("REMOTE_ADDR")
 
 
 class _ClientProfileMixin:
@@ -215,6 +225,17 @@ class ManagementClientDocumentValidateView(APIView):
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)})
 
+        client_email = document.client.user.email
+        create_system_log(
+            user=request.user,
+            action="DOCUMENT_VALIDATED",
+            message=(
+                f"Document #{document.id} ({document.document_type}) valide pour client {client_email}."
+            ),
+            level=SystemLog.Level.INFO,
+            ip_address=_extract_request_ip(request),
+        )
+
         serializer = ManagerClientDocumentDetailSerializer(document)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -250,6 +271,17 @@ class ManagementClientDocumentRejectView(APIView):
             )
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)})
+
+        client_email = document.client.user.email
+        create_system_log(
+            user=request.user,
+            action="DOCUMENT_REJECTED",
+            message=(
+                f"Document #{document.id} ({document.document_type}) refuse pour client {client_email}."
+            ),
+            level=SystemLog.Level.WARNING,
+            ip_address=_extract_request_ip(request),
+        )
 
         response_serializer = ManagerClientDocumentDetailSerializer(document)
         return Response(response_serializer.data, status=status.HTTP_200_OK)

@@ -11,6 +11,8 @@ from accounts.models import Role
 from accounts.services import validate_client_for_reservation
 from invoicing.services import InvoiceCreationNotAvailable, create_invoice_for_reservation
 from notifications.services import create_notification
+from common.models import SystemLog
+from common.services import create_system_log
 from payments.models import Payment, StripeEvent
 from reservations.models import Reservation
 from vehicles.models import Vehicle
@@ -38,6 +40,26 @@ class StripeWebhookProcessingError(ValueError):
 
 class InvoiceIntegrationPending(StripeWebhookProcessingError):
     pass
+
+
+def _safe_log_payment_result(*, action: str, level: str | SystemLog.Level, payment: Payment, reservation: Reservation, user, suffix: str = "") -> None:
+    try:
+        message = (
+            f"Payment id={payment.id}, reservation={reservation.reference} (id={reservation.id}), "
+            f"amount={payment.amount} {payment.currency}."
+        )
+        if suffix:
+            message = f"{message} {suffix}"
+
+        create_system_log(
+            user=user,
+            action=action,
+            message=message,
+            level=level,
+        )
+    except Exception:
+        # Logging failures must not impact Stripe webhook business processing.
+        return
 
 
 def _clean_failure_text(value: Any) -> str | None:
@@ -259,6 +281,15 @@ def _handle_success(
         reservation.status = Reservation.Status.PAIEMENT_ECHOUE
         reservation.save(update_fields=["status", "updated_at"])
 
+        _safe_log_payment_result(
+            action="PAYMENT_FAILED",
+            level=SystemLog.Level.ERROR,
+            payment=payment,
+            reservation=reservation,
+            user=reservation.client.user,
+            suffix="reason=AVAILABILITY_CONFLICT",
+        )
+
         _notify_managers_once_on_commit(
             notification_type="PAYMENT_CONFLICT",
             title="Conflit apres paiement Stripe",
@@ -288,6 +319,14 @@ def _handle_success(
             "failure_message",
             "updated_at",
         ]
+    )
+
+    _safe_log_payment_result(
+        action="PAYMENT_SUCCESS",
+        level=SystemLog.Level.INFO,
+        payment=payment,
+        reservation=reservation,
+        user=reservation.client.user,
     )
 
     reservation.status = Reservation.Status.CONFIRMEE
@@ -364,6 +403,16 @@ def _handle_failed(*, payment: Payment, reservation: Reservation, payment_intent
             "failure_message",
             "updated_at",
         ]
+    )
+
+    failure_code = payment.failure_code or "UNKNOWN"
+    _safe_log_payment_result(
+        action="PAYMENT_FAILED",
+        level=SystemLog.Level.ERROR,
+        payment=payment,
+        reservation=reservation,
+        user=reservation.client.user,
+        suffix=f"reason={failure_code}",
     )
 
     reservation.status = Reservation.Status.PAIEMENT_ECHOUE
