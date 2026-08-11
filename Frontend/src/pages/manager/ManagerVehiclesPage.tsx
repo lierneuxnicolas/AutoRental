@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import axios from 'axios'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
+import VehicleStatusForm from '../../components/vehicles/VehicleStatusForm'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import Input from '../../components/ui/Input'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
+import { updateVehicleStatus } from '../../services/managementVehicleService'
 import { getVehicles } from '../../services/vehicleService'
-import type { VehicleManagementStatus } from '../../types/managementVehicle'
+import type { VehicleManagementStatus, VehicleManagementStatusUpdateRequest } from '../../types/managementVehicle'
 import type { PaginatedResponse, PublicVehicle } from '../../types/vehicle'
 import { resolveMediaUrl } from '../../utils/media'
 
@@ -98,9 +101,10 @@ function toPaginationPayload(payload: Awaited<ReturnType<typeof getVehicles>>): 
 
 interface VehicleCardProps {
   vehicle: PublicVehicle
+  onChangeStatus: (vehicle: PublicVehicle) => void
 }
 
-function VehicleMobileCard({ vehicle }: VehicleCardProps) {
+function VehicleMobileCard({ vehicle, onChangeStatus }: VehicleCardProps) {
   const statusUi = mapStatusToUi(vehicle.public_status)
   const registrationNumber = getRegistrationNumber(vehicle)
   const mainPhotoUrl = resolveMediaUrl(vehicle.main_photo?.file)
@@ -150,14 +154,14 @@ function VehicleMobileCard({ vehicle }: VehicleCardProps) {
           <Link to={`/manager/vehicles/${vehicle.id}/photos`}>
             <Button variant="secondary" size="sm">Gérer les photos</Button>
           </Link>
-          <Button variant="secondary" size="sm" onClick={() => undefined}>Changer le statut</Button>
+          <Button variant="secondary" size="sm" onClick={() => onChangeStatus(vehicle)}>Changer le statut</Button>
         </div>
       </div>
     </Card>
   )
 }
 
-function VehicleDesktopRow({ vehicle }: VehicleCardProps) {
+function VehicleDesktopRow({ vehicle, onChangeStatus }: VehicleCardProps) {
   const statusUi = mapStatusToUi(vehicle.public_status)
   const registrationNumber = getRegistrationNumber(vehicle)
   const mainPhotoUrl = resolveMediaUrl(vehicle.main_photo?.file)
@@ -200,21 +204,59 @@ function VehicleDesktopRow({ vehicle }: VehicleCardProps) {
           <Link to={`/manager/vehicles/${vehicle.id}/photos`}>
             <Button variant="secondary" size="sm">Gérer les photos</Button>
           </Link>
-          <Button variant="secondary" size="sm" onClick={() => undefined}>Changer le statut</Button>
+          <Button variant="secondary" size="sm" onClick={() => onChangeStatus(vehicle)}>Changer le statut</Button>
         </div>
       </td>
     </tr>
   )
 }
 
+function getStatusSubmitError(error: unknown): string {
+  if (!axios.isAxiosError(error)) {
+    return 'Une erreur inattendue est survenue.'
+  }
+
+  if (!error.response) {
+    return 'Erreur reseau: impossible de contacter le serveur.'
+  }
+
+  if (error.response.status === 403) {
+    return 'Vous n\'avez pas les permissions pour changer le statut de ce vehicule.'
+  }
+
+  if (error.response.status === 404) {
+    return 'Le vehicule est introuvable ou a ete supprime.'
+  }
+
+  const payload = error.response.data as { detail?: unknown; status?: unknown; non_field_errors?: unknown } | undefined
+
+  if (Array.isArray(payload?.status) && payload.status.length > 0) {
+    return String(payload.status[0])
+  }
+
+  if (typeof payload?.detail === 'string' && payload.detail.trim().length > 0) {
+    return payload.detail
+  }
+
+  if (Array.isArray(payload?.non_field_errors) && payload.non_field_errors.length > 0) {
+    return String(payload.non_field_errors[0])
+  }
+
+  return 'Impossible de changer le statut pour le moment.'
+}
+
 export default function ManagerVehiclesPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const queryClient = useQueryClient()
 
   const [page, setPage] = useState(1)
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [selectedVehicle, setSelectedVehicle] = useState<PublicVehicle | null>(null)
+  const [statusApiError, setStatusApiError] = useState<string | null>(null)
+  const [statusSuccessMessage, setStatusSuccessMessage] = useState<string | null>(null)
 
   const state = location.state as { successMessage?: string } | null
   const successMessage = state?.successMessage
@@ -235,6 +277,11 @@ export default function ManagerVehiclesPage() {
 
   const vehicles = useMemo(() => vehiclesQuery.data?.results ?? [], [vehiclesQuery.data?.results])
 
+  const statusMutation = useMutation({
+    mutationFn: ({ vehicleId, payload }: { vehicleId: number; payload: VehicleManagementStatusUpdateRequest }) =>
+      updateVehicleStatus(vehicleId, payload),
+  })
+
   const totalPages = useMemo(() => {
     if (!vehiclesQuery.data || vehiclesQuery.data.count === 0) {
       return 1
@@ -252,6 +299,40 @@ export default function ManagerVehiclesPage() {
   const handleStatusChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     setStatusFilter(event.target.value as StatusFilter)
     setPage(1)
+  }
+
+  const handleOpenStatusForm = (vehicle: PublicVehicle) => {
+    setSelectedVehicle(vehicle)
+    setStatusApiError(null)
+    setStatusSuccessMessage(null)
+  }
+
+  const handleSubmitStatus = async (payload: VehicleManagementStatusUpdateRequest) => {
+    if (!selectedVehicle) {
+      return
+    }
+
+    setStatusApiError(null)
+    setStatusSuccessMessage(null)
+
+    try {
+      const updatedVehicle = await statusMutation.mutateAsync({
+        vehicleId: selectedVehicle.id,
+        payload,
+      })
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['manager-vehicles'] }),
+        queryClient.invalidateQueries({ queryKey: ['manager-vehicle-edit', selectedVehicle.id] }),
+        queryClient.invalidateQueries({ queryKey: ['manager-vehicle-photos', selectedVehicle.id] }),
+      ])
+
+      const updatedStatusUi = mapStatusToUi(updatedVehicle.public_status)
+      setStatusSuccessMessage(`Nouveau statut enregistre: ${updatedStatusUi.label}.`)
+      setSelectedVehicle(null)
+    } catch (error) {
+      setStatusApiError(getStatusSubmitError(error))
+    }
   }
 
   return (
@@ -288,7 +369,7 @@ export default function ManagerVehiclesPage() {
                 id="vehicle-status-filter"
                 value={statusFilter}
                 onChange={handleStatusChange}
-                className="block h-[50px] w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
+                className="block h-12.5 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
               >
                 {statusOptions.map((status) => (
                   <option key={status.value} value={status.value}>
@@ -319,6 +400,25 @@ export default function ManagerVehiclesPage() {
               </Button>
             </div>
           }
+        />
+      ) : null}
+
+      {statusSuccessMessage ? (
+        <Alert variant="success" title="Statut mis a jour" message={statusSuccessMessage} />
+      ) : null}
+
+      {selectedVehicle ? (
+        <VehicleStatusForm
+          key={selectedVehicle.id}
+          currentStatus={selectedVehicle.public_status as VehicleManagementStatus}
+          vehicleLabel={`${selectedVehicle.brand} ${selectedVehicle.model_name}`}
+          onSubmit={handleSubmitStatus}
+          onCancel={() => {
+            setSelectedVehicle(null)
+            setStatusApiError(null)
+          }}
+          isSubmitting={statusMutation.isPending}
+          apiError={statusApiError}
         />
       ) : null}
 
@@ -361,7 +461,7 @@ export default function ManagerVehiclesPage() {
         <>
           <div className="flex flex-col gap-4 lg:hidden">
             {vehicles.map((vehicle) => (
-              <VehicleMobileCard key={vehicle.id} vehicle={vehicle} />
+              <VehicleMobileCard key={vehicle.id} vehicle={vehicle} onChangeStatus={handleOpenStatusForm} />
             ))}
           </div>
 
@@ -381,7 +481,7 @@ export default function ManagerVehiclesPage() {
               </thead>
               <tbody>
                 {vehicles.map((vehicle) => (
-                  <VehicleDesktopRow key={vehicle.id} vehicle={vehicle} />
+                  <VehicleDesktopRow key={vehicle.id} vehicle={vehicle} onChangeStatus={handleOpenStatusForm} />
                 ))}
               </tbody>
             </table>

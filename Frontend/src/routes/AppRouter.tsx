@@ -41,6 +41,7 @@ import ManagerDocumentDetailPage from '../pages/manager/ManagerDocumentDetailPag
 import ManagerVehiclesPage from '../pages/manager/ManagerVehiclesPage'
 import ManagerVehicleCreatePage from '../pages/manager/ManagerVehicleCreatePage'
 import ManagerVehicleEditPage from '../pages/manager/ManagerVehicleEditPage'
+import ManagerVehiclePhotosPage from '../pages/manager/ManagerVehiclePhotosPage'
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -139,6 +140,10 @@ export default function AppRouter() {
             <Route
               path="vehicles/:id/edit"
               element={<ManagerVehicleEditPage />}
+            />
+            <Route
+              path="vehicles/:id/photos"
+              element={<ManagerVehiclePhotosPage />}
             />
             <Route
               path="reservations"
