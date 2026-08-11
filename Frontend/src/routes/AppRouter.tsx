@@ -2,7 +2,6 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import {
   CarFront,
   CircleGauge,
-  ClipboardList,
   CreditCard,
   History,
   Settings,
@@ -42,6 +41,8 @@ import ManagerVehiclesPage from '../pages/manager/ManagerVehiclesPage'
 import ManagerVehicleCreatePage from '../pages/manager/ManagerVehicleCreatePage'
 import ManagerVehicleEditPage from '../pages/manager/ManagerVehicleEditPage'
 import ManagerVehiclePhotosPage from '../pages/manager/ManagerVehiclePhotosPage'
+import ManagerReservationsPage from '../pages/manager/ManagerReservationsPage'
+import ManagerReservationDetailPage from '../pages/manager/ManagerReservationDetailPage'
 
 function NotFoundPage() {
   return <div className="p-8 text-3xl font-bold">404 - Page introuvable</div>
@@ -147,15 +148,11 @@ export default function AppRouter() {
             />
             <Route
               path="reservations"
-              element={
-                <FeaturePlaceholderPage
-                  title="Réservations"
-                  description="Suivez et administrez les réservations clients."
-                  icon={ClipboardList}
-                  backLink="/manager"
-                  backLabel="Retour au tableau de bord"
-                />
-              }
+              element={<ManagerReservationsPage />}
+            />
+            <Route
+              path="reservations/:id"
+              element={<ManagerReservationDetailPage />}
             />
             <Route
               path="documents"
