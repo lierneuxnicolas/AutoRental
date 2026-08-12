@@ -16,7 +16,8 @@ from .utils import ensure_roles
 
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
-    FRONTEND_URL="http://localhost:3000",
+    FRONTEND_URL="http://localhost:5173",
+    DEFAULT_FROM_EMAIL="GetACar <noreply@getacar.be>",
 )
 class PasswordResetTests(APITestCase):
     def setUp(self):
@@ -59,8 +60,15 @@ class PasswordResetTests(APITestCase):
         self.assertNotIn("user", response.data)
         self.assertNotIn("detail", response.data)
         self.assertEqual(len(mail.outbox), 1)
-        self.assertIn("/reset-password?uid=", mail.outbox[0].body)
-        self.assertIn("&token=", mail.outbox[0].body)
+        sent_email = mail.outbox[0]
+        uid, token = self._reset_token_payload()
+        self.assertEqual(sent_email.subject, "Reinitialisez votre mot de passe GetACar")
+        self.assertEqual(sent_email.from_email, "GetACar <noreply@getacar.be>")
+        self.assertEqual(sent_email.to, ["resetme@example.com"])
+        self.assertIn("http://localhost:5173/reset-password?uid=", sent_email.body)
+        self.assertIn(f"uid={uid}", sent_email.body)
+        self.assertIn(f"token={token}", sent_email.body)
+        self.assertIn("Ce lien est valable pendant la duree configuree par Django.", sent_email.body)
 
     def test_password_reset_request_unknown_email_returns_same_message_and_no_email(self):
         with self.captureOnCommitCallbacks(execute=True):

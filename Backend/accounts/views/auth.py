@@ -266,11 +266,15 @@ class PasswordResetRequestView(APIView):
 
             def _send_reset_email():
                 send_mail(
-                    subject="Reinitialisation de votre mot de passe AutoRental",
+                    subject="Reinitialisez votre mot de passe GetACar",
                     message=(
-                        "Vous avez demande la reinitialisation de votre mot de passe.\n\n"
-                        "Si vous etes a l'origine de cette demande, ouvrez ce lien :\n"
-                        f"{reset_url}\n"
+                        "Bonjour,\n\n"
+                        "Vous avez demande la reinitialisation de votre mot de passe GetACar.\n\n"
+                        "Pour choisir un nouveau mot de passe, ouvrez le lien suivant :\n\n"
+                        f"{reset_url}\n\n"
+                        "Si vous n'etes pas a l'origine de cette demande, ignorez simplement cet e-mail.\n\n"
+                        "Ce lien est valable pendant la duree configuree par Django.\n\n"
+                        "GetACar"
                     ),
                     from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
                     recipient_list=[user.email],
