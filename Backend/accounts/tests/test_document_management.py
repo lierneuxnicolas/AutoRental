@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+from django.core import mail
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -12,6 +14,9 @@ from notifications.models import Notification
 from .utils import create_user, ensure_roles
 
 
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+)
 class DocumentManagementEndpointsTests(APITestCase):
     tracked_actions = ("DOCUMENT_VALIDATED", "DOCUMENT_REJECTED")
 
@@ -111,6 +116,12 @@ class DocumentManagementEndpointsTests(APITestCase):
         self.assertEqual(log.level, SystemLog.Level.INFO)
         self.assertIn(str(self.document.id), log.message)
         self.assertEqual(self.client_profile.profile_status, ClientProfile.ProfileStatus.INCOMPLET)
+        self.assertEqual(len(mail.outbox), 1)
+        sent_email = mail.outbox[0]
+        self.assertEqual(sent_email.subject, "Votre document GetACar a été validé")
+        self.assertEqual(sent_email.to, [self.client_user.email])
+        self.assertIn(self.document.get_document_type_display(), sent_email.body)
+        self.assertIn("Statut : Validé", sent_email.body)
 
     def test_validate_expired_document_is_rejected(self):
         self.document.expiration_date = timezone.localdate() - timedelta(days=1)
@@ -124,20 +135,22 @@ class DocumentManagementEndpointsTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(SystemLog.objects.filter(action__in=self.tracked_actions).count(), logs_before)
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_reject_success_with_reason(self):
         self._authenticate("manager-docs@example.com", "StrongPass123!")
         reject_url = reverse("accounts:management-documents-reject", kwargs={"pk": self.document.pk})
+        rejection_reason = "Document illisible"
 
         with self.captureOnCommitCallbacks(execute=True):
-            response = self.client.post(reject_url, {"reason": "Document illisible"}, format="json")
+            response = self.client.post(reject_url, {"reason": rejection_reason}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.document.refresh_from_db()
         self.client_profile.refresh_from_db()
 
         self.assertEqual(self.document.status, ClientDocument.Status.REFUSE)
-        self.assertEqual(self.document.rejection_reason, "Document illisible")
+        self.assertEqual(self.document.rejection_reason, rejection_reason)
         self.assertEqual(self.document.validated_by_id, self.manager.id)
         self.assertIsNotNone(self.document.validated_at)
         self.assertEqual(self.client_profile.profile_status, ClientProfile.ProfileStatus.REFUSE)
@@ -154,6 +167,13 @@ class DocumentManagementEndpointsTests(APITestCase):
         self.assertEqual(log.user, self.manager)
         self.assertEqual(log.level, SystemLog.Level.WARNING)
         self.assertIn(str(self.document.id), log.message)
+        self.assertEqual(len(mail.outbox), 1)
+        sent_email = mail.outbox[0]
+        self.assertEqual(sent_email.subject, "Votre document GetACar doit être corrigé")
+        self.assertEqual(sent_email.to, [self.client_user.email])
+        self.assertIn(self.document.get_document_type_display(), sent_email.body)
+        self.assertIn("Statut : Refusé", sent_email.body)
+        self.assertIn(rejection_reason, sent_email.body)
 
     def test_reject_without_reason_is_rejected(self):
         logs_before = SystemLog.objects.filter(action__in=self.tracked_actions).count()
@@ -165,15 +185,32 @@ class DocumentManagementEndpointsTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(SystemLog.objects.filter(action__in=self.tracked_actions).count(), logs_before)
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_repeated_action_is_refused(self):
         self._authenticate("manager-docs@example.com", "StrongPass123!")
         validate_url = reverse("accounts:management-documents-validate", kwargs={"pk": self.document.pk})
 
-        first_response = self.client.post(validate_url, {}, format="json")
+        with self.captureOnCommitCallbacks(execute=True):
+            first_response = self.client.post(validate_url, {}, format="json")
         logs_before_second_attempt = SystemLog.objects.filter(action__in=self.tracked_actions).count()
         second_response = self.client.post(validate_url, {}, format="json")
 
         self.assertEqual(first_response.status_code, status.HTTP_200_OK)
         self.assertEqual(second_response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(SystemLog.objects.filter(action__in=self.tracked_actions).count(), logs_before_second_attempt)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_repeated_reject_is_refused_and_email_sent_once(self):
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+        reject_url = reverse("accounts:management-documents-reject", kwargs={"pk": self.document.pk})
+
+        with self.captureOnCommitCallbacks(execute=True):
+            first_response = self.client.post(reject_url, {"reason": "Document flou"}, format="json")
+        logs_before_second_attempt = SystemLog.objects.filter(action__in=self.tracked_actions).count()
+        second_response = self.client.post(reject_url, {"reason": "Document flou"}, format="json")
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(SystemLog.objects.filter(action__in=self.tracked_actions).count(), logs_before_second_attempt)
+        self.assertEqual(len(mail.outbox), 1)
