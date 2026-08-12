@@ -262,12 +262,14 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 			"data": {"object": payment_intent},
 		}
 
-	@patch("payments.services.webhooks.create_invoice_for_reservation", return_value=object())
-	def test_payment_intent_succeeded_confirms_reservation_sets_vehicle_reserved_and_notifies_once(self, mocked_invoice):
+	def test_payment_intent_succeeded_confirms_reservation_sets_vehicle_reserved_and_notifies_once(self):
 		event = self._build_event("evt_success", "payment_intent.succeeded")
 
-		process_stripe_event(event)
-		process_stripe_event(event)
+		with patch("payments.services.webhooks.create_invoice_for_reservation", return_value=type("InvoiceStub", (), {"id": 12345})()) as mocked_invoice, patch(
+			"payments.services.webhooks.send_mail"
+		) as mocked_send_mail:
+			process_stripe_event(event)
+			process_stripe_event(event)
 
 		self.payment.refresh_from_db()
 		self.reservation.refresh_from_db()
@@ -292,13 +294,31 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		self.assertIn(self.reservation.reference, log.message)
 		self.assertIn(str(self.payment.amount), log.message)
 		mocked_invoice.assert_called_once_with(self.reservation)
+		mocked_send_mail.assert_called_once()
+		kwargs = mocked_send_mail.call_args.kwargs
+		self.assertEqual(kwargs["subject"], "Votre réservation GetACar est confirmée")
+		self.assertEqual(kwargs["from_email"], getattr(settings, "DEFAULT_FROM_EMAIL", None))
+		self.assertEqual(kwargs["recipient_list"], [self.client_user.email])
+		message = kwargs["message"]
+		self.assertIn("Bonjour", message)
+		self.assertIn(self.reservation.reference, message)
+		self.assertIn(self.vehicle.brand.name, message)
+		self.assertIn(self.vehicle.model_name, message)
+		self.assertIn("Début :", message)
+		self.assertIn("Fin :", message)
+		self.assertIn(str(self.reservation.rental_amount), message)
+		self.assertIn(str(self.reservation.deposit_amount), message)
+		self.assertIn("GetACar", message)
 
-	@patch("payments.services.webhooks.create_invoice_for_reservation", side_effect=InvoiceIntegrationPending("Invoice model is not available yet."))
-	def test_payment_intent_succeeded_keeps_event_retryable_when_invoice_integration_is_blocked(self, mocked_invoice):
+	def test_payment_intent_succeeded_keeps_event_retryable_when_invoice_integration_is_blocked(self):
 		event = self._build_event("evt_invoice_blocked", "payment_intent.succeeded")
 
-		with self.assertRaises(InvoiceIntegrationPending):
-			process_stripe_event(event)
+		with patch(
+			"payments.services.webhooks.create_invoice_for_reservation",
+			side_effect=InvoiceIntegrationPending("Invoice model is not available yet."),
+		) as mocked_invoice, patch("payments.services.webhooks.send_mail") as mocked_send_mail:
+			with self.assertRaises(InvoiceIntegrationPending):
+				process_stripe_event(event)
 
 		stripe_event = StripeEvent.objects.get(stripe_event_id="evt_invoice_blocked")
 		self.payment.refresh_from_db()
@@ -312,6 +332,7 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		self.assertEqual(self.vehicle.status, Vehicle.Status.DISPONIBLE)
 		self.assertFalse(Notification.objects.filter(notification_type="PAYMENT_SUCCEEDED").exists())
 		self.assertFalse(SystemLog.objects.filter(action="PAYMENT_SUCCESS").exists())
+		mocked_send_mail.assert_not_called()
 		mocked_invoice.assert_called_once()
 
 	@patch("payments.services.webhooks.create_invoice_for_reservation", return_value=object())

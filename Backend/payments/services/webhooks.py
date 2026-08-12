@@ -3,7 +3,9 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -109,6 +111,39 @@ def _notify_once(*, user, notification_type: str, title: str, message: str, rela
         message=message,
         related_object_type=related_object_type,
         related_object_id=related_object_id,
+    )
+
+
+def _format_local_datetime(value) -> str:
+    return timezone.localtime(value).strftime("%d/%m/%Y %H:%M")
+
+
+def _send_reservation_confirmation_email(*, reservation: Reservation) -> None:
+    client_user = reservation.client.user
+    first_name = (getattr(client_user, "first_name", "") or "").strip()
+    greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
+    vehicle_brand = getattr(getattr(reservation.vehicle, "brand", None), "name", "").strip()
+    vehicle_model = (getattr(reservation.vehicle, "model_name", "") or "").strip()
+    vehicle_label = " ".join(part for part in [vehicle_brand, vehicle_model] if part)
+
+    send_mail(
+        subject="Votre réservation GetACar est confirmée",
+        message=(
+            f"{greeting}\n\n"
+            "Votre réservation GetACar est confirmée.\n\n"
+            f"Référence : {reservation.reference}\n"
+            f"Véhicule : {vehicle_label}\n"
+            f"Début : {_format_local_datetime(reservation.start_at)}\n"
+            f"Fin : {_format_local_datetime(reservation.end_at)}\n"
+            f"Montant de location : {reservation.rental_amount}\n"
+            f"Caution : {reservation.deposit_amount}\n\n"
+            "Vous pouvez consulter votre réservation depuis votre espace client.\n\n"
+            "Merci,\n"
+            "GetACar"
+        ),
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        recipient_list=[client_user.email],
+        fail_silently=False,
     )
 
 
@@ -369,6 +404,7 @@ def _handle_success(
             related_object_type="reservation",
             related_object_id=reservation_id,
         )
+        _send_reservation_confirmation_email(reservation=reservation)
         if invoice_id is not None:
             _notify_once(
                 user=client_user,
