@@ -6,11 +6,12 @@ from unittest.mock import patch
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.db import IntegrityError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import resolve, reverse
 from django.utils import timezone
@@ -18,6 +19,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from accounts.models import ClientDocument, ClientProfile, Role
+from accounts.tests.utils import create_user, ensure_roles
 from inspections.models import Inspection
 from interventions.models import Intervention, LockingLog, VehicleAccess
 from interventions.services.vehicle_access import activate_vehicle_access
@@ -25,6 +27,7 @@ from notifications.models import Notification
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
 from reservations.services.pricing import PricingError, _quantize_amount, calculate_price_simulation
+from reservations.services.reminders import REMINDER_NOTIFICATION_TYPE, send_reservation_24h_reminders
 from reservations.services.reservation_creation import create_draft_reservation
 from reservations.views import (
 	PriceSimulationView,
@@ -2363,3 +2366,152 @@ class ReservationConcurrencyAuditTests(TestCase):
 		atomic_index = source.find("with transaction.atomic():")
 		last_availability_check_index = source.rfind("is_vehicle_available(")
 		self.assertGreater(last_availability_check_index, atomic_index)
+
+
+class ReservationReminderEmailTests(TestCase):
+	def setUp(self):
+		self.roles = ensure_roles()
+		self.client_user = create_user(
+			email="reminder-client@example.com",
+			password="StrongPass123!",
+			role=self.roles[Role.Code.CLIENT],
+			email_verified=True,
+			is_active=True,
+		)
+		self.client_profile = ClientProfile.objects.create(
+			user=self.client_user,
+			date_of_birth=date(1990, 1, 1),
+			address="Rue Reminder 1",
+			profile_status=ClientProfile.ProfileStatus.VALIDE,
+		)
+
+		brand = Brand.objects.create(name="Reminder Brand", is_active=True)
+		category = VehicleCategory.objects.create(
+			name="Reminder Category",
+			description="Category",
+			daily_rate=Decimal("60.00"),
+			hourly_rate=Decimal("10.00"),
+			minimum_deposit=Decimal("300.00"),
+			minimum_rental_hours=1,
+			is_active=True,
+		)
+		parking = Parking.objects.create(
+			name="Reminder Parking",
+			address="Rue Reminder Parking 1",
+			capacity=10,
+			is_active=True,
+		)
+		space = ParkingSpace.objects.create(parking=parking, number="R1", is_active=True)
+		self.vehicle = Vehicle.objects.create(
+			brand=brand,
+			category=category,
+			parking_space=space,
+			registration_number="RMD-001",
+			model_name="Model Reminder",
+			year=2024,
+			color="Black",
+			energy_type="Hybrid",
+			transmission="Auto",
+			seats=5,
+			doors=5,
+			mileage=1000,
+			status=Vehicle.Status.RESERVE,
+			is_active=True,
+		)
+
+	def _create_reservation(self, *, status, start_offset_hours, cancelled=False, reference_time=None):
+		now = reference_time or timezone.now()
+		start_at = now + timedelta(hours=start_offset_hours)
+		end_at = start_at + timedelta(hours=2)
+		reservation = Reservation.objects.create(
+			client=self.client_profile,
+			vehicle=self.vehicle,
+			start_at=start_at,
+			end_at=end_at,
+			status=status,
+			rental_amount=Decimal("120.00"),
+			deposit_amount=Decimal("300.00"),
+			confirmed_at=timezone.now() if status in Reservation.CONFIRMED_STATUSES else None,
+			cancelled_at=timezone.now() if cancelled else None,
+			cancellation_reason="User cancelled" if cancelled else "",
+		)
+		return reservation
+
+	@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+	def test_confirmed_reservation_around_24h_sends_email_once(self):
+		reference_time = timezone.now()
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_offset_hours=24,
+			reference_time=reference_time,
+		)
+
+		sent_count = send_reservation_24h_reminders(reference_time=reference_time)
+
+		self.assertEqual(sent_count, 1)
+		self.assertEqual(len(mail.outbox), 1)
+		sent_email = mail.outbox[0]
+		self.assertEqual(sent_email.subject, "Rappel de votre réservation GetACar")
+		self.assertEqual(sent_email.to, [self.client_user.email])
+		self.assertIn(reservation.reference, sent_email.body)
+		self.assertIn(self.vehicle.brand.name, sent_email.body)
+		self.assertIn(self.vehicle.model_name, sent_email.body)
+		self.assertTrue(
+			Notification.objects.filter(
+				user=self.client_user,
+				notification_type=REMINDER_NOTIFICATION_TYPE,
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).exists()
+		)
+
+	@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+	def test_cancelled_reservation_sends_no_email(self):
+		reference_time = timezone.now()
+		self._create_reservation(
+			status=Reservation.Status.ANNULEE,
+			start_offset_hours=24,
+			cancelled=True,
+			reference_time=reference_time,
+		)
+
+		sent_count = send_reservation_24h_reminders(reference_time=reference_time)
+
+		self.assertEqual(sent_count, 0)
+		self.assertEqual(len(mail.outbox), 0)
+
+	@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+	def test_non_confirmed_reservation_sends_no_email(self):
+		reference_time = timezone.now()
+		self._create_reservation(
+			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+			start_offset_hours=24,
+			reference_time=reference_time,
+		)
+
+		sent_count = send_reservation_24h_reminders(reference_time=reference_time)
+
+		self.assertEqual(sent_count, 0)
+		self.assertEqual(len(mail.outbox), 0)
+
+	@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+	def test_already_sent_reminder_does_not_send_again(self):
+		reference_time = timezone.now()
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_offset_hours=24,
+			reference_time=reference_time,
+		)
+		Notification.objects.create(
+			user=self.client_user,
+			notification_type=REMINDER_NOTIFICATION_TYPE,
+			title="Rappel de réservation envoyé",
+			message=f"Rappel 24h envoyé pour la réservation {reservation.reference}.",
+			related_object_type="reservation",
+			related_object_id=reservation.id,
+		)
+
+		sent_count = send_reservation_24h_reminders(reference_time=reference_time)
+
+		self.assertEqual(sent_count, 0)
+		self.assertEqual(len(mail.outbox), 0)
