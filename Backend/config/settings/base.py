@@ -19,7 +19,8 @@ from dotenv import load_dotenv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-# Load environment variables from project root .env file.
+# Load root .env first (SMTP), then Backend/.env for missing backend-specific vars.
+load_dotenv(BASE_DIR.parent / ".env")
 load_dotenv(BASE_DIR / ".env")
 
 
@@ -237,3 +238,22 @@ LOGGING = {
         },
     },
 }
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend",
+)
+
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+
+EMAIL_USE_TLS = (
+    os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
+)
+
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+
+DEFAULT_FROM_EMAIL = os.getenv(
+    "DEFAULT_FROM_EMAIL",
+    "GetACar <noreply@getacar.be>",
+)
