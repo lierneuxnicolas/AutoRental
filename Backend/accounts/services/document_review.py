@@ -1,4 +1,6 @@
 from django.db import transaction
+from django.conf import settings
+from django.core.mail import send_mail
 from django.utils import timezone
 
 from accounts.models import ClientDocument, Role
@@ -35,6 +37,51 @@ def _notify_once(*, user, notification_type, title, message, related_object_type
         message=message,
         related_object_type=related_object_type,
         related_object_id=related_object_id,
+    )
+
+
+def _send_validated_document_email(*, document) -> None:
+    client_user = document.client.user
+    first_name = (getattr(client_user, "first_name", "") or "").strip()
+    greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
+
+    send_mail(
+        subject="Votre document GetACar a été validé",
+        message=(
+            f"{greeting}\n\n"
+            "Votre document a été validé par notre équipe.\n\n"
+            f"Document : {document.get_document_type_display()}\n"
+            "Statut : Validé\n\n"
+            "Votre profil GetACar a été mis à jour.\n\n"
+            "Merci,\n"
+            "GetACar"
+        ),
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        recipient_list=[client_user.email],
+        fail_silently=False,
+    )
+
+
+def _send_rejected_document_email(*, document) -> None:
+    client_user = document.client.user
+    first_name = (getattr(client_user, "first_name", "") or "").strip()
+    greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
+
+    send_mail(
+        subject="Votre document GetACar doit être corrigé",
+        message=(
+            f"{greeting}\n\n"
+            "Votre document n'a pas pu être validé.\n\n"
+            f"Document : {document.get_document_type_display()}\n"
+            "Statut : Refusé\n"
+            f"Motif : {document.rejection_reason}\n\n"
+            "Merci de corriger ou remplacer ce document depuis votre profil GetACar.\n\n"
+            "Merci,\n"
+            "GetACar"
+        ),
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        recipient_list=[client_user.email],
+        fail_silently=False,
     )
 
 
@@ -78,8 +125,8 @@ def validate_document(*, document, manager):
         recalculate_profile_status(locked_document.client)
 
         message = f"Votre document {locked_document.get_document_type_display()} a ete valide."
-        transaction.on_commit(
-            lambda: _notify_once(
+        def _notify_and_send_email_once() -> None:
+            notification = _notify_once(
                 user=locked_document.client.user,
                 notification_type="DOCUMENT_VALIDATED",
                 title="Document valide",
@@ -87,7 +134,11 @@ def validate_document(*, document, manager):
                 related_object_type="document",
                 related_object_id=locked_document.id,
             )
-        )
+            if notification is None:
+                return
+            _send_validated_document_email(document=locked_document)
+
+        transaction.on_commit(_notify_and_send_email_once)
 
         document.status = locked_document.status
         document.rejection_reason = locked_document.rejection_reason
@@ -140,8 +191,8 @@ def reject_document(*, document, manager, reason):
             f"Votre document {locked_document.get_document_type_display()} a ete refuse. "
             f"Motif: {cleaned_reason}"
         )
-        transaction.on_commit(
-            lambda: _notify_once(
+        def _notify_and_send_email_once() -> None:
+            notification = _notify_once(
                 user=locked_document.client.user,
                 notification_type="DOCUMENT_REJECTED",
                 title="Document refuse",
@@ -149,7 +200,11 @@ def reject_document(*, document, manager, reason):
                 related_object_type="document",
                 related_object_id=locked_document.id,
             )
-        )
+            if notification is None:
+                return
+            _send_rejected_document_email(document=locked_document)
+
+        transaction.on_commit(_notify_and_send_email_once)
 
         document.status = locked_document.status
         document.rejection_reason = locked_document.rejection_reason
