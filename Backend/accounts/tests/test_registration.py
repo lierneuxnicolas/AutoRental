@@ -14,6 +14,8 @@ from .utils import ensure_roles
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     FRONTEND_URL="http://localhost:3000",
+    DEFAULT_FROM_EMAIL="GetACar <noreply@getacar.be>",
+    EMAIL_VERIFICATION_MAX_AGE=86400,
 )
 class RegistrationTests(APITestCase):
     def setUp(self):
@@ -62,8 +64,13 @@ class RegistrationTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(len(mail.outbox), 1)
-        self.assertIn("Confirmez votre adresse e-mail", mail.outbox[0].subject)
-        self.assertIn("/verify-email?token=", mail.outbox[0].body)
+        sent_email = mail.outbox[0]
+        self.assertEqual(sent_email.subject, "Confirmez votre inscription GetACar")
+        self.assertEqual(sent_email.from_email, "GetACar <noreply@getacar.be>")
+        self.assertEqual(sent_email.to, ["newclient@example.com"])
+        self.assertIn("Bonjour Alice,", sent_email.body)
+        self.assertIn("/verify-email?token=", sent_email.body)
+        self.assertIn("86400 secondes", sent_email.body)
 
     def test_registration_rejects_duplicate_email_case_insensitive(self):
         user_model = get_user_model()
