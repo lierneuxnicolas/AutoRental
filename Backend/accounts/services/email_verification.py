@@ -37,13 +37,19 @@ def send_verification_email(user, request=None):
     token = generate_email_verification_token(user)
     frontend_url = getattr(settings, "FRONTEND_URL", "") or ""
     verify_url = f"{frontend_url.rstrip('/')}/verify-email?token={token}"
+    first_name = (getattr(user, "first_name", "") or "").strip()
+    greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
+    max_age_seconds = int(getattr(settings, "EMAIL_VERIFICATION_MAX_AGE", 0) or 0)
 
     send_mail(
-        subject="Confirmez votre adresse e-mail AutoRental",
+        subject="Confirmez votre inscription GetACar",
         message=(
-            "Bienvenue sur AutoRental.\n\n"
-            "Confirmez votre adresse e-mail en ouvrant ce lien :\n"
-            f"{verify_url}\n"
+            f"{greeting}\n\n"
+            "Merci pour votre inscription sur GetACar.\n"
+            "Pour finaliser votre inscription, veuillez confirmer votre adresse e-mail en ouvrant ce lien :\n"
+            f"{verify_url}\n\n"
+            f"Ce lien expire selon la configuration actuelle ({max_age_seconds} secondes).\n\n"
+            "Signature GetACar"
         ),
         from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
         recipient_list=[user.email],
