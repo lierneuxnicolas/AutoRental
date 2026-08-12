@@ -5,6 +5,8 @@ import tempfile
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.conf import settings
+from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
@@ -520,11 +522,12 @@ class VehicleAccessUnlockServiceTests(VehicleAccessTestDataMixin, TestCase):
 	def test_owner_can_unlock_and_state_is_unlocked(self):
 		reservation, access = self._prepare_active_access()
 
-		result = unlock_vehicle(
-			reservation=reservation,
-			requested_by=self.client_user_1,
-			request_context={"ip_address": "203.0.113.10", "user_agent": "ClientTest/1.0"},
-		)
+		with self.captureOnCommitCallbacks(execute=True):
+			result = unlock_vehicle(
+				reservation=reservation,
+				requested_by=self.client_user_1,
+				request_context={"ip_address": "203.0.113.10", "user_agent": "ClientTest/1.0"},
+			)
 
 		access.refresh_from_db()
 		self.assertEqual(result["state"], VehicleAccess.LockState.UNLOCKED)
@@ -537,6 +540,22 @@ class VehicleAccessUnlockServiceTests(VehicleAccessTestDataMixin, TestCase):
 				result=LockingLog.Result.SUCCESS,
 			).exists()
 		)
+		self.assertEqual(len(mail.outbox), 1)
+		email = mail.outbox[0]
+		self.assertEqual(email.subject, "Votre location GetACar a commencé")
+		self.assertEqual(email.from_email, settings.DEFAULT_FROM_EMAIL)
+		self.assertEqual(email.to, [self.client_user_1.email])
+		self.assertIn(f"Référence : {reservation.reference}", email.body)
+		self.assertIn("Votre location GetACar a bien commencé.", email.body)
+		self.assertEqual(
+			Notification.objects.filter(
+				user=self.client_user_1,
+				notification_type="RESERVATION_STARTED",
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).count(),
+			1,
+		)
 
 	def test_other_client_is_refused_and_not_owner_logged(self):
 		reservation, _access = self._prepare_active_access()
@@ -546,6 +565,15 @@ class VehicleAccessUnlockServiceTests(VehicleAccessTestDataMixin, TestCase):
 
 		self.assertEqual(exc.exception.code, "NOT_OWNER")
 		self._assert_failure_logged(reservation=reservation, code="NOT_OWNER")
+		self.assertEqual(len(mail.outbox), 0)
+		self.assertFalse(
+			Notification.objects.filter(
+				user=self.client_user_1,
+				notification_type="RESERVATION_STARTED",
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).exists()
+		)
 
 	def test_anonymous_is_refused(self):
 		reservation, _access = self._prepare_active_access()
@@ -707,7 +735,18 @@ class VehicleAccessUnlockServiceTests(VehicleAccessTestDataMixin, TestCase):
 	def test_double_unlock_is_refused_and_failure_logged(self):
 		reservation, access = self._prepare_active_access()
 
-		unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
+		with self.captureOnCommitCallbacks(execute=True):
+			unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
+		self.assertEqual(len(mail.outbox), 1)
+		self.assertEqual(
+			Notification.objects.filter(
+				user=self.client_user_1,
+				notification_type="RESERVATION_STARTED",
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).count(),
+			1,
+		)
 		with self.assertRaises(VehicleAccessError) as exc:
 			unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
 
@@ -715,6 +754,16 @@ class VehicleAccessUnlockServiceTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(exc.exception.code, "ALREADY_UNLOCKED")
 		self.assertEqual(access.lock_state, VehicleAccess.LockState.UNLOCKED)
 		self._assert_failure_logged(reservation=reservation, code="ALREADY_UNLOCKED")
+		self.assertEqual(len(mail.outbox), 1)
+		self.assertEqual(
+			Notification.objects.filter(
+				user=self.client_user_1,
+				notification_type="RESERVATION_STARTED",
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).count(),
+			1,
+		)
 
 
 class VehicleAccessLockServiceTests(VehicleAccessTestDataMixin, TestCase):

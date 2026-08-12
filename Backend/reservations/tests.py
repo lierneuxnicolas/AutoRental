@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.apps import apps
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.exceptions import ValidationError
@@ -23,6 +24,7 @@ from accounts.tests.utils import create_user, ensure_roles
 from inspections.models import Inspection
 from interventions.models import Intervention, LockingLog, VehicleAccess
 from interventions.services.vehicle_access import activate_vehicle_access
+from invoicing.models import Invoice
 from notifications.models import Notification
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
@@ -1677,14 +1679,65 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 	def test_manager_can_close_a_controler_reservation_when_vehicle_is_disponible(self):
 		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
 		self._prepare_completed_return_workflow(reservation)
+		Invoice.objects.create(
+			reservation=reservation,
+			client=reservation.client,
+			status=Invoice.Status.ISSUED,
+			subtotal=reservation.rental_amount,
+			tax_amount=Decimal("0.00"),
+			total_amount=reservation.rental_amount,
+			currency="EUR",
+			billing_name=f"{reservation.client.user.first_name} {reservation.client.user.last_name}".strip() or "Client",
+			billing_address=reservation.client.address,
+		)
 		self.client_api.force_authenticate(self.manager_user)
 
-		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+		with self.settings(FRONTEND_URL="https://app.getacar.test"):
+			with self.captureOnCommitCallbacks(execute=True):
+				response = self.client_api.post(self.url(reservation.id), {}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		reservation.refresh_from_db()
 		self.assertEqual(reservation.status, Reservation.Status.TERMINEE)
 		self.assertEqual(response.data["reservation"]["status"], Reservation.Status.TERMINEE)
+		self.assertEqual(len(mail.outbox), 1)
+		email = mail.outbox[0]
+		self.assertEqual(email.subject, "Merci d’avoir choisi GetACar")
+		self.assertEqual(email.from_email, settings.DEFAULT_FROM_EMAIL)
+		self.assertEqual(email.to, [reservation.client.user.email])
+		self.assertIn(f"Référence : {reservation.reference}", email.body)
+		self.assertIn("Votre réservation GetACar est maintenant terminée.", email.body)
+		self.assertIn("Consulter mes factures : https://app.getacar.test/invoices", email.body)
+		self.assertEqual(
+			Notification.objects.filter(
+				user=reservation.client.user,
+				notification_type="RESERVATION_COMPLETED",
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).count(),
+			1,
+		)
+
+	def test_rejects_when_reservation_is_still_en_cours_without_email(self):
+		reservation = self._create_reservation(status=Reservation.Status.EN_COURS)
+		self._prepare_completed_return_workflow(reservation)
+		reservation.status = Reservation.Status.EN_COURS
+		reservation.save(update_fields=["status", "updated_at"])
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "INVALID_STATUS")
+		self.assertEqual(len(mail.outbox), 0)
+		self.assertFalse(
+			Notification.objects.filter(
+				user=reservation.client.user,
+				notification_type="RESERVATION_COMPLETED",
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).exists()
+		)
 
 	def test_rejects_when_vehicle_is_not_disponible(self):
 		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
@@ -1697,6 +1750,50 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
 		self.assertEqual(response.data["code"], "VEHICLE_NOT_AVAILABLE")
+		self.assertEqual(len(mail.outbox), 0)
+		self.assertFalse(
+			Notification.objects.filter(
+				user=reservation.client.user,
+				notification_type="RESERVATION_COMPLETED",
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).exists()
+		)
+
+	def test_second_completion_call_does_not_duplicate_email(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		self.client_api.force_authenticate(self.manager_user)
+
+		with self.captureOnCommitCallbacks(execute=True):
+			first_response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+		self.assertEqual(len(mail.outbox), 1)
+		self.assertEqual(
+			Notification.objects.filter(
+				user=reservation.client.user,
+				notification_type="RESERVATION_COMPLETED",
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).count(),
+			1,
+		)
+
+		with self.captureOnCommitCallbacks(execute=True):
+			second_response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+		self.assertEqual(len(mail.outbox), 1)
+		self.assertEqual(
+			Notification.objects.filter(
+				user=reservation.client.user,
+				notification_type="RESERVATION_COMPLETED",
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).count(),
+			1,
+		)
 
 	def test_rejects_when_final_inspection_is_missing(self):
 		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)

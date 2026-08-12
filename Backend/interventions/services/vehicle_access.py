@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import Any
 
 from django.conf import settings
+from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
 
@@ -13,6 +14,9 @@ from inspections.models import Damage, Inspection
 from interventions.models import LockingLog, VehicleAccess
 from reservations.models import Reservation
 from vehicles.models import Vehicle
+
+
+RESERVATION_STARTED_NOTIFICATION_TYPE = "RESERVATION_STARTED"
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,59 @@ class VehicleAccessError(ValueError):
 
 def _raise_vehicle_access_error(code: str, message: str, *, http_status: int | None = None) -> None:
     raise VehicleAccessError(code=code, message=message, http_status=http_status)
+
+
+def _format_local_datetime(value) -> str:
+    return timezone.localtime(value).strftime("%d/%m/%Y %H:%M")
+
+
+def _send_reservation_started_email(*, reservation: Reservation) -> None:
+    client_user = reservation.client.user
+    first_name = (getattr(client_user, "first_name", "") or "").strip()
+    greeting = f"Bonjour {first_name}," if first_name else "Bonjour,"
+    vehicle_brand = (getattr(getattr(reservation.vehicle, "brand", None), "name", "") or "").strip()
+    vehicle_model = (getattr(reservation.vehicle, "model_name", "") or "").strip()
+    vehicle_label = " ".join(part for part in [vehicle_brand, vehicle_model] if part)
+
+    send_mail(
+        subject="Votre location GetACar a commencé",
+        message=(
+            f"{greeting}\n\n"
+            "Votre location GetACar a bien commencé.\n\n"
+            f"Référence : {reservation.reference}\n"
+            f"Véhicule : {vehicle_label}\n"
+            f"Début : {_format_local_datetime(reservation.start_at)}\n"
+            f"Fin prévue : {_format_local_datetime(reservation.end_at)}\n\n"
+            "Bonne route et à bientôt,\n"
+            "GetACar"
+        ),
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        recipient_list=[client_user.email],
+        fail_silently=False,
+    )
+
+
+def _notify_reservation_started_once(*, reservation: Reservation):
+    user = reservation.client.user
+    message = f"Votre location {reservation.reference} a commence."
+    existing = user.notifications.filter(
+        notification_type=RESERVATION_STARTED_NOTIFICATION_TYPE,
+        related_object_type="reservation",
+        related_object_id=reservation.id,
+    ).exists()
+    if existing:
+        return None
+
+    from notifications.services import create_notification
+
+    return create_notification(
+        user=user,
+        notification_type=RESERVATION_STARTED_NOTIFICATION_TYPE,
+        title="Location commencée",
+        message=message,
+        related_object_type="reservation",
+        related_object_id=reservation.id,
+    )
 
 
 def _extract_audit_context(*, request_context: Any = None) -> tuple[str | None, str | None]:
@@ -612,6 +669,14 @@ def unlock_vehicle(
                 user_agent=user_agent,
                 metadata={},
             )
+
+            def _notify_and_send_started_email_once() -> None:
+                notification = _notify_reservation_started_once(reservation=reservation_locked)
+                if notification is None:
+                    return
+                _send_reservation_started_email(reservation=reservation_locked)
+
+            transaction.on_commit(_notify_and_send_started_email_once)
 
             return {
                 "state": VehicleAccess.LockState.UNLOCKED,
