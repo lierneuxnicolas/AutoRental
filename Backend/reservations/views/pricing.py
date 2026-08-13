@@ -129,6 +129,7 @@ class PriceSimulationView(APIView):
                 vehicle=vehicle,
                 start_at=payload["start_at"],
                 end_at=payload["end_at"],
+                insurance_type=payload.get("insurance_type", "STANDARD"),
             )
         except PricingError as exc:
             error = pricing_error_to_serializer_error(exc)

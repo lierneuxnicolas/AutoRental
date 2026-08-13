@@ -160,6 +160,7 @@ class ReservationClientListCreateView(generics.ListCreateAPIView):
                 vehicle=vehicle,
                 start_at=payload["start_at"],
                 end_at=payload["end_at"],
+                insurance_type=payload.get("insurance_type", Reservation.InsuranceType.STANDARD),
             )
         except ReservationCreationError as exc:
             detail = {"code": exc.code, "message": exc.message}
@@ -389,7 +390,7 @@ class ReservationClientDepositAuthorizeView(generics.GenericAPIView):
         updated_reservation = result["reservation"]
         response_data = {
             "message": "Caution preautorisee.",
-            "reservation": ReservationListDetailSerializer(updated_reservation).data,
+            "reservation": updated_reservation,
             "deposit_id": deposit.id,
             "deposit_mode": deposit.mode,
             "deposit_status": deposit.status,

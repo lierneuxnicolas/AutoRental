@@ -128,6 +128,7 @@ def create_draft_reservation(
     vehicle: Vehicle,
     start_at: datetime,
     end_at: datetime,
+    insurance_type: str = Reservation.InsuranceType.STANDARD,
 ) -> Reservation:
     """Create a draft reservation after all business checks pass.
 
@@ -208,6 +209,7 @@ def create_draft_reservation(
                 vehicle=locked_vehicle,
                 start_at=normalized_start_at,
                 end_at=normalized_end_at,
+                insurance_type=insurance_type,
             )
         except PricingError as exc:
             _raise_reservation_creation_error(
@@ -229,6 +231,7 @@ def create_draft_reservation(
             end_at=normalized_end_at,
             status=Reservation.Status.BROUILLON,
             rental_amount=pricing.rental_amount,
+            insurance_type=pricing.insurance_type,
             deposit_amount=pricing.deposit_amount,
         )
 

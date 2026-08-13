@@ -1,6 +1,7 @@
 import inspect
 from datetime import date, timedelta
 from decimal import Decimal
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -16,15 +17,17 @@ from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import resolve, reverse
 from django.utils import timezone
+from PIL import Image
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from accounts.models import ClientDocument, ClientProfile, Role
 from accounts.tests.utils import create_user, ensure_roles
-from inspections.models import Inspection
+from common.models import SystemLog
+from inspections.models import Inspection, InspectionPhoto
 from interventions.models import Intervention, LockingLog, VehicleAccess
 from interventions.services.vehicle_access import activate_vehicle_access
-from invoicing.models import Invoice
+from invoicing.models import Invoice, InvoiceLine
 from notifications.models import Notification
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
@@ -40,6 +43,7 @@ from reservations.views import (
 	ReservationClientPaymentIntentView,
 	ReservationManagementCompleteView,
 	ReservationManagementDetailView,
+	ReservationManagementIssueView,
 	ReservationManagementListView,
 	ReservationLockView,
 	ReservationUnlockView,
@@ -217,7 +221,9 @@ class PriceSimulationServiceTests(PricingSimulationDataMixin, TestCase):
 		self.assertEqual(result.vehicle_id, self.vehicle_hybrid.id)
 		self.assertEqual(result.duration_hours, Decimal("2.00"))
 		self.assertEqual(result.rental_amount, Decimal("24.00"))
-		self.assertEqual(result.deposit_amount, Decimal("300.00"))
+		self.assertEqual(result.insurance_type, "STANDARD")
+		self.assertEqual(result.insurance_amount, Decimal("0.00"))
+		self.assertEqual(result.deposit_amount, Decimal("500.00"))
 		self.assertTrue(result.insurance_included)
 		self.assertEqual(result.total_amount, Decimal("24.00"))
 		self.assertEqual(result.pricing_method, "HOURLY")
@@ -324,7 +330,7 @@ class PriceSimulationServiceTests(PricingSimulationDataMixin, TestCase):
 			end_at=end_at,
 		)
 
-		self.assertEqual(result.deposit_amount, self.category_daily_only.minimum_deposit)
+		self.assertEqual(result.deposit_amount, Decimal("500.00"))
 
 	def test_insurance_included_is_always_true(self):
 		start_at, end_at = self._future_period(duration_hours=2)
@@ -337,6 +343,34 @@ class PriceSimulationServiceTests(PricingSimulationDataMixin, TestCase):
 
 		self.assertTrue(result.insurance_included)
 
+	def test_duo_insurance_is_added_to_total_amount(self):
+		start_at, end_at = self._future_period(duration_hours=26)
+
+		result = calculate_price_simulation(
+			vehicle=self.vehicle_hybrid,
+			start_at=start_at,
+			end_at=end_at,
+			insurance_type="DUO",
+		)
+
+		self.assertEqual(result.rental_amount, Decimal("100.00"))
+		self.assertEqual(result.insurance_type, "DUO")
+		self.assertEqual(result.insurance_amount, Decimal("16.00"))
+		self.assertEqual(result.total_amount, Decimal("116.00"))
+
+	def test_invalid_insurance_type_raises_error(self):
+		start_at, end_at = self._future_period(duration_hours=2)
+
+		with self.assertRaises(PricingError) as exc:
+			calculate_price_simulation(
+				vehicle=self.vehicle_hybrid,
+				start_at=start_at,
+				end_at=end_at,
+				insurance_type="PREMIUM",
+			)
+
+		self.assertEqual(exc.exception.code, "INVALID_INSURANCE")
+
 	def test_total_amount_excludes_deposit(self):
 		start_at, end_at = self._future_period(duration_hours=2)
 
@@ -346,7 +380,7 @@ class PriceSimulationServiceTests(PricingSimulationDataMixin, TestCase):
 			end_at=end_at,
 		)
 
-		self.assertEqual(result.total_amount, result.rental_amount)
+		self.assertEqual(result.total_amount, result.rental_amount + result.insurance_amount)
 		self.assertNotEqual(result.total_amount, result.rental_amount + result.deposit_amount)
 
 	def test_service_does_not_write_in_database(self):
@@ -424,6 +458,8 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 				"vehicle_id",
 				"duration_hours",
 				"rental_amount",
+				"insurance_type",
+				"insurance_amount",
 				"deposit_amount",
 				"insurance_included",
 				"total_amount",
@@ -443,9 +479,31 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		self.assertEqual(response.data["vehicle_id"], self.vehicle_hybrid.id)
 		self.assertEqual(Decimal(str(response.data["duration_hours"])), Decimal("2.00"))
 		self.assertEqual(Decimal(str(response.data["rental_amount"])), Decimal("24.00"))
-		self.assertEqual(Decimal(str(response.data["deposit_amount"])), Decimal("300.00"))
+		self.assertEqual(response.data["insurance_type"], "STANDARD")
+		self.assertEqual(Decimal(str(response.data["insurance_amount"])), Decimal("0.00"))
+		self.assertEqual(Decimal(str(response.data["deposit_amount"])), Decimal("500.00"))
 		self.assertEqual(Decimal(str(response.data["total_amount"])), Decimal("24.00"))
 		self.assertTrue(response.data["insurance_included"])
+
+	def test_successful_simulation_with_duo_insurance_includes_insurance_amount(self):
+		start_at, end_at = self._future_period(duration_hours=26)
+
+		response = self.client_api.post(
+			self.url,
+			self._payload(
+				vehicle_id=self.vehicle_hybrid.id,
+				start_at=start_at,
+				end_at=end_at,
+				insurance_type="DUO",
+			),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["insurance_type"], "DUO")
+		self.assertEqual(Decimal(str(response.data["insurance_amount"])), Decimal("16.00"))
+		self.assertEqual(Decimal(str(response.data["rental_amount"])), Decimal("100.00"))
+		self.assertEqual(Decimal(str(response.data["total_amount"])), Decimal("116.00"))
 
 	def test_unknown_vehicle_returns_404(self):
 		response = self.client_api.post(self.url, self._payload(vehicle_id=999999), format="json")
@@ -619,6 +677,13 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 
 def _doc_file(name):
 	return SimpleUploadedFile(name, b"document", content_type="application/octet-stream")
+
+
+def _image_file(name="proof.jpg", image_format="JPEG", content_type="image/jpeg"):
+	buffer = BytesIO()
+	Image.new("RGB", (10, 10), color="blue").save(buffer, format=image_format)
+	buffer.seek(0)
+	return SimpleUploadedFile(name, buffer.getvalue(), content_type=content_type)
 
 
 class ReservationTestDataMixin:
@@ -823,6 +888,7 @@ class ReservationTestDataMixin:
 			end_at=end,
 			status=status,
 			rental_amount=Decimal("120.00"),
+			insurance_type=Reservation.InsuranceType.STANDARD,
 			deposit_amount=Decimal("350.00"),
 			confirmed_at=confirmed_at,
 			cancelled_at=cancelled_at,
@@ -1189,8 +1255,10 @@ class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
 			duration_hours=Decimal("4.00"),
 			rental_amount=Decimal("555.55"),
 			deposit_amount=Decimal("444.44"),
+			insurance_type="DUO",
+			insurance_amount=Decimal("32.00"),
 			insurance_included=True,
-			total_amount=Decimal("555.55"),
+			total_amount=Decimal("587.55"),
 			pricing_method="MOCKED",
 		),
 	)
@@ -1201,6 +1269,7 @@ class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 		reservation = Reservation.objects.get(pk=response.data["id"])
 		self.assertEqual(reservation.rental_amount, Decimal("555.55"))
+		self.assertEqual(reservation.insurance_type, "DUO")
 		self.assertEqual(reservation.deposit_amount, Decimal("444.44"))
 
 	def test_faux_montant_frontend_refuse(self):
@@ -1591,6 +1660,7 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 	def setUp(self):
 		self.client_api = APIClient()
 		self.url = lambda reservation_id: reverse("reservations:management-reservation-complete", kwargs={"pk": reservation_id})
+		self.issue_url = lambda reservation_id: reverse("reservations:management-reservation-report-issue", kwargs={"pk": reservation_id})
 
 	def _make_active_access(self, reservation):
 		if reservation.status != Reservation.Status.EN_COURS:
@@ -1621,7 +1691,7 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 			reservation.status = Reservation.Status.A_CONTROLER
 			reservation.save(update_fields=["status", "updated_at"])
 
-		reservation.vehicle.status = Vehicle.Status.DISPONIBLE
+		reservation.vehicle.status = Vehicle.Status.A_CONTROLER
 		reservation.vehicle.save(update_fields=["status", "updated_at"])
 
 		Inspection.objects.create(
@@ -1660,6 +1730,17 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 			started_at=timezone.now() - timedelta(hours=1),
 			completed_at=timezone.now(),
 		)
+
+	def _create_review_deposit(self, reservation, *, mode=Deposit.Mode.SIMULATED, status=Deposit.Status.A_VERIFIER):
+		return Deposit.objects.create(
+			reservation=reservation,
+			mode=mode,
+			amount=Decimal("500.00"),
+			currency="EUR",
+			status=status,
+			authorized_at=timezone.now(),
+			stripe_payment_intent_id="pi_dep_complete_001" if mode == Deposit.Mode.STRIPE_TEST else None,
+		)
 		Intervention.objects.create(
 			reservation=reservation,
 			vehicle=reservation.vehicle,
@@ -1675,21 +1756,13 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 	def test_management_complete_routes_are_resolved(self):
 		self.assertEqual(reverse("reservations:management-reservation-complete", kwargs={"pk": 1}), "/api/v1/management/reservations/1/complete/")
 		self.assertIs(resolve("/api/v1/management/reservations/1/complete/").func.view_class, ReservationManagementCompleteView)
+		self.assertEqual(reverse("reservations:management-reservation-report-issue", kwargs={"pk": 1}), "/api/v1/management/reservations/1/report-issue/")
+		self.assertIs(resolve("/api/v1/management/reservations/1/report-issue/").func.view_class, ReservationManagementIssueView)
 
 	def test_manager_can_close_a_controler_reservation_when_vehicle_is_disponible(self):
 		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
 		self._prepare_completed_return_workflow(reservation)
-		Invoice.objects.create(
-			reservation=reservation,
-			client=reservation.client,
-			status=Invoice.Status.ISSUED,
-			subtotal=reservation.rental_amount,
-			tax_amount=Decimal("0.00"),
-			total_amount=reservation.rental_amount,
-			currency="EUR",
-			billing_name=f"{reservation.client.user.first_name} {reservation.client.user.last_name}".strip() or "Client",
-			billing_address=reservation.client.address,
-		)
+		self._create_review_deposit(reservation)
 		self.client_api.force_authenticate(self.manager_user)
 
 		with self.settings(FRONTEND_URL="https://app.getacar.test"):
@@ -1698,8 +1771,18 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		reservation.refresh_from_db()
+		reservation.vehicle.refresh_from_db()
 		self.assertEqual(reservation.status, Reservation.Status.TERMINEE)
+		self.assertEqual(reservation.vehicle.status, Vehicle.Status.DISPONIBLE)
 		self.assertEqual(response.data["reservation"]["status"], Reservation.Status.TERMINEE)
+		invoice = Invoice.objects.get(reservation=reservation)
+		self.assertEqual(invoice.subtotal, reservation.rental_amount)
+		self.assertEqual(invoice.total_amount, reservation.rental_amount)
+		self.assertEqual(invoice.lines.count(), 1)
+		line = invoice.lines.get()
+		self.assertEqual(line.line_type, InvoiceLine.LineType.VEHICLE_RENTAL)
+		self.assertEqual(line.total_price, reservation.rental_amount)
+		self.assertNotEqual(invoice.total_amount, reservation.rental_amount + reservation.deposit_amount)
 		self.assertEqual(len(mail.outbox), 1)
 		email = mail.outbox[0]
 		self.assertEqual(email.subject, "Merci d’avoir choisi GetACar")
@@ -1717,10 +1800,96 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 			).count(),
 			1,
 		)
+		notification = Notification.objects.get(
+			user=reservation.client.user,
+			notification_type="RESERVATION_COMPLETED",
+			related_object_type="reservation",
+			related_object_id=reservation.id,
+		)
+		self.assertEqual(notification.message, "Votre retour a été validé. La caution a été libérée.")
+		log = SystemLog.objects.filter(action="RETURN_VALIDATED", user=self.manager_user).latest("created_at")
+		self.assertIn(reservation.reference, log.message)
+		self.assertEqual(log.level, SystemLog.Level.INFO)
+
+	@patch("reservations.services.completion.create_invoice_for_reservation")
+	def test_rejects_when_invoice_cannot_be_created(self, mocked_create_invoice):
+		from invoicing.services import InvoiceCreationNotAvailable
+
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		self._create_review_deposit(reservation)
+		self.client_api.force_authenticate(self.manager_user)
+		mocked_create_invoice.side_effect = InvoiceCreationNotAvailable("Invoice backend unavailable.")
+
+		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "INVOICE_CREATION_FAILED")
+		reservation.refresh_from_db()
+		deposit = Deposit.objects.get(reservation=reservation)
+		self.assertEqual(reservation.status, Reservation.Status.A_CONTROLER)
+		self.assertEqual(deposit.status, Deposit.Status.A_VERIFIER)
+		self.assertFalse(Invoice.objects.filter(reservation=reservation).exists())
+
+	def test_completion_releases_authorized_deposit(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		self._create_review_deposit(reservation)
+		self.client_api.force_authenticate(self.manager_user)
+
+		with self.captureOnCommitCallbacks(execute=True):
+			response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		released_deposit = Deposit.objects.get(reservation=reservation)
+		self.assertEqual(released_deposit.status, Deposit.Status.LIBEREE)
+		self.assertIsNotNone(released_deposit.released_at)
+
+	@patch("payments.services.deposits.release_authorized_deposit")
+	def test_rejects_when_deposit_release_fails(self, mocked_release):
+		from payments.services import DepositReleaseError
+
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		self._create_review_deposit(reservation)
+		self.client_api.force_authenticate(self.manager_user)
+		mocked_release.side_effect = DepositReleaseError(
+			code="STRIPE_UNAVAILABLE",
+			message="Stripe est temporairement indisponible.",
+		)
+
+		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "DEPOSIT_RELEASE_FAILED")
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.A_CONTROLER)
+
+	def test_rejects_when_deposit_is_missing(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "DEPOSIT_NOT_FOUND")
+
+	def test_rejects_when_deposit_status_is_not_ready_for_release(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		self._create_review_deposit(reservation, status=Deposit.Status.AUTORISEE)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "DEPOSIT_STATUS_INVALID")
 
 	def test_rejects_when_reservation_is_still_en_cours_without_email(self):
 		reservation = self._create_reservation(status=Reservation.Status.EN_COURS)
 		self._prepare_completed_return_workflow(reservation)
+		self._create_review_deposit(reservation)
 		reservation.status = Reservation.Status.EN_COURS
 		reservation.save(update_fields=["status", "updated_at"])
 		self.client_api.force_authenticate(self.manager_user)
@@ -1739,30 +1908,27 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 			).exists()
 		)
 
-	def test_rejects_when_vehicle_is_not_disponible(self):
+	def test_keeps_current_vehicle_status_when_it_is_already_blocked(self):
 		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
 		self._prepare_completed_return_workflow(reservation)
-		reservation.vehicle.status = Vehicle.Status.LOUE
+		self._create_review_deposit(reservation)
+		reservation.vehicle.status = Vehicle.Status.MAINTENANCE
 		reservation.vehicle.save(update_fields=["status", "updated_at"])
 		self.client_api.force_authenticate(self.manager_user)
 
-		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+		with self.captureOnCommitCallbacks(execute=True):
+			response = self.client_api.post(self.url(reservation.id), {}, format="json")
 
-		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
-		self.assertEqual(response.data["code"], "VEHICLE_NOT_AVAILABLE")
-		self.assertEqual(len(mail.outbox), 0)
-		self.assertFalse(
-			Notification.objects.filter(
-				user=reservation.client.user,
-				notification_type="RESERVATION_COMPLETED",
-				related_object_type="reservation",
-				related_object_id=reservation.id,
-			).exists()
-		)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		reservation.vehicle.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.TERMINEE)
+		self.assertEqual(reservation.vehicle.status, Vehicle.Status.MAINTENANCE)
 
 	def test_second_completion_call_does_not_duplicate_email(self):
 		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
 		self._prepare_completed_return_workflow(reservation)
+		self._create_review_deposit(reservation)
 		self.client_api.force_authenticate(self.manager_user)
 
 		with self.captureOnCommitCallbacks(execute=True):
@@ -1779,6 +1945,7 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 			).count(),
 			1,
 		)
+		self.assertEqual(SystemLog.objects.filter(action="RETURN_VALIDATED", user=self.manager_user).count(), 1)
 
 		with self.captureOnCommitCallbacks(execute=True):
 			second_response = self.client_api.post(self.url(reservation.id), {}, format="json")
@@ -1797,7 +1964,8 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 
 	def test_rejects_when_final_inspection_is_missing(self):
 		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
-		reservation.vehicle.status = Vehicle.Status.DISPONIBLE
+		self._create_review_deposit(reservation)
+		reservation.vehicle.status = Vehicle.Status.A_CONTROLER
 		reservation.vehicle.save(update_fields=["status", "updated_at"])
 		self.client_api.force_authenticate(self.manager_user)
 
@@ -1806,9 +1974,10 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
 		self.assertEqual(response.data["code"], "FINAL_INSPECTION_REQUIRED")
 
-	def test_rejects_when_pending_intervention_exists(self):
+	def test_pending_mechanic_intervention_keeps_vehicle_in_maintenance(self):
 		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
-		reservation.vehicle.status = Vehicle.Status.DISPONIBLE
+		self._create_review_deposit(reservation)
+		reservation.vehicle.status = Vehicle.Status.A_CONTROLER
 		reservation.vehicle.save(update_fields=["status", "updated_at"])
 		Inspection.objects.create(
 			reservation=reservation,
@@ -1829,19 +1998,142 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 		)
 		self.client_api.force_authenticate(self.manager_user)
 
-		response = self.client_api.post(self.url(reservation.id), {}, format="json")
+		with self.captureOnCommitCallbacks(execute=True):
+			response = self.client_api.post(self.url(reservation.id), {}, format="json")
 
-		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
-		self.assertEqual(response.data["code"], "INTERVENTIONS_NOT_COMPLETED")
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		reservation.vehicle.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.TERMINEE)
+		self.assertEqual(reservation.vehicle.status, Vehicle.Status.MAINTENANCE)
 
 	def test_rejects_for_non_manager_role(self):
 		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
 		self._prepare_completed_return_workflow(reservation)
+		self._create_review_deposit(reservation)
 		self.client_api.force_authenticate(self.client_user_1)
 
 		response = self.client_api.post(self.url(reservation.id), {}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	@patch("payments.services.deposits.stripe.PaymentIntent.cancel")
+	@patch("payments.services.deposits.stripe.PaymentIntent.retrieve")
+	def test_double_validation_releases_stripe_deposit_only_once(self, mocked_retrieve, mocked_cancel):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		self._create_review_deposit(
+			reservation,
+			mode=Deposit.Mode.STRIPE_TEST,
+			status=Deposit.Status.A_VERIFIER,
+		)
+		self.client_api.force_authenticate(self.manager_user)
+		mocked_retrieve.return_value = SimpleNamespace(status="requires_capture")
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			with self.captureOnCommitCallbacks(execute=True):
+				first_response = self.client_api.post(self.url(reservation.id), {}, format="json")
+			with self.captureOnCommitCallbacks(execute=True):
+				second_response = self.client_api.post(self.url(reservation.id), {}, format="json")
+
+		self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+		self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+		mocked_cancel.assert_called_once()
+		deposit = Deposit.objects.get(reservation=reservation)
+		self.assertEqual(deposit.status, Deposit.Status.LIBEREE)
+
+	def test_manager_can_report_return_issue_and_keep_deposit_under_review(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		self._create_review_deposit(reservation)
+		self.client_api.force_authenticate(self.manager_user)
+
+		with self.captureOnCommitCallbacks(execute=True):
+			response = self.client_api.post(
+				self.issue_url(reservation.id),
+				{
+					"anomaly_type": "ACCIDENT",
+					"comment": "Impact visible sur l'aile droite.",
+					"vehicle_status": Vehicle.Status.ACCIDENTE,
+					"evidence_files": [_image_file("impact.jpg")],
+				},
+				format="multipart",
+			)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		reservation.vehicle.refresh_from_db()
+		deposit = Deposit.objects.get(reservation=reservation)
+		self.assertEqual(reservation.status, Reservation.Status.A_CONTROLER)
+		self.assertEqual(reservation.vehicle.status, Vehicle.Status.ACCIDENTE)
+		self.assertEqual(deposit.status, Deposit.Status.A_VERIFIER)
+		self.assertIsNone(deposit.released_at)
+
+		final_inspection = reservation.inspections.get(inspection_type=Inspection.Type.FINAL)
+		self.assertEqual(final_inspection.photos.filter(photo_type=InspectionPhoto.PhotoType.DOMMAGE).count(), 1)
+
+		intervention = Intervention.objects.get(reservation=reservation, status=Intervention.Status.A_ATTRIBUER)
+		self.assertEqual(intervention.status, Intervention.Status.A_ATTRIBUER)
+		self.assertEqual(intervention.intervention_type, Intervention.Type.MECANIQUE)
+		self.assertEqual(intervention.inspection_id, final_inspection.id)
+		self.assertIn("ACCIDENT", intervention.description)
+		self.assertIn("Impact visible", intervention.description)
+
+		notification = Notification.objects.get(
+			user=reservation.client.user,
+			notification_type="RETURN_ISSUE_REPORTED",
+			related_object_type="intervention",
+			related_object_id=intervention.id,
+		)
+		self.assertIn("verification complementaire", notification.message)
+
+		log = SystemLog.objects.filter(action="RETURN_ISSUE_REPORTED", user=self.manager_user).latest("created_at")
+		self.assertEqual(log.level, SystemLog.Level.WARNING)
+		self.assertIn(reservation.reference, log.message)
+
+		self.assertEqual(response.data["reservation"]["status"], Reservation.Status.A_CONTROLER)
+		self.assertEqual(response.data["reservation"]["deposit_status"], Deposit.Status.A_VERIFIER)
+		self.assertEqual(response.data["intervention"]["status"], Intervention.Status.A_ATTRIBUER)
+
+	def test_rejects_issue_report_for_non_manager(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		self._create_review_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(
+			self.issue_url(reservation.id),
+			{
+				"anomaly_type": "NETTOYAGE",
+				"comment": "Habitacle sale",
+				"vehicle_status": Vehicle.Status.NETTOYAGE,
+			},
+			format="multipart",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+		self.assertFalse(Intervention.objects.filter(reservation=reservation, status=Intervention.Status.A_ATTRIBUER).exists())
+
+	def test_rejects_issue_report_when_deposit_not_under_review(self):
+		reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self._prepare_completed_return_workflow(reservation)
+		deposit = self._create_review_deposit(reservation, status=Deposit.Status.LIBEREE)
+		deposit.released_at = timezone.now()
+		deposit.save(update_fields=["released_at", "updated_at"])
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(
+			self.issue_url(reservation.id),
+			{
+				"anomaly_type": "MECANIQUE",
+				"comment": "Temoin moteur allume",
+				"vehicle_status": Vehicle.Status.MAINTENANCE,
+			},
+			format="multipart",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "DEPOSIT_STATUS_INVALID")
 
 	def test_lock_a_controler_without_final_completed_is_refused(self):
 		reservation = self._create_reservation(
@@ -2058,6 +2350,8 @@ class ReservationDepositAuthorizationTests(ReservationTestDataMixin, TestCase):
 			duration_hours=Decimal("4.00"),
 			rental_amount=Decimal("111.11"),
 			deposit_amount=Decimal("555.55"),
+			insurance_type="STANDARD",
+			insurance_amount=Decimal("0.00"),
 			insurance_included=True,
 			total_amount=Decimal("111.11"),
 			pricing_method="MOCKED",
@@ -2124,6 +2418,8 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 	@patch("payments.services.payment_intents.stripe.PaymentIntent.modify")
 	def test_owner_is_authorized_and_only_client_secret_is_returned(self, mocked_modify, mocked_create):
 		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		reservation.insurance_type = Reservation.InsuranceType.DUO
+		reservation.save(update_fields=["insurance_type", "updated_at"])
 		self._create_authorized_deposit(reservation)
 		self.client_api.force_authenticate(self.client_user_1)
 		mocked_create.return_value = SimpleNamespace(
@@ -2140,6 +2436,12 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.data["client_secret"], "pi_secret_123")
 		payment = Payment.objects.get(pk=response.data["payment_id"])
 		self.assertEqual(payment.stripe_payment_intent_id, "pi_pay_123")
+		self.assertEqual(payment.amount, Decimal("88.00"))
+		create_kwargs = mocked_create.call_args.kwargs
+		self.assertEqual(create_kwargs["metadata"]["reservation_id"], str(reservation.id))
+		self.assertEqual(create_kwargs["metadata"]["user_id"], str(self.client_user_1.id))
+		self.assertEqual(create_kwargs["metadata"]["vehicle_id"], str(reservation.vehicle_id))
+		self.assertEqual(create_kwargs["metadata"]["insurance_type"], "DUO")
 		mocked_modify.assert_not_called()
 
 	def test_other_client_is_refused(self):
@@ -2204,8 +2506,10 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 			duration_hours=Decimal("4.00"),
 			rental_amount=Decimal("222.22"),
 			deposit_amount=Decimal("333.33"),
+			insurance_type="DUO",
+			insurance_amount=Decimal("16.00"),
 			insurance_included=True,
-			total_amount=Decimal("222.22"),
+			total_amount=Decimal("238.22"),
 			pricing_method="MOCKED",
 		),
 	)
@@ -2228,8 +2532,8 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		reservation.refresh_from_db()
 		payment = Payment.objects.get(pk=response.data["payment_id"])
-		self.assertEqual(reservation.rental_amount, Decimal("222.22"))
-		self.assertEqual(payment.amount, Decimal("222.22"))
+		self.assertEqual(reservation.rental_amount, Decimal("238.22"))
+		self.assertEqual(payment.amount, Decimal("238.22"))
 
 	@patch("payments.services.payment_intents.stripe.PaymentIntent.retrieve")
 	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
@@ -2251,6 +2555,11 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		kwargs = mocked_create.call_args.kwargs
 		expected_key = f"reservation-payment-{reservation.id}-8000"
 		self.assertEqual(kwargs["idempotency_key"], expected_key)
+		self.assertEqual(kwargs["currency"], "eur")
+		self.assertEqual(kwargs["metadata"]["reservation_id"], str(reservation.id))
+		self.assertEqual(kwargs["metadata"]["user_id"], str(self.client_user_1.id))
+		self.assertEqual(kwargs["metadata"]["vehicle_id"], str(reservation.vehicle_id))
+		self.assertEqual(kwargs["metadata"]["insurance_type"], reservation.insurance_type)
 
 	@patch("payments.services.payment_intents.stripe.PaymentIntent.retrieve")
 	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
@@ -2261,8 +2570,9 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 			vehicle=reservation.vehicle,
 			start_at=reservation.start_at,
 			end_at=reservation.end_at,
+			insurance_type=reservation.insurance_type,
 		)
-		expected_amount = pricing.rental_amount
+		expected_amount = pricing.total_amount
 		existing = Payment.objects.create(
 			reservation=reservation,
 			provider=Payment.Provider.STRIPE,
@@ -2305,6 +2615,17 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(response.data["client_secret"], "secret_reserved_ok")
+
+	def test_live_stripe_key_is_rejected_for_test_only_flow(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_live_forbidden"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "STRIPE_TEST_ONLY")
 
 	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
 	def test_current_reservation_is_excluded_from_conflict_search(self, mocked_create):
@@ -2450,6 +2771,70 @@ class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase)
 		]:
 			self.assertNotIn(forbidden_key, response.data)
 			self.assertNotIn(forbidden_key, client_summary)
+
+	def test_detail_manager_expose_depart_et_retour_pour_comparaison(self):
+		reservation = self.reservation_client_1
+		Deposit.objects.create(
+			reservation=reservation,
+			mode=Deposit.Mode.SIMULATED,
+			amount=reservation.deposit_amount,
+			currency="EUR",
+			status=Deposit.Status.A_VERIFIER,
+			authorized_at=timezone.now() - timedelta(hours=3),
+		)
+		initial_inspection = Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.INITIAL,
+			status=Inspection.Status.TERMINE,
+			mileage=1100,
+			energy_level_percent=85,
+			comments="Depart propre",
+			completed_at=timezone.now() - timedelta(hours=2),
+			completed_by=self.client_user_1,
+		)
+		return_inspection = Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.FINAL,
+			status=Inspection.Status.TERMINE,
+			mileage=1300,
+			energy_level_percent=70,
+			comments="Retour avec observation",
+			has_critical_issue=True,
+			critical_issue_description="Rayure pare-chocs",
+			completed_at=timezone.now() - timedelta(minutes=10),
+			completed_by=self.client_user_1,
+		)
+
+		for inspection in (initial_inspection, return_inspection):
+			for photo_type in [
+				InspectionPhoto.PhotoType.AVANT,
+				InspectionPhoto.PhotoType.ARRIERE,
+				InspectionPhoto.PhotoType.COTE_GAUCHE,
+				InspectionPhoto.PhotoType.COTE_DROIT,
+				InspectionPhoto.PhotoType.INTERIEUR,
+				InspectionPhoto.PhotoType.TABLEAU_DE_BORD,
+			]:
+				InspectionPhoto.objects.create(
+					inspection=inspection,
+					photo_type=photo_type,
+					file=SimpleUploadedFile(f"{photo_type}.jpg", b"image-bytes", content_type="image/jpeg"),
+					position=0,
+				)
+
+		self.client_api.force_authenticate(self.manager_user)
+		detail_url = reverse("reservations:management-reservation-detail", kwargs={"pk": reservation.id})
+		response = self.client_api.get(detail_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["deposit_status"], Deposit.Status.A_VERIFIER)
+		self.assertEqual(response.data["departure_inspection"]["inspection_type"], Inspection.Type.INITIAL)
+		self.assertEqual(response.data["return_inspection"]["inspection_type"], Inspection.Type.FINAL)
+		self.assertEqual(response.data["departure_inspection"]["mileage"], 1100)
+		self.assertEqual(response.data["return_inspection"]["mileage"], 1300)
+		self.assertEqual(len(response.data["departure_inspection"]["photos"]), 6)
+		self.assertEqual(len(response.data["return_inspection"]["photos"]), 6)
+		self.assertEqual(response.data["departure_inspection"]["damages"], [])
+		self.assertEqual(response.data["return_inspection"]["damages"], [])
 
 
 class ReservationConcurrencyAuditTests(TestCase):

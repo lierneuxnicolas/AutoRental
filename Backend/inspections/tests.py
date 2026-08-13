@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from io import BytesIO
 from unittest.mock import patch
 
@@ -701,6 +702,9 @@ class DepartureInspectionCompletionTests(TestCase):
             )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], Inspection.Status.TERMINE)
+        self.assertEqual(response.data["comments"], "Pret pour le depart")
+        self.assertIsNotNone(response.data["completed_at"])
         self.initial_inspection.refresh_from_db()
         self.reservation.refresh_from_db()
         self.vehicle.refresh_from_db()
@@ -708,6 +712,8 @@ class DepartureInspectionCompletionTests(TestCase):
         self.assertEqual(self.initial_inspection.completed_by, self.client_user)
         self.assertEqual(self.initial_inspection.mileage, 1200)
         self.assertEqual(self.initial_inspection.energy_level_percent, 80)
+        self.assertEqual(self.initial_inspection.comments, "Pret pour le depart")
+        self.assertIsNotNone(self.initial_inspection.completed_at)
         self.assertEqual(self.reservation.status, Reservation.Status.EN_COURS)
         self.assertEqual(self.vehicle.status, Vehicle.Status.LOUE)
         self.assertEqual(self.vehicle.mileage, 1200)
@@ -1013,6 +1019,15 @@ class ReturnInspectionFlowTests(TestCase):
             status=Inspection.Status.EN_COURS,
         )
         self._create_required_photos(final_inspection)
+        Deposit.objects.create(
+            reservation=self.reservation,
+            mode=Deposit.Mode.STRIPE_TEST,
+            amount=Decimal("500.00"),
+            currency="EUR",
+            status=Deposit.Status.AUTORISEE,
+            authorized_at=timezone.now(),
+            stripe_payment_intent_id="pi_dep_return_001",
+        )
         self._create_active_unlocked_vehicle_access()
         self.api.force_authenticate(self.client_user)
 
@@ -1024,6 +1039,8 @@ class ReturnInspectionFlowTests(TestCase):
             )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["comments"], "Retour effectue")
+        self.assertIsNotNone(response.data["completed_at"])
         final_inspection.refresh_from_db()
         self.reservation.refresh_from_db()
         self.vehicle.refresh_from_db()
@@ -1032,10 +1049,15 @@ class ReturnInspectionFlowTests(TestCase):
         self.assertEqual(final_inspection.completed_by, self.client_user)
         self.assertEqual(final_inspection.mileage, 1300)
         self.assertEqual(final_inspection.energy_level_percent, 70)
+        self.assertEqual(final_inspection.comments, "Retour effectue")
         self.assertIsNotNone(final_inspection.completed_at)
         self.assertEqual(self.reservation.status, Reservation.Status.A_CONTROLER)
         self.assertEqual(self.vehicle.status, Vehicle.Status.A_CONTROLER)
         self.assertEqual(self.vehicle.mileage, 1300)
+
+        deposit = Deposit.objects.get(reservation=self.reservation)
+        self.assertEqual(deposit.status, Deposit.Status.A_VERIFIER)
+        self.assertIsNone(deposit.released_at)
 
         self.assertEqual(
             Notification.objects.filter(
@@ -1055,6 +1077,13 @@ class ReturnInspectionFlowTests(TestCase):
             ).count(),
             1,
         )
+        manager_notification = Notification.objects.get(
+            user=self.manager_user,
+            notification_type="VEHICLE_REQUIRES_REVIEW",
+            related_object_type="Inspection",
+            related_object_id=final_inspection.id,
+        )
+        self.assertEqual(manager_notification.message, "Un véhicule retourné est en attente de vérification.")
 
     def test_refuses_second_completion_without_duplicate_notifications(self):
         final_inspection = Inspection.objects.create(

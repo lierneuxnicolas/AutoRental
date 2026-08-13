@@ -241,6 +241,13 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 			status=Payment.Status.EN_ATTENTE,
 			stripe_payment_intent_id="pi_test_123",
 		)
+		self.deposit = Deposit.objects.create(
+			reservation=self.reservation,
+			mode=Deposit.Mode.STRIPE_TEST,
+			amount=Decimal("300.00"),
+			currency="EUR",
+			status=Deposit.Status.CREE,
+		)
 
 	def _build_event(self, event_id, event_type, **object_overrides):
 		amount_minor = int((self.payment.amount * Decimal("100")).quantize(Decimal("1")))
@@ -252,6 +259,27 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 			"metadata": {
 				"reservation_id": str(self.reservation.id),
 				"payment_id": str(self.payment.id),
+			},
+			**object_overrides,
+		}
+		return {
+			"id": event_id,
+			"type": event_type,
+			"api_version": "2025-01-01",
+			"data": {"object": payment_intent},
+		}
+
+	def _build_deposit_event(self, event_id, event_type, **object_overrides):
+		amount_minor = int((self.deposit.amount * Decimal("100")).quantize(Decimal("1")))
+		payment_intent = {
+			"id": self.deposit.stripe_payment_intent_id or "pi_deposit_test_123",
+			"amount": amount_minor,
+			"amount_capturable": amount_minor,
+			"currency": self.deposit.currency.lower(),
+			"metadata": {
+				"reservation_id": str(self.reservation.id),
+				"deposit_id": str(self.deposit.id),
+				"purpose": "deposit",
 			},
 			**object_overrides,
 		}
@@ -457,6 +485,37 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		process_stripe_event(event)
 
 		self.assertEqual(Notification.objects.filter(notification_type="PAYMENT_FAILED").count(), 1)
+
+	def test_deposit_authorization_webhook_marks_deposit_authorized_and_is_idempotent(self):
+		self.reservation.status = Reservation.Status.BROUILLON
+		self.reservation.save(update_fields=["status", "updated_at"])
+		event = self._build_deposit_event("evt_deposit_authorized", "payment_intent.amount_capturable_updated")
+
+		process_stripe_event(event)
+		process_stripe_event(event)
+
+		self.deposit.refresh_from_db()
+		self.reservation.refresh_from_db()
+		self.assertEqual(self.deposit.status, Deposit.Status.AUTORISEE)
+		self.assertIsNotNone(self.deposit.authorized_at)
+		self.assertIsNone(self.deposit.released_at)
+		self.assertEqual(self.reservation.status, Reservation.Status.EN_ATTENTE_PAIEMENT)
+		self.assertEqual(StripeEvent.objects.filter(stripe_event_id="evt_deposit_authorized", processed=True).count(), 1)
+		self.assertEqual(SystemLog.objects.filter(action="DEPOSIT_AUTHORIZED", user=self.client_user).count(), 1)
+
+	def test_deposit_webhook_never_releases_authorized_caution(self):
+		self.deposit.status = Deposit.Status.AUTORISEE
+		self.deposit.authorized_at = timezone.now()
+		self.deposit.stripe_payment_intent_id = "pi_deposit_test_123"
+		self.deposit.save(update_fields=["status", "authorized_at", "stripe_payment_intent_id", "updated_at"])
+		event = self._build_deposit_event("evt_deposit_succeeded", "payment_intent.succeeded")
+
+		process_stripe_event(event)
+
+		self.deposit.refresh_from_db()
+		self.assertEqual(self.deposit.status, Deposit.Status.AUTORISEE)
+		self.assertIsNone(self.deposit.released_at)
+		self.assertIsNone(self.deposit.captured_at)
 
 
 class DepositAuthorizationNotificationTests(TestCase):

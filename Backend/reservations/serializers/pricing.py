@@ -8,7 +8,7 @@ from reservations.services.pricing import PricingError
 from vehicles.models import Vehicle
 
 
-ALLOWED_REQUEST_FIELDS = {"vehicle_id", "start_at", "end_at"}
+ALLOWED_REQUEST_FIELDS = {"vehicle_id", "start_at", "end_at", "insurance_type"}
 
 
 class PriceSimulationRequestSerializer(serializers.Serializer):
@@ -26,6 +26,11 @@ class PriceSimulationRequestSerializer(serializers.Serializer):
             "required": "Le champ end_at est obligatoire.",
             "invalid": "Le champ end_at doit etre un datetime ISO 8601 valide.",
         },
+    )
+    insurance_type = serializers.ChoiceField(
+        choices=["STANDARD", "DUO", "OMNIUM"],
+        required=False,
+        default="STANDARD",
     )
 
     def to_internal_value(self, data):
@@ -71,6 +76,8 @@ class PriceSimulationResponseSerializer(serializers.Serializer):
     vehicle_id = serializers.IntegerField()
     duration_hours = serializers.DecimalField(max_digits=10, decimal_places=2)
     rental_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    insurance_type = serializers.CharField()
+    insurance_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
     deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
     insurance_included = serializers.BooleanField()
     total_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
@@ -95,6 +102,8 @@ def simulate_price_response_payload(
     vehicle_id: int,
     duration_hours: Decimal,
     rental_amount: Decimal,
+    insurance_type: str,
+    insurance_amount: Decimal,
     deposit_amount: Decimal,
     insurance_included: bool,
     total_amount: Decimal,
@@ -103,6 +112,8 @@ def simulate_price_response_payload(
         "vehicle_id": vehicle_id,
         "duration_hours": duration_hours,
         "rental_amount": rental_amount,
+        "insurance_type": insurance_type,
+        "insurance_amount": insurance_amount,
         "deposit_amount": deposit_amount,
         "insurance_included": insurance_included,
         "total_amount": total_amount,

@@ -22,22 +22,29 @@ Les informations utiles leur seront exposées uniquement via:
 Aucun endpoint général n'est créé pour eux.
 """
 
+from django.db.models import Prefetch
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import generics, status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.permissions import IsManagerOrAdministrator
+from inspections.models import Inspection
+from interventions.models import Intervention
+from payments.models import Deposit
 from reservations.models import Reservation
 from reservations.serializers.management import (
     ReservationManagementDetailSerializer,
     ReservationManagementCompleteRequestSerializer,
     ReservationManagementCompleteResponseSerializer,
+    ReservationManagementIssueRequestSerializer,
+    ReservationManagementIssueResponseSerializer,
     ReservationManagementListSerializer,
 )
-from reservations.services import ReservationCompletionError, complete_reservation
+from reservations.services import ReservationCompletionError, complete_reservation, report_return_issue
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou d'autorisation.")
@@ -354,6 +361,34 @@ class ReservationManagementDetailView(generics.RetrieveAPIView):
             "vehicle",
             "vehicle__brand",
             "vehicle__category",
+        ).prefetch_related(
+            Prefetch(
+                "inspections",
+                queryset=Inspection.objects.select_related("completed_by").prefetch_related(
+                    "photos",
+                    "damages",
+                    "damages__evidence_photos",
+                ),
+                to_attr="prefetched_inspections",
+            ),
+            Prefetch(
+                "deposits",
+                queryset=Deposit.objects.order_by("-created_at", "-id"),
+                to_attr="prefetched_deposits",
+            ),
+            Prefetch(
+                "interventions",
+                queryset=Intervention.objects.select_related(
+                    "vehicle",
+                    "vehicle__brand",
+                    "reservation",
+                    "assigned_to",
+                    "assigned_to__role",
+                    "created_by",
+                    "created_by__role",
+                ),
+                to_attr="prefetched_interventions",
+            ),
         )
 
     @extend_schema(
@@ -421,5 +456,66 @@ class ReservationManagementCompleteView(generics.GenericAPIView):
 
         response_serializer = ReservationManagementCompleteResponseSerializer(
             {"message": "Reservation terminee.", "reservation": completed_reservation}
+        )
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class ReservationManagementIssueView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    serializer_class = ReservationManagementIssueRequestSerializer
+    parser_classes = [MultiPartParser, FormParser]
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return ReservationManagementDetailView().get_queryset()
+
+    @extend_schema(
+        tags=["Reservation Management"],
+        request=ReservationManagementIssueRequestSerializer,
+        description=(
+            "Signale une anomalie constatee lors du controle retour, conserve la caution A_VERIFIER "
+            "et oriente le vehicule vers le statut operationnel approprie."
+        ),
+        responses={
+            200: ReservationManagementIssueResponseSerializer,
+            400: ErrorDetailResponseSerializer,
+            401: ErrorDetailResponseSerializer,
+            403: ErrorDetailResponseSerializer,
+            404: ErrorDetailResponseSerializer,
+            409: ErrorDetailResponseSerializer,
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        reservation = self.get_object()
+        data = request.data.copy()
+        data.setlist("evidence_files", request.FILES.getlist("evidence_files"))
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            updated_reservation, intervention = report_return_issue(
+                reservation=reservation,
+                requested_by=request.user,
+                anomaly_type=serializer.validated_data["anomaly_type"],
+                comment=serializer.validated_data.get("comment", ""),
+                vehicle_status=serializer.validated_data["vehicle_status"],
+                evidence_files=serializer.validated_data.get("evidence_files", []),
+            )
+        except ReservationCompletionError as exc:
+            detail = {"code": exc.code, "message": exc.message}
+            return Response(detail, status=exc.http_status)
+
+        updated_reservation = self.get_queryset().get(pk=updated_reservation.pk)
+        response_serializer = ReservationManagementIssueResponseSerializer(
+            {
+                "message": "Anomalie enregistree. La caution reste en verification.",
+                "reservation": updated_reservation,
+                "intervention": intervention,
+            },
+            context={"request": request},
         )
         return Response(response_serializer.data, status=status.HTTP_200_OK)

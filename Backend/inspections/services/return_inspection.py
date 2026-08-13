@@ -10,6 +10,7 @@ from inspections.models import Damage, Inspection, InspectionPhoto
 from inspections.services.departure import DepartureInspectionError
 from interventions.services.vehicle_access import lock_and_revoke_after_return
 from notifications.services import create_notification
+from payments.services import mark_authorized_deposit_for_verification
 from reservations.models import Reservation
 from vehicles.models import Vehicle
 
@@ -284,6 +285,8 @@ def complete_return_inspection(
         if has_major_or_critical_damage:
             _integrate_intervention_for_major_or_critical_damage(inspection=inspection_locked)
 
+        mark_authorized_deposit_for_verification(reservation=reservation_locked)
+
         lock_and_revoke_after_return(
             reservation=reservation_locked,
             requested_by=requested_by,
@@ -292,9 +295,7 @@ def complete_return_inspection(
         client_notification_message = (
             f"L'inspection de retour pour la reservation {reservation_locked.reference} est terminee."
         )
-        manager_notification_message = (
-            f"Le vehicule {vehicle_locked.registration_number} necessite un controle apres retour."
-        )
+        manager_notification_message = "Un véhicule retourné est en attente de vérification."
         transaction.on_commit(
             lambda: _notify_once(
                 user=reservation_locked.client.user,

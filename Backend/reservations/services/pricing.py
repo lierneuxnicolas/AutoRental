@@ -10,6 +10,15 @@ from vehicles.services.availability import validate_availability_period
 
 DECIMAL_QUANTIZER = Decimal("0.01")
 HOURS_PER_DAY = Decimal("24")
+FIXED_DEPOSIT_AMOUNT = Decimal("500.00")
+INSURANCE_STANDARD = "STANDARD"
+INSURANCE_DUO = "DUO"
+INSURANCE_OMNIUM = "OMNIUM"
+INSURANCE_DAILY_RATES = {
+    INSURANCE_STANDARD: Decimal("0.00"),
+    INSURANCE_DUO: Decimal("8.00"),
+    INSURANCE_OMNIUM: Decimal("25.00"),
+}
 
 
 @dataclass(frozen=True)
@@ -18,6 +27,8 @@ class PriceSimulationResult:
     duration_hours: Decimal
     rental_amount: Decimal
     deposit_amount: Decimal
+    insurance_type: str
+    insurance_amount: Decimal
     insurance_included: bool
     total_amount: Decimal
     pricing_method: str
@@ -62,7 +73,14 @@ def _ceil_decimal(value: Decimal) -> Decimal:
     return value.to_integral_value(rounding=ROUND_CEILING)
 
 
-def calculate_price_simulation(*, vehicle, start_at, end_at) -> PriceSimulationResult:
+def normalize_insurance_type(insurance_type: str | None) -> str:
+    raw_value = (insurance_type or INSURANCE_STANDARD).strip().upper()
+    if raw_value not in INSURANCE_DAILY_RATES:
+        _raise_pricing_error("INVALID_INSURANCE", "Le type d'assurance est invalide.")
+    return raw_value
+
+
+def calculate_price_simulation(*, vehicle, start_at, end_at, insurance_type: str = INSURANCE_STANDARD) -> PriceSimulationResult:
     if vehicle is None:
         _raise_pricing_error("VEHICLE_REQUIRED", "Un vehicule est obligatoire.")
 
@@ -95,7 +113,7 @@ def calculate_price_simulation(*, vehicle, start_at, end_at) -> PriceSimulationR
 
     daily_rate = getattr(category, "daily_rate", None)
     hourly_rate = getattr(category, "hourly_rate", None)
-    deposit_amount = getattr(category, "minimum_deposit", None)
+    deposit_amount = FIXED_DEPOSIT_AMOUNT
 
     if daily_rate is None and hourly_rate is None:
         _raise_pricing_error(
@@ -103,6 +121,7 @@ def calculate_price_simulation(*, vehicle, start_at, end_at) -> PriceSimulationR
             "Aucun tarif n'est configure pour cette categorie.",
         )
 
+    normalized_insurance = normalize_insurance_type(insurance_type)
     deposit_amount = _quantize_amount(_to_decimal(deposit_amount))
     billed_hours = int(_ceil_decimal(duration_hours))
     billed_days = int(_ceil_decimal(duration_hours / HOURS_PER_DAY))
@@ -127,13 +146,19 @@ def calculate_price_simulation(*, vehicle, start_at, end_at) -> PriceSimulationR
             "Aucun tarif exploitable n'est configure pour cette categorie.",
         )
 
+    insurance_daily_rate = INSURANCE_DAILY_RATES[normalized_insurance]
+    insurance_amount = _quantize_amount(insurance_daily_rate * Decimal(billed_days))
+    total_amount = _quantize_amount(rental_amount + insurance_amount)
+
     return PriceSimulationResult(
         vehicle_id=vehicle.pk,
         duration_hours=_quantize_amount(duration_hours),
         rental_amount=rental_amount,
         deposit_amount=deposit_amount,
+        insurance_type=normalized_insurance,
+        insurance_amount=insurance_amount,
         insurance_included=True,
-        total_amount=rental_amount,
+        total_amount=total_amount,
         pricing_method=pricing_method,
         billed_hours=billed_hours,
         billed_days=billed_days,

@@ -16,6 +16,11 @@ REFERENCE_GENERATION_MAX_ATTEMPTS = 10
 
 
 class Reservation(models.Model):
+	class InsuranceType(models.TextChoices):
+		STANDARD = "STANDARD", "Standard"
+		DUO = "DUO", "Duo"
+		OMNIUM = "OMNIUM", "Omnium"
+
 	class Status(models.TextChoices):
 		BROUILLON = "BROUILLON", "Brouillon"
 		EN_ATTENTE_CAUTION = "EN_ATTENTE_CAUTION", "En attente caution"
@@ -71,6 +76,11 @@ class Reservation(models.Model):
 		max_digits=10,
 		decimal_places=2,
 		default=Decimal("0.00"),
+	)
+	insurance_type = models.CharField(
+		max_length=20,
+		choices=InsuranceType.choices,
+		default=InsuranceType.STANDARD,
 	)
 	deposit_amount = models.DecimalField(
 		max_digits=10,
@@ -135,6 +145,9 @@ class Reservation(models.Model):
 
 		if self.rental_amount is not None and self.rental_amount < 0:
 			raise ValidationError({"rental_amount": "Le montant de location ne peut pas etre negatif."})
+
+		if self.insurance_type not in {value for value, _ in self.InsuranceType.choices}:
+			raise ValidationError({"insurance_type": "Le type d'assurance est invalide."})
 
 		if self.deposit_amount is not None and self.deposit_amount < 0:
 			raise ValidationError({"deposit_amount": "Le montant de caution ne peut pas etre negatif."})

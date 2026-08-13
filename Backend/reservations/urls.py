@@ -11,6 +11,7 @@ from reservations.views import (
     ReservationLockView,
     ReservationManagementDetailView,
     ReservationManagementCompleteView,
+    ReservationManagementIssueView,
     ReservationManagementListView,
     ReservationUnlockView,
 )
@@ -43,5 +44,10 @@ urlpatterns = [
         "management/reservations/<int:pk>/complete/",
         ReservationManagementCompleteView.as_view(),
         name="management-reservation-complete",
+    ),
+    path(
+        "management/reservations/<int:pk>/report-issue/",
+        ReservationManagementIssueView.as_view(),
+        name="management-reservation-report-issue",
     ),
 ]

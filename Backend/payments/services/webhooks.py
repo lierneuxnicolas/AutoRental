@@ -15,13 +15,14 @@ from invoicing.services import InvoiceCreationNotAvailable, create_invoice_for_r
 from notifications.services import create_notification
 from common.models import SystemLog
 from common.services import create_system_log
-from payments.models import Payment, StripeEvent
+from payments.models import Deposit, Payment, StripeEvent
 from reservations.models import Reservation
 from vehicles.models import Vehicle
 from vehicles.services import is_vehicle_available
 
 
 SUPPORTED_STRIPE_EVENT_TYPES = {
+    "payment_intent.amount_capturable_updated",
     "payment_intent.succeeded",
     "payment_intent.payment_failed",
     "payment_intent.canceled",
@@ -61,6 +62,25 @@ def _safe_log_payment_result(*, action: str, level: str | SystemLog.Level, payme
         )
     except Exception:
         # Logging failures must not impact Stripe webhook business processing.
+        return
+
+
+def _safe_log_deposit_result(*, action: str, level: str | SystemLog.Level, deposit: Deposit, reservation: Reservation, user, suffix: str = "") -> None:
+    try:
+        message = (
+            f"Deposit id={deposit.id}, reservation={reservation.reference} (id={reservation.id}), "
+            f"amount={deposit.amount} {deposit.currency}."
+        )
+        if suffix:
+            message = f"{message} {suffix}"
+
+        create_system_log(
+            user=user,
+            action=action,
+            message=message,
+            level=level,
+        )
+    except Exception:
         return
 
 
@@ -226,6 +246,21 @@ def _get_object_metadata(payment_intent: dict[str, Any]) -> dict[str, Any]:
     return metadata if isinstance(metadata, dict) else {}
 
 
+def _get_payment_intent_purpose(payment_intent: dict[str, Any]) -> str:
+    metadata = _get_object_metadata(payment_intent)
+    purpose = metadata.get("purpose")
+    return str(purpose).strip().lower() if purpose is not None else ""
+
+
+def _get_deposit_identifier(metadata: dict[str, Any]) -> int | None:
+    deposit_id = metadata.get("deposit_id")
+    try:
+        parsed = int(deposit_id)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 def _validate_payment_metadata(*, payment: Payment, metadata: dict[str, Any]) -> None:
     reservation_id = metadata.get("reservation_id")
     payment_id = metadata.get("payment_id")
@@ -253,6 +288,74 @@ def _payment_terminal_state_matches_event(*, payment: Payment, event_type: str) 
         (event_type == "payment_intent.succeeded" and payment.status == Payment.Status.REUSSI)
         or (event_type == "payment_intent.payment_failed" and payment.status == Payment.Status.ECHOUE)
         or (event_type == "payment_intent.canceled" and payment.status == Payment.Status.ANNULE)
+    )
+
+
+def _deposit_terminal_state_matches_event(*, deposit: Deposit, event_type: str) -> bool:
+    return (
+        (event_type == "payment_intent.amount_capturable_updated" and deposit.status == Deposit.Status.AUTORISEE)
+    )
+
+
+def _validate_deposit_metadata(*, deposit: Deposit, metadata: dict[str, Any]) -> None:
+    deposit_id = metadata.get("deposit_id")
+    if deposit_id not in (None, "", str(deposit.id)):
+        raise StripeWebhookProcessingError("deposit_id metadata mismatch.")
+
+
+def _validate_deposit_amount_and_currency(*, deposit: Deposit, payment_intent: dict[str, Any]) -> None:
+    stripe_amount = _parse_stripe_amount(
+        payment_intent.get("amount_capturable", payment_intent.get("amount_received", payment_intent.get("amount")))
+    )
+    local_amount = _amount_to_minor_units(deposit.amount)
+    if stripe_amount != local_amount:
+        raise StripeWebhookProcessingError("Stripe amount mismatch.")
+
+    stripe_currency = _parse_stripe_currency(payment_intent.get("currency"))
+    if stripe_currency != deposit.currency:
+        raise StripeWebhookProcessingError("Stripe currency mismatch.")
+
+
+def _handle_deposit_authorized(*, deposit: Deposit, reservation: Reservation, payment_intent: dict[str, Any]) -> None:
+    if deposit.status in {Deposit.Status.AUTORISEE, Deposit.Status.A_VERIFIER, Deposit.Status.CAPTUREE, Deposit.Status.LIBEREE}:
+        return
+
+    _validate_deposit_amount_and_currency(deposit=deposit, payment_intent=payment_intent)
+
+    now = timezone.now()
+    deposit.status = Deposit.Status.AUTORISEE
+    if deposit.authorized_at is None:
+        deposit.authorized_at = now
+    deposit.failed_at = None
+    deposit.captured_at = None
+    deposit.released_at = None
+    deposit.authorization_expires_at = None
+    deposit_id = payment_intent.get("id")
+    if deposit_id and not deposit.stripe_payment_intent_id:
+        deposit.stripe_payment_intent_id = str(deposit_id)
+    deposit.save(
+        update_fields=[
+            "status",
+            "authorized_at",
+            "failed_at",
+            "captured_at",
+            "released_at",
+            "authorization_expires_at",
+            "stripe_payment_intent_id",
+            "updated_at",
+        ]
+    )
+
+    if reservation.status == Reservation.Status.BROUILLON:
+        reservation.status = Reservation.Status.EN_ATTENTE_PAIEMENT
+        reservation.save(update_fields=["status", "updated_at"])
+
+    _safe_log_deposit_result(
+        action="DEPOSIT_AUTHORIZED",
+        level=SystemLog.Level.INFO,
+        deposit=deposit,
+        reservation=reservation,
+        user=reservation.client.user,
     )
 
 
@@ -543,6 +646,33 @@ def _apply_payment_intent_event(*, event_type: str, payment_intent: dict[str, An
         _handle_canceled(payment=payment, reservation=reservation)
 
 
+def _apply_deposit_event(*, event_type: str, payment_intent: dict[str, Any]) -> None:
+    if event_type != "payment_intent.amount_capturable_updated":
+        return
+
+    metadata = _get_object_metadata(payment_intent)
+    deposit_id = _get_deposit_identifier(metadata)
+    stripe_payment_intent_id = payment_intent.get("id")
+
+    deposit_queryset = Deposit.objects.select_for_update().select_related("reservation", "reservation__client", "reservation__client__user")
+    deposit = None
+    if deposit_id is not None:
+        deposit = deposit_queryset.filter(pk=deposit_id).first()
+    if deposit is None and stripe_payment_intent_id:
+        deposit = deposit_queryset.filter(stripe_payment_intent_id=stripe_payment_intent_id).first()
+    if deposit is None:
+        return
+
+    reservation = Reservation.objects.select_for_update().select_related("client", "client__user", "vehicle").get(pk=deposit.reservation_id)
+
+    _validate_deposit_metadata(deposit=deposit, metadata=metadata)
+
+    if _deposit_terminal_state_matches_event(deposit=deposit, event_type=event_type):
+        return
+
+    _handle_deposit_authorized(deposit=deposit, reservation=reservation, payment_intent=payment_intent)
+
+
 def process_stripe_event(event: Any) -> StripeEvent:
     payload = _event_to_payload(event)
     stripe_event_id = payload.get("id")
@@ -581,11 +711,17 @@ def process_stripe_event(event: Any) -> StripeEvent:
                 event_object = ((payload.get("data") or {}).get("object") or {})
                 if not isinstance(event_object, dict):
                     raise StripeWebhookProcessingError("Invalid Stripe event object.")
-                _apply_payment_intent_event(
-                    event_type=event_type,
-                    payment_intent=event_object,
-                    post_commit_actions=post_commit_actions,
-                )
+                if _get_payment_intent_purpose(event_object) == "deposit":
+                    _apply_deposit_event(
+                        event_type=event_type,
+                        payment_intent=event_object,
+                    )
+                else:
+                    _apply_payment_intent_event(
+                        event_type=event_type,
+                        payment_intent=event_object,
+                        post_commit_actions=post_commit_actions,
+                    )
 
             stripe_event.processed = True
             stripe_event.processed_at = timezone.now()

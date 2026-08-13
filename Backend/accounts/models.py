@@ -115,6 +115,9 @@ class User(AbstractUser):
 
 
 class ClientProfile(models.Model):
+	MINIMUM_AGE_YEARS = 18
+	MAXIMUM_AGE_YEARS = 90
+
 	class ProfileStatus(models.TextChoices):
 		INCOMPLET = "INCOMPLET", "Incomplet"
 		EN_ATTENTE = "EN_ATTENTE", "En attente"
@@ -142,15 +145,38 @@ class ClientProfile(models.Model):
 			models.Index(fields=["updated_at"], name="client_profile_updated_idx"),
 		]
 
+	@staticmethod
+	def _subtract_years(reference_date, years):
+		"""Subtract years while keeping leap-day boundaries stable (29/02 -> 28/02)."""
+		try:
+			return reference_date.replace(year=reference_date.year - years)
+		except ValueError:
+			return reference_date.replace(year=reference_date.year - years, month=2, day=28)
+
+	@classmethod
+	def validate_date_of_birth_value(cls, date_of_birth, *, reference_date=None):
+		if not date_of_birth:
+			return
+
+		today = reference_date or timezone.localdate()
+		if date_of_birth > today:
+			raise ValidationError("La date de naissance ne peut pas etre dans le futur.")
+
+		youngest_allowed = cls._subtract_years(today, cls.MINIMUM_AGE_YEARS)
+		if date_of_birth > youngest_allowed:
+			raise ValidationError("Vous devez avoir au moins 18 ans pour utiliser GetACar.")
+
+		oldest_allowed = cls._subtract_years(today, cls.MAXIMUM_AGE_YEARS)
+		if date_of_birth < oldest_allowed:
+			raise ValidationError("L'âge maximum autorisé pour une location GetACar est de 90 ans.")
+
 	def clean(self):
 		super().clean()
 		if self.date_of_birth:
-			today = timezone.localdate()
-			if self.date_of_birth > today:
-				raise ValidationError({"date_of_birth": "La date de naissance ne peut pas etre dans le futur."})
-			oldest_allowed = today.replace(year=today.year - 120)
-			if self.date_of_birth < oldest_allowed:
-				raise ValidationError({"date_of_birth": "La date de naissance semble invalide."})
+			try:
+				self.validate_date_of_birth_value(self.date_of_birth)
+			except ValidationError as exc:
+				raise ValidationError({"date_of_birth": exc.messages[0]})
 
 	@property
 	def is_actionable(self) -> bool:

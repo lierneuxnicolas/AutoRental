@@ -7,7 +7,7 @@ from .client import (
      ReservationLockView,
      ReservationUnlockView,
 )
-from .management import ReservationManagementCompleteView, ReservationManagementDetailView, ReservationManagementListView
+from .management import ReservationManagementCompleteView, ReservationManagementDetailView, ReservationManagementIssueView, ReservationManagementListView
 from .pricing import PriceSimulationView
 
 __all__ = [
@@ -20,6 +20,7 @@ __all__ = [
     "ReservationManagementListView",
     "ReservationManagementDetailView",
     "ReservationManagementCompleteView",
+    "ReservationManagementIssueView",
      "ReservationLockView",
      "ReservationUnlockView",
 ]

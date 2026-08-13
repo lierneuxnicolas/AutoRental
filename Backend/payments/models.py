@@ -60,6 +60,7 @@ class Deposit(models.Model):
 		CREE = "CREE", "Cree"
 		EN_ATTENTE = "EN_ATTENTE", "En attente"
 		AUTORISEE = "AUTORISEE", "Autorisee"
+		A_VERIFIER = "A_VERIFIER", "A verifier"
 		CAPTUREE = "CAPTUREE", "Capturee"
 		LIBEREE = "LIBEREE", "Liberee"
 		ECHOUEE = "ECHOUEE", "Echouee"
