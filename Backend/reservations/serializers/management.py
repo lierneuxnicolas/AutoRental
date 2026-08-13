@@ -14,7 +14,12 @@ Données volontairement masquées pour la sécurité:
 from rest_framework import serializers
 
 from accounts.models import ClientProfile
+from inspections.models import Inspection
+from inspections.serializers import InspectionDamageReadSerializer, InspectionPhotoReadSerializer
+from interventions.models import Intervention
+from interventions.serializers import InterventionManagementResponseSerializer
 from reservations.models import Reservation
+from vehicles.models import Vehicle
 
 
 # ==============================================================================
@@ -55,6 +60,31 @@ class ReservationManagementVehicleSummarySerializer(serializers.Serializer):
     doors = serializers.IntegerField(read_only=True)
 
 
+class ReservationManagementInspectionSerializer(serializers.ModelSerializer):
+    photos = InspectionPhotoReadSerializer(many=True, read_only=True)
+    damages = InspectionDamageReadSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Inspection
+        fields = [
+            "id",
+            "inspection_type",
+            "status",
+            "mileage",
+            "energy_level_percent",
+            "comments",
+            "has_critical_issue",
+            "critical_issue_description",
+            "started_at",
+            "completed_at",
+            "completed_by",
+            "created_at",
+            "updated_at",
+            "photos",
+            "damages",
+        ]
+
+
 # ==============================================================================
 # Réservation en list/detail pour le management
 # ==============================================================================
@@ -91,6 +121,10 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
 
     vehicle = ReservationManagementVehicleSummarySerializer(read_only=True)
     client_summary = ReservationManagementClientSummarySerializer(source="*", read_only=True)
+    deposit_status = serializers.SerializerMethodField()
+    departure_inspection = serializers.SerializerMethodField()
+    return_inspection = serializers.SerializerMethodField()
+    interventions = serializers.SerializerMethodField()
     rental_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
 
@@ -106,11 +140,68 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
             "status",
             "rental_amount",
             "deposit_amount",
+            "deposit_status",
+            "departure_inspection",
+            "return_inspection",
+            "interventions",
             "created_at",
             "confirmed_at",
             "cancelled_at",
             "cancellation_reason",
         ]
+
+    def _get_inspection(self, obj, inspection_type):
+        inspections = getattr(obj, "prefetched_inspections", None)
+        if inspections is None:
+            inspections = list(
+                obj.inspections.select_related("completed_by").prefetch_related(
+                    "photos",
+                    "damages",
+                    "damages__evidence_photos",
+                )
+            )
+
+        for inspection in inspections:
+            if inspection.inspection_type == inspection_type:
+                return inspection
+        return None
+
+    def get_deposit_status(self, obj):
+        deposits = getattr(obj, "prefetched_deposits", None)
+        if deposits is None:
+            deposit = obj.deposits.order_by("-created_at", "-id").first()
+        else:
+            deposit = deposits[0] if deposits else None
+
+        return getattr(deposit, "status", None)
+
+    def get_departure_inspection(self, obj):
+        inspection = self._get_inspection(obj, Inspection.Type.INITIAL)
+        if inspection is None:
+            return None
+        return ReservationManagementInspectionSerializer(inspection, context=self.context).data
+
+    def get_return_inspection(self, obj):
+        inspection = self._get_inspection(obj, Inspection.Type.FINAL)
+        if inspection is None:
+            return None
+        return ReservationManagementInspectionSerializer(inspection, context=self.context).data
+
+    def get_interventions(self, obj):
+        interventions = getattr(obj, "prefetched_interventions", None)
+        if interventions is None:
+            interventions = list(
+                obj.interventions.select_related(
+                    "vehicle",
+                    "vehicle__brand",
+                    "reservation",
+                    "assigned_to",
+                    "assigned_to__role",
+                    "created_by",
+                    "created_by__role",
+                )
+            )
+        return InterventionManagementResponseSerializer(interventions, many=True, context=self.context).data
 
 
 class ReservationManagementCompleteRequestSerializer(serializers.Serializer):
@@ -120,3 +211,35 @@ class ReservationManagementCompleteRequestSerializer(serializers.Serializer):
 class ReservationManagementCompleteResponseSerializer(serializers.Serializer):
     message = serializers.CharField(read_only=True)
     reservation = ReservationManagementDetailSerializer(read_only=True)
+
+
+class ReservationManagementIssueRequestSerializer(serializers.Serializer):
+    anomaly_type = serializers.ChoiceField(
+        choices=[
+            ("MECANIQUE", "Mecanique"),
+            ("ACCIDENT", "Accident"),
+            ("NETTOYAGE", "Nettoyage"),
+            ("AUTRE", "Autre"),
+        ]
+    )
+    comment = serializers.CharField(required=False, allow_blank=True, default="")
+    vehicle_status = serializers.ChoiceField(
+        choices=[
+            Vehicle.Status.MAINTENANCE,
+            Vehicle.Status.ACCIDENTE,
+            Vehicle.Status.NETTOYAGE,
+            Vehicle.Status.A_CONTROLER,
+            Vehicle.Status.INDISPONIBLE,
+        ]
+    )
+    evidence_files = serializers.ListField(
+        child=serializers.ImageField(),
+        required=False,
+        allow_empty=True,
+    )
+
+
+class ReservationManagementIssueResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(read_only=True)
+    reservation = ReservationManagementDetailSerializer(read_only=True)
+    intervention = InterventionManagementResponseSerializer(read_only=True, allow_null=True)

@@ -30,8 +30,22 @@ class DepositAuthorizationError(ValueError):
         return self.message
 
 
+@dataclass(frozen=True)
+class DepositReleaseError(ValueError):
+    code: str
+    message: str
+    details: dict[str, Any] | None = None
+
+    def __str__(self) -> str:
+        return self.message
+
+
 def _raise_deposit_error(code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
     raise DepositAuthorizationError(code=code, message=message, details=details)
+
+
+def _raise_deposit_release_error(code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
+    raise DepositReleaseError(code=code, message=message, details=details)
 
 
 def _normalize_mode(mode: str) -> str:
@@ -158,6 +172,99 @@ def _to_minor_units(amount: Decimal) -> int:
 
 def _build_idempotency_key(*, deposit: Deposit) -> str:
     return f"deposit_authorize:{deposit.id}:{deposit.amount}:{deposit.currency}"
+
+
+def _build_release_idempotency_key(*, deposit: Deposit) -> str:
+    return f"deposit_release:{deposit.id}:{deposit.stripe_payment_intent_id or 'no-pi'}"
+
+
+def _release_stripe_deposit_hold(*, deposit: Deposit) -> None:
+    if not deposit.stripe_payment_intent_id:
+        return
+
+    stripe_api_key = getattr(settings, "STRIPE_SECRET_KEY", "")
+    if not stripe_api_key:
+        _raise_deposit_release_error(
+            "STRIPE_NOT_CONFIGURED",
+            "STRIPE_SECRET_KEY est requis pour liberer une caution STRIPE_TEST.",
+        )
+
+    stripe.api_key = stripe_api_key
+
+    try:
+        payment_intent = stripe.PaymentIntent.retrieve(deposit.stripe_payment_intent_id)
+    except stripe.error.APIConnectionError:
+        _raise_deposit_release_error("STRIPE_UNAVAILABLE", "Stripe est temporairement indisponible.")
+    except stripe.error.StripeError as exc:
+        _raise_deposit_release_error(
+            "STRIPE_ERROR",
+            "Impossible de verifier la preautorisation Stripe de caution.",
+            details={"stripe_error": str(exc)},
+        )
+
+    stripe_status = getattr(payment_intent, "status", "")
+    if stripe_status in {"canceled", "succeeded"}:
+        return
+
+    try:
+        stripe.PaymentIntent.cancel(
+            deposit.stripe_payment_intent_id,
+            cancellation_reason="abandoned",
+            idempotency_key=_build_release_idempotency_key(deposit=deposit),
+        )
+    except stripe.error.InvalidRequestError as exc:
+        error_code = getattr(exc, "code", None)
+        if error_code == "payment_intent_unexpected_state":
+            return
+        _raise_deposit_release_error(
+            "STRIPE_ERROR",
+            "Stripe refuse la liberation de la caution.",
+            details={"stripe_error": str(exc)},
+        )
+    except stripe.error.APIConnectionError:
+        _raise_deposit_release_error("STRIPE_UNAVAILABLE", "Stripe est temporairement indisponible.")
+    except stripe.error.StripeError as exc:
+        _raise_deposit_release_error(
+            "STRIPE_ERROR",
+            "Erreur Stripe lors de la liberation de la caution.",
+            details={"stripe_error": str(exc)},
+        )
+
+
+def release_authorized_deposit(*, reservation: Reservation) -> Deposit | None:
+    deposit = (
+        Deposit.objects.select_for_update()
+        .filter(reservation=reservation, status=Deposit.Status.A_VERIFIER)
+        .order_by("-authorized_at", "-created_at")
+        .first()
+    )
+    if deposit is None:
+        return None
+
+    if deposit.mode == Deposit.Mode.STRIPE_TEST:
+        _release_stripe_deposit_hold(deposit=deposit)
+
+    now = timezone.now()
+    deposit.status = Deposit.Status.LIBEREE
+    deposit.released_at = now
+    deposit.authorization_expires_at = None
+    deposit.save(update_fields=["status", "released_at", "authorization_expires_at", "updated_at"])
+    return deposit
+
+
+def mark_authorized_deposit_for_verification(*, reservation: Reservation) -> Deposit | None:
+    deposit = (
+        Deposit.objects.select_for_update()
+        .filter(reservation=reservation, status=Deposit.Status.AUTORISEE)
+        .order_by("-authorized_at", "-created_at")
+        .first()
+    )
+    if deposit is None:
+        return None
+
+    deposit.status = Deposit.Status.A_VERIFIER
+    deposit.save(update_fields=["status", "updated_at"])
+    return deposit
 
 
 def _notify_deposit_authorized_once(*, reservation: Reservation, deposit: Deposit, owner) -> None:

@@ -144,24 +144,25 @@ def _assert_deposit_authorized(reservation: Reservation) -> None:
         )
 
 
-def _recalculate_rental_amount(reservation: Reservation) -> Decimal:
+def _recalculate_payable_amount(reservation: Reservation) -> Decimal:
     try:
         pricing = calculate_price_simulation(
             vehicle=reservation.vehicle,
             start_at=reservation.start_at,
             end_at=reservation.end_at,
+            insurance_type=reservation.insurance_type,
         )
     except PricingError as exc:
         _raise_payment_intent_error(
             "PRICING_ERROR",
-            "Impossible de recalculer le montant de location.",
+            "Impossible de recalculer le montant a payer.",
             details={"pricing_error": exc.code},
         )
 
-    if pricing.rental_amount < 0:
+    if pricing.total_amount < 0:
         _raise_payment_intent_error("INCONSISTENT_AMOUNT", "Le montant recalcule est incoherent.")
 
-    return pricing.rental_amount
+    return pricing.total_amount
 
 
 def _build_idempotency_key(*, reservation_id: int, amount: Decimal) -> str:
@@ -196,12 +197,21 @@ def _configure_stripe() -> None:
             "STRIPE_NOT_CONFIGURED",
             "STRIPE_SECRET_KEY est requis pour creer un PaymentIntent.",
         )
+    if not stripe_secret_key.startswith("sk_test_"):
+        _raise_payment_intent_error(
+            "STRIPE_TEST_ONLY",
+            "Seules les cles Stripe Test (sk_test_) sont autorisees pour ce flux.",
+        )
     stripe.api_key = stripe_secret_key
 
 
 def _create_payment_intent(*, reservation: Reservation, payment: Payment, amount: Decimal):
+    client_user = getattr(getattr(reservation, "client", None), "user", None)
     metadata = {
         "reservation_id": str(reservation.id),
+        "user_id": str(getattr(client_user, "id", "")),
+        "vehicle_id": str(reservation.vehicle_id),
+        "insurance_type": str(reservation.insurance_type),
         "reservation_reference": reservation.reference,
         "payment_id": str(payment.id),
         "purpose": "rental_payment",
@@ -247,12 +257,12 @@ def create_or_reuse_payment_intent(
         _assert_vehicle_still_available(reservation_locked)
         _assert_deposit_authorized(reservation_locked)
 
-        rental_amount = _recalculate_rental_amount(reservation_locked)
-        if reservation_locked.rental_amount != rental_amount:
-            reservation_locked.rental_amount = rental_amount
+        payable_amount = _recalculate_payable_amount(reservation_locked)
+        if reservation_locked.rental_amount != payable_amount:
+            reservation_locked.rental_amount = payable_amount
             reservation_locked.save(update_fields=["rental_amount", "updated_at"])
 
-        reusable_payment = _find_reusable_payment(reservation=reservation_locked, amount=rental_amount)
+        reusable_payment = _find_reusable_payment(reservation=reservation_locked, amount=payable_amount)
         if reusable_payment is not None:
             try:
                 existing_pi = stripe.PaymentIntent.retrieve(reusable_payment.stripe_payment_intent_id)
@@ -267,7 +277,7 @@ def create_or_reuse_payment_intent(
 
             if _is_reusable_stripe_status(existing_pi.status):
                 reusable_payment.status = _status_from_stripe(existing_pi.status)
-                reusable_payment.amount = rental_amount
+                reusable_payment.amount = payable_amount
                 reusable_payment.currency = "EUR"
                 reusable_payment.save(update_fields=["status", "amount", "currency", "updated_at"])
 
@@ -282,7 +292,7 @@ def create_or_reuse_payment_intent(
         payment = Payment.objects.create(
             reservation=reservation_locked,
             provider=Payment.Provider.STRIPE,
-            amount=rental_amount,
+            amount=payable_amount,
             currency="EUR",
             status=Payment.Status.CREE,
         )
@@ -290,11 +300,11 @@ def create_or_reuse_payment_intent(
         payment_intent = _create_payment_intent(
             reservation=reservation_locked,
             payment=payment,
-            amount=rental_amount,
+            amount=payable_amount,
         )
 
         payment.status = _status_from_stripe(payment_intent.status)
-        payment.amount = rental_amount
+        payment.amount = payable_amount
         payment.currency = "EUR"
         payment.stripe_payment_intent_id = payment_intent.id
         payment.failed_at = None

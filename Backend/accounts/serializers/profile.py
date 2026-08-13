@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.utils import timezone
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from accounts.models import ClientProfile
@@ -69,8 +69,10 @@ class ClientProfileMeSerializer(serializers.ModelSerializer):
         return cleaned
 
     def validate_date_of_birth(self, value):
-        if value and value > timezone.localdate():
-            raise serializers.ValidationError("La date de naissance ne peut pas etre dans le futur.")
+        try:
+            ClientProfile.validate_date_of_birth_value(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages[0])
         return value
 
     def update(self, instance, validated_data):

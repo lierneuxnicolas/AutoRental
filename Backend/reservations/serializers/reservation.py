@@ -1,9 +1,10 @@
 from rest_framework import serializers
 
 from reservations.models import Reservation
+from reservations.services.pricing import PricingError, calculate_price_simulation
 
 
-ALLOWED_CREATE_FIELDS = {"vehicle_id", "start_at", "end_at"}
+ALLOWED_CREATE_FIELDS = {"vehicle_id", "start_at", "end_at", "insurance_type"}
 FORBIDDEN_CREATE_FIELDS = {
     "client",
     "reference",
@@ -33,6 +34,11 @@ class ReservationCreateRequestSerializer(serializers.Serializer):
     vehicle_id = serializers.IntegerField(required=True)
     start_at = serializers.DateTimeField(required=True)
     end_at = serializers.DateTimeField(required=True)
+    insurance_type = serializers.ChoiceField(
+        choices=["STANDARD", "DUO", "OMNIUM"],
+        required=False,
+        default="STANDARD",
+    )
 
     def to_internal_value(self, data):
         if hasattr(data, "keys"):
@@ -55,7 +61,22 @@ class ReservationCreateRequestSerializer(serializers.Serializer):
 class ReservationListDetailSerializer(serializers.ModelSerializer):
     vehicle = ReservationVehicleSummarySerializer(read_only=True)
     rental_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    insurance_type = serializers.CharField(read_only=True)
     deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    total_amount = serializers.SerializerMethodField()
+
+    def get_total_amount(self, obj):
+        try:
+            pricing = calculate_price_simulation(
+                vehicle=obj.vehicle,
+                start_at=obj.start_at,
+                end_at=obj.end_at,
+                insurance_type=obj.insurance_type,
+            )
+        except PricingError:
+            return obj.rental_amount
+
+        return pricing.total_amount
 
     class Meta:
         model = Reservation
@@ -67,7 +88,9 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
             "end_at",
             "status",
             "rental_amount",
+            "insurance_type",
             "deposit_amount",
+            "total_amount",
             "created_at",
             "confirmed_at",
             "cancelled_at",

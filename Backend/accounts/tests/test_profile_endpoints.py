@@ -1,4 +1,5 @@
 from datetime import date
+from datetime import timedelta
 
 from django.urls import reverse
 from rest_framework import status
@@ -36,6 +37,13 @@ class ProfileEndpointsTests(APITestCase):
         )
         token = response.data["access"]
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    @staticmethod
+    def _subtract_years(reference_date: date, years: int) -> date:
+        try:
+            return reference_date.replace(year=reference_date.year - years)
+        except ValueError:
+            return reference_date.replace(year=reference_date.year - years, month=2, day=28)
 
     def test_get_profile_for_client(self):
         self._authenticate("profile-client@example.com", "StrongPass123!")
@@ -128,3 +136,67 @@ class ProfileEndpointsTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(ClientProfile.objects.filter(user=legacy_user).exists())
+
+    def test_patch_rejects_date_of_birth_when_under_18(self):
+        self._authenticate("profile-client@example.com", "StrongPass123!")
+        today = date.today()
+        underage_birth_date = self._subtract_years(today, 17)
+
+        response = self.client.patch(
+            self.profile_url,
+            {"date_of_birth": underage_birth_date.isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["date_of_birth"][0],
+            "Vous devez avoir au moins 18 ans pour utiliser GetACar.",
+        )
+
+    def test_patch_accepts_date_of_birth_when_exactly_18(self):
+        self._authenticate("profile-client@example.com", "StrongPass123!")
+        today = date.today()
+        adult_birth_date = self._subtract_years(today, 18)
+
+        response = self.client.patch(
+            self.profile_url,
+            {"date_of_birth": adult_birth_date.isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.date_of_birth, adult_birth_date)
+
+    def test_patch_accepts_date_of_birth_when_exactly_90(self):
+        self._authenticate("profile-client@example.com", "StrongPass123!")
+        today = date.today()
+        max_age_birth_date = self._subtract_years(today, 90)
+
+        response = self.client.patch(
+            self.profile_url,
+            {"date_of_birth": max_age_birth_date.isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.date_of_birth, max_age_birth_date)
+
+    def test_patch_rejects_date_of_birth_when_over_90(self):
+        self._authenticate("profile-client@example.com", "StrongPass123!")
+        today = date.today()
+        over_max_age_birth_date = self._subtract_years(today, 90) - timedelta(days=1)
+
+        response = self.client.patch(
+            self.profile_url,
+            {"date_of_birth": over_max_age_birth_date.isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["date_of_birth"][0],
+            "L'âge maximum autorisé pour une location GetACar est de 90 ans.",
+        )
