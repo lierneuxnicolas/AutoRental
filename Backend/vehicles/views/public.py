@@ -1,13 +1,15 @@
+from django.db.models import Prefetch
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 
 from vehicles.filters import VehiclePublicFilter
-from vehicles.models import Parking, Vehicle, VehicleCategory
+from vehicles.models import Parking, Vehicle, VehicleCategory, VehicleEquipment
 from vehicles.serializers import (
 	ParkingPublicSerializer,
 	VehicleAvailabilityQuerySerializer,
 	VehicleCategoryPublicSerializer,
+	VehiclePublicDetailSerializer,
 	VehiclePublicSerializer,
 )
 from vehicles.services import get_available_vehicles
@@ -39,7 +41,13 @@ class VehiclePublicListView(generics.ListAPIView):
 				parking_space__parking__is_active=True,
 			)
 			.select_related("brand", "category", "parking_space", "parking_space__parking")
-			.prefetch_related("photos")
+			.prefetch_related(
+				"photos",
+				Prefetch(
+					"equipment",
+					queryset=VehicleEquipment.objects.filter(is_active=True).order_by("label"),
+				),
+			)
 		)
 
 	def _serialize_period_query(self, *, minimum_hours=None):
@@ -129,7 +137,7 @@ class VehicleAvailablePublicListView(VehiclePublicListView):
 
 class VehiclePublicDetailView(generics.RetrieveAPIView):
 	permission_classes = [AllowAny]
-	serializer_class = VehiclePublicSerializer
+	serializer_class = VehiclePublicDetailSerializer
 	lookup_field = "id"
 	lookup_url_kwarg = "pk"
 
@@ -146,14 +154,20 @@ class VehiclePublicDetailView(generics.RetrieveAPIView):
 				parking_space__parking__is_active=True,
 			)
 			.select_related("brand", "category", "parking_space", "parking_space__parking")
-			.prefetch_related("photos")
+			.prefetch_related(
+				"photos",
+				Prefetch(
+					"equipment",
+					queryset=VehicleEquipment.objects.filter(is_active=True).order_by("label"),
+				),
+			)
 		)
 
 	@extend_schema(
 		tags=["Vehicles"],
 		auth=[],
 		responses={
-			200: VehiclePublicSerializer,
+			200: VehiclePublicDetailSerializer,
 			404: ErrorDetailResponseSerializer,
 		},
 	)

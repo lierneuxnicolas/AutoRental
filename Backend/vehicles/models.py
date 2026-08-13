@@ -194,6 +194,35 @@ class ParkingSpace(models.Model):
 		return f"{self.parking.name} - {self.number}"
 
 
+class VehicleEquipment(models.Model):
+	code = models.SlugField(max_length=80, unique=True)
+	label = models.CharField(max_length=120)
+	is_active = models.BooleanField(default=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		ordering = ["label"]
+		indexes = [
+			models.Index(fields=["code"], name="vehicle_equipment_code_idx"),
+			models.Index(fields=["is_active"], name="vehicle_equipment_active_idx"),
+		]
+
+	def clean(self):
+		super().clean()
+		if self.code:
+			self.code = _normalize_spaces(self.code).lower()
+		if self.label:
+			self.label = _normalize_spaces(self.label)
+
+	def save(self, *args, **kwargs):
+		self.full_clean()
+		super().save(*args, **kwargs)
+
+	def __str__(self) -> str:
+		return self.label
+
+
 class Vehicle(models.Model):
 	class Status(models.TextChoices):
 		DISPONIBLE = "DISPONIBLE", "Disponible"
@@ -207,6 +236,7 @@ class Vehicle(models.Model):
 
 	brand = models.ForeignKey(Brand, on_delete=models.PROTECT, related_name="vehicles")
 	category = models.ForeignKey(VehicleCategory, on_delete=models.PROTECT, related_name="vehicles")
+	equipment = models.ManyToManyField(VehicleEquipment, blank=True, related_name="vehicles")
 	parking_space = models.OneToOneField(
 		ParkingSpace,
 		on_delete=models.PROTECT,
@@ -221,6 +251,15 @@ class Vehicle(models.Model):
 	seats = models.PositiveIntegerField(validators=[MinValueValidator(1)])
 	doors = models.PositiveIntegerField(validators=[MinValueValidator(1)])
 	mileage = models.PositiveIntegerField(default=0)
+	power_hp = models.PositiveIntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
+	consumption = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal("0.00"))])
+	trunk_volume = models.PositiveIntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
+	euro_standard = models.CharField(max_length=50, blank=True, null=True)
+	included_km_per_day = models.PositiveIntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
+	extra_km_price = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal("0.00"))])
+	minimum_age = models.PositiveIntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
+	required_license = models.CharField(max_length=100, blank=True, null=True)
+	recommended_use = models.TextField(blank=True)
 	status = models.CharField(max_length=20, choices=Status.choices, default=Status.DISPONIBLE)
 	description = models.TextField(blank=True)
 	is_active = models.BooleanField(default=True)
@@ -258,6 +297,15 @@ class Vehicle(models.Model):
 
 		if self.transmission:
 			self.transmission = _normalize_spaces(self.transmission)
+
+		if self.euro_standard:
+			self.euro_standard = _normalize_spaces(self.euro_standard)
+
+		if self.required_license:
+			self.required_license = _normalize_spaces(self.required_license)
+
+		if self.recommended_use:
+			self.recommended_use = _normalize_spaces(self.recommended_use)
 
 		if self.description:
 			self.description = _normalize_spaces(self.description)

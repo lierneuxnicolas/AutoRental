@@ -15,7 +15,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from accounts.models import ClientProfile, Role
-from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehiclePhoto
+from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment, VehiclePhoto
 from vehicles.services import (
 	AvailabilityValidationError,
 	calculate_duration_hours,
@@ -122,6 +122,35 @@ class VehicleTestDataMixin:
 		cls.space_a3 = ParkingSpace.objects.create(parking=cls.parking_active, number="A3", is_active=True)
 		cls.space_b1 = ParkingSpace.objects.create(parking=cls.parking_inactive, number="B1", is_active=True)
 
+		cls.equipment_climatisation, _ = VehicleEquipment.objects.get_or_create(
+			code="climatisation",
+			defaults={"label": "Climatisation"},
+		)
+		cls.equipment_gps, _ = VehicleEquipment.objects.get_or_create(
+			code="gps",
+			defaults={"label": "GPS"},
+		)
+		cls.equipment_bluetooth, _ = VehicleEquipment.objects.get_or_create(
+			code="bluetooth",
+			defaults={"label": "Bluetooth / CarPlay"},
+		)
+		cls.equipment_radar, _ = VehicleEquipment.objects.get_or_create(
+			code="radar",
+			defaults={"label": "Radar / caméra de recul"},
+		)
+		cls.equipment_limiteur, _ = VehicleEquipment.objects.get_or_create(
+			code="regulateur",
+			defaults={"label": "Régulateur / limiteur"},
+		)
+		cls.equipment_isofix, _ = VehicleEquipment.objects.get_or_create(
+			code="isofix",
+			defaults={"label": "ISOFIX"},
+		)
+		cls.equipment_usb, _ = VehicleEquipment.objects.get_or_create(
+			code="usb",
+			defaults={"label": "USB"},
+		)
+
 		cls.vehicle_active = Vehicle.objects.create(
 			brand=cls.brand_active,
 			category=cls.category_active,
@@ -135,10 +164,27 @@ class VehicleTestDataMixin:
 			seats=5,
 			doors=5,
 			mileage=12000,
+			power_hp=120,
+			consumption="5.8",
+			trunk_volume=320,
+			euro_standard="Euro 6",
+			included_km_per_day=1000,
+			extra_km_price="0.20",
+			minimum_age=21,
+			required_license="Permis B",
 			status=Vehicle.Status.DISPONIBLE,
 			description="Vehicule actif",
 			is_active=True,
 		)
+		cls.vehicle_active.equipment.set([
+			cls.equipment_climatisation,
+			cls.equipment_gps,
+			cls.equipment_bluetooth,
+			cls.equipment_radar,
+			cls.equipment_limiteur,
+			cls.equipment_isofix,
+			cls.equipment_usb,
+		])
 		cls.vehicle_loue = Vehicle.objects.create(
 			brand=cls.brand_active,
 			category=cls.category_active,
@@ -310,6 +356,62 @@ class VehiclePublicCatalogTests(VehicleTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		for field in ["mileage", "registration_number", "created_at", "updated_at"]:
 			self.assertNotIn(field, response.data)
+
+	def test_public_vehicle_detail_includes_extended_vehicle_fields(self):
+		response = self.client_api.get(f"/api/v1/vehicles/{self.vehicle_active.id}/")
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["power_hp"], 120)
+		self.assertEqual(response.data["consumption"], "5.80")
+		self.assertEqual(response.data["trunk_volume"], 320)
+		self.assertEqual(response.data["euro_standard"], "Euro 6")
+		self.assertEqual(response.data["included_km_per_day"], 1000)
+		self.assertEqual(response.data["extra_km_price"], "0.20")
+		self.assertEqual(response.data["minimum_age"], 21)
+		self.assertEqual(response.data["required_license"], "Permis B")
+		self.assertIn("equipment", response.data)
+		equipment_codes = {item["code"] for item in response.data["equipment"]}
+		self.assertTrue(
+			{
+				"climatisation",
+				"gps",
+				"bluetooth",
+				"radar",
+				"regulateur",
+				"isofix",
+				"usb",
+			}.issubset(equipment_codes)
+		)
+
+	def test_conditions_are_exposed_in_vehicle_detail_only(self):
+		detail_response = self.client_api.get(f"/api/v1/vehicles/{self.vehicle_active.id}/")
+		self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+		self.assertIn("conditions", detail_response.data)
+
+		conditions = detail_response.data["conditions"]
+		self.assertEqual(conditions["included_km_per_day"], 1000)
+		self.assertEqual(str(conditions["extra_km_price"]), "0.20")
+		self.assertEqual(str(conditions["minimum_deposit"]), "300.00")
+		self.assertEqual(conditions["minimum_age"], 21)
+		self.assertEqual(conditions["required_license"], "Permis B")
+		self.assertEqual(
+			conditions["reservation_profile_validation"]["required_documents"],
+			["CARTE_IDENTITE", "PERMIS_CONDUIRE"],
+		)
+		self.assertTrue(conditions["fuel_tracking"]["managed_in_inspections"])
+		self.assertEqual(conditions["fuel_tracking"]["field"], "energy_level_percent")
+		self.assertTrue(conditions["late_policy"]["managed_in_departure_inspection_window"])
+		self.assertEqual(conditions["late_policy"]["early_tolerance_minutes"], 30)
+		self.assertEqual(conditions["late_policy"]["late_tolerance_minutes"], 120)
+		self.assertIn("CONFIRMEE", conditions["cancellation_policy"]["allowed_statuses"])
+		self.assertTrue(conditions["cancellation_policy"]["confirmed_requires_future_start"])
+		self.assertTrue(conditions["inspection_policy"]["departure_required"])
+		self.assertTrue(conditions["inspection_policy"]["return_required"])
+		self.assertEqual(conditions["inspection_policy"]["mandatory_photo_count"], 6)
+
+		list_response = self.client_api.get("/api/v1/vehicles/")
+		self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+		self.assertTrue(list_response.data["results"])
+		self.assertNotIn("conditions", list_response.data["results"][0])
 
 	def test_exact_location_hidden_when_vehicle_loue(self):
 		response = self.client_api.get(f"/api/v1/vehicles/{self.vehicle_loue.id}/")
@@ -1018,7 +1120,7 @@ class VehicleAvailableEndpointTests(VehicleTestDataMixin, TestCase):
 	def test_available_endpoint_uses_service_once_and_avoids_n_plus_one(self, mocked_get_available_vehicles):
 		mocked_get_available_vehicles.side_effect = self._fake_get_available_vehicles
 
-		with self.assertNumQueries(4):  # min_rental_hours, COUNT, SELECT vehicles, prefetch photos
+		with self.assertNumQueries(5):  # min_rental_hours, COUNT, SELECT vehicles, prefetch photos, prefetch equipment
 			response = self.client_api.get("/api/v1/vehicles/available/", self._availability_params())
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
