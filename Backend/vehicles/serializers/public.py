@@ -1,7 +1,11 @@
+from django.conf import settings
 from drf_spectacular.utils import extend_schema_field, extend_schema_serializer
 from rest_framework import serializers
 
-from vehicles.models import Parking, Vehicle, VehicleCategory
+from accounts.models import ClientDocument
+from inspections.services.departure import MANDATORY_PHOTO_TYPES
+from reservations.services.cancellation import get_cancellable_statuses
+from vehicles.models import Parking, Vehicle, VehicleCategory, VehicleEquipment
 from vehicles.services import AvailabilityValidationError, validate_availability_period
 
 
@@ -51,6 +55,12 @@ class VehicleAvailabilityQuerySerializer(serializers.Serializer):
 		return period
 
 
+class VehicleEquipmentPublicSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = VehicleEquipment
+		fields = ["id", "code", "label"]
+
+
 class VehiclePublicSerializer(serializers.ModelSerializer):
 	brand = serializers.CharField(source="brand.name", read_only=True)
 	category = serializers.CharField(source="category.name", read_only=True)
@@ -62,6 +72,7 @@ class VehiclePublicSerializer(serializers.ModelSerializer):
 		decimal_places=2,
 		read_only=True,
 	)
+	equipment = serializers.SerializerMethodField()
 	main_photo = serializers.SerializerMethodField()
 	photos = serializers.SerializerMethodField()
 	parking_name = serializers.SerializerMethodField()
@@ -81,9 +92,19 @@ class VehiclePublicSerializer(serializers.ModelSerializer):
 			"transmission",
 			"seats",
 			"doors",
+			"power_hp",
+			"consumption",
+			"trunk_volume",
+			"euro_standard",
+			"included_km_per_day",
+			"extra_km_price",
+			"minimum_age",
+			"required_license",
+			"recommended_use",
 			"description",
 			"public_status",
 			"category_daily_rate",
+			"equipment",
 			"main_photo",
 			"photos",
 			"parking_name",
@@ -101,6 +122,10 @@ class VehiclePublicSerializer(serializers.ModelSerializer):
 		if parking is None:
 			return False
 		return bool(space.is_active and parking.is_active)
+
+	@extend_schema_field(VehicleEquipmentPublicSerializer(many=True))
+	def get_equipment(self, obj: Vehicle):
+		return VehicleEquipmentPublicSerializer(obj.equipment.all(), many=True, context=self.context).data
 
 	@extend_schema_field(VehiclePhotoPublicSerializer(allow_null=True))
 	def get_main_photo(self, obj: Vehicle):
@@ -133,6 +158,55 @@ class VehiclePublicSerializer(serializers.ModelSerializer):
 		if not self._can_expose_exact_location(obj):
 			return None
 		return obj.parking_space.number
+
+
+class VehiclePublicDetailSerializer(VehiclePublicSerializer):
+	conditions = serializers.SerializerMethodField()
+
+	class Meta(VehiclePublicSerializer.Meta):
+		fields = VehiclePublicSerializer.Meta.fields + ["conditions"]
+
+	@extend_schema_field(
+		serializers.DictField(
+			child=serializers.JSONField(),
+		)
+	)
+	def get_conditions(self, obj: Vehicle):
+		category = getattr(obj, "category", None)
+		minimum_deposit = getattr(category, "minimum_deposit", None)
+
+		return {
+			"included_km_per_day": obj.included_km_per_day,
+			"extra_km_price": obj.extra_km_price,
+			"minimum_deposit": minimum_deposit,
+			"minimum_age": obj.minimum_age,
+			"required_license": obj.required_license,
+			"reservation_profile_validation": {
+				"documents_must_be_valid": True,
+				"required_documents": [
+					ClientDocument.DocumentType.CARTE_IDENTITE,
+					ClientDocument.DocumentType.PERMIS_CONDUIRE,
+				],
+			},
+			"fuel_tracking": {
+				"managed_in_inspections": True,
+				"field": "energy_level_percent",
+			},
+			"late_policy": {
+				"managed_in_departure_inspection_window": True,
+				"early_tolerance_minutes": settings.DEPARTURE_INSPECTION_EARLY_TOLERANCE_MINUTES,
+				"late_tolerance_minutes": settings.DEPARTURE_INSPECTION_LATE_TOLERANCE_MINUTES,
+			},
+			"cancellation_policy": {
+				"allowed_statuses": sorted(get_cancellable_statuses()),
+				"confirmed_requires_future_start": True,
+			},
+			"inspection_policy": {
+				"departure_required": True,
+				"return_required": True,
+				"mandatory_photo_count": len(MANDATORY_PHOTO_TYPES),
+			},
+		}
 
 
 class VehicleCategoryPublicSerializer(serializers.ModelSerializer):
