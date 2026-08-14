@@ -1317,6 +1317,43 @@ class ReservationClientConsultationTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(response.data["id"], self.owned_reservation.id)
 
+	def test_liste_client_reste_disponible_avec_une_reservation_confirmee_passee(self):
+		past_reservation = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.CONFIRMEE,
+			start_at=timezone.now() - timedelta(days=3),
+			end_at=timezone.now() - timedelta(days=3, hours=-3),
+		)
+
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.get(self.list_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		ids = {item["id"] for item in response.data["results"]}
+		self.assertIn(past_reservation.id, ids)
+
+	def test_detail_proprietaire_includes_departure_inspection_photos(self):
+		inspection = Inspection.objects.create(
+			reservation=self.owned_reservation,
+			inspection_type=Inspection.Type.INITIAL,
+			status=Inspection.Status.BROUILLON,
+		)
+		InspectionPhoto.objects.create(
+			inspection=inspection,
+			photo_type=InspectionPhoto.PhotoType.AVANT,
+			file=_image_file("front-left.jpg"),
+		)
+
+		self.client_api.force_authenticate(self.client_user_1)
+		url = reverse("reservations:reservation-detail", kwargs={"pk": self.owned_reservation.id})
+		response = self.client_api.get(url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertIsNotNone(response.data["departure_inspection"])
+		self.assertEqual(response.data["departure_inspection"]["inspection_type"], Inspection.Type.INITIAL)
+		self.assertEqual(len(response.data["departure_inspection"]["photos"]), 1)
+		self.assertEqual(response.data["departure_inspection"]["photos"][0]["photo_type"], InspectionPhoto.PhotoType.AVANT)
+
 	def test_autre_client_obtient_404(self):
 		self.client_api.force_authenticate(self.client_user_2)
 		url = reverse("reservations:reservation-detail", kwargs={"pk": self.owned_reservation.id})
@@ -1608,7 +1645,7 @@ class ReservationVehicleAccessTests(ReservationTestDataMixin, TestCase):
 			client=self.client_profile_1,
 			status=Reservation.Status.EN_COURS,
 			start_at=timezone.now() - timedelta(hours=3),
-			end_at=timezone.now() - timedelta(minutes=30),
+			end_at=timezone.now() + timedelta(minutes=30),
 		)
 		self._make_active_access(reservation)
 		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
@@ -1654,6 +1691,38 @@ class ReservationVehicleAccessTests(ReservationTestDataMixin, TestCase):
 				result=LockingLog.Result.SUCCESS,
 			).exists()
 		)
+
+	def test_unlock_is_refused_before_h_minus_15(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() + timedelta(minutes=20),
+			end_at=timezone.now() + timedelta(hours=4),
+		)
+		self._make_active_access(reservation)
+		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.post(unlock_url, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "ACCESS_NOT_STARTED")
+
+	def test_unlock_is_refused_after_reservation_end(self):
+		reservation = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() - timedelta(hours=4),
+			end_at=timezone.now() - timedelta(minutes=1),
+		)
+		self._make_active_access(reservation)
+		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
+
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.post(unlock_url, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "ACCESS_EXPIRED")
 
 
 class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
@@ -2140,7 +2209,7 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 			client=self.client_profile_1,
 			status=Reservation.Status.EN_COURS,
 			start_at=timezone.now() - timedelta(hours=3),
-			end_at=timezone.now() - timedelta(minutes=30),
+			end_at=timezone.now() + timedelta(minutes=30),
 		)
 		self._make_active_access(reservation)
 		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
@@ -2171,7 +2240,7 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 			client=self.client_profile_1,
 			status=Reservation.Status.EN_COURS,
 			start_at=timezone.now() - timedelta(hours=3),
-			end_at=timezone.now() - timedelta(minutes=30),
+			end_at=timezone.now() + timedelta(minutes=30),
 		)
 		self._make_active_access(reservation)
 		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
@@ -2199,7 +2268,7 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 			client=self.client_profile_1,
 			status=Reservation.Status.EN_COURS,
 			start_at=timezone.now() - timedelta(hours=3),
-			end_at=timezone.now() - timedelta(minutes=30),
+			end_at=timezone.now() + timedelta(minutes=30),
 		)
 		self._make_active_access(reservation)
 		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})
@@ -2246,7 +2315,7 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 			client=self.client_profile_1,
 			status=Reservation.Status.EN_COURS,
 			start_at=timezone.now() - timedelta(hours=3),
-			end_at=timezone.now() - timedelta(minutes=30),
+			end_at=timezone.now() + timedelta(minutes=30),
 		)
 		self._make_active_access(reservation)
 		unlock_url = reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id})

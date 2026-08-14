@@ -1,7 +1,10 @@
 from rest_framework import serializers
 
+from inspections.models import Inspection
+from inspections.serializers import InspectionPhotoReadSerializer
 from reservations.models import Reservation
 from reservations.services.pricing import PricingError, calculate_price_simulation
+from vehicles.services import AvailabilityValidationError
 
 
 ALLOWED_CREATE_FIELDS = {"vehicle_id", "start_at", "end_at", "insurance_type"}
@@ -73,7 +76,7 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
                 end_at=obj.end_at,
                 insurance_type=obj.insurance_type,
             )
-        except PricingError:
+        except (PricingError, AvailabilityValidationError):
             return obj.rental_amount
 
         return pricing.total_amount
@@ -98,8 +101,58 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
         ]
 
 
+class ReservationInspectionDetailSerializer(serializers.ModelSerializer):
+    photos = InspectionPhotoReadSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Inspection
+        fields = [
+            "id",
+            "inspection_type",
+            "status",
+            "completed_at",
+            "started_at",
+            "photos",
+        ]
+
+
 class ReservationCreateResponseSerializer(ReservationListDetailSerializer):
     pass
+
+
+class ReservationClientDetailSerializer(ReservationListDetailSerializer):
+    departure_inspection = serializers.SerializerMethodField()
+    return_inspection = serializers.SerializerMethodField()
+
+    class Meta(ReservationListDetailSerializer.Meta):
+        fields = ReservationListDetailSerializer.Meta.fields + [
+            "departure_inspection",
+            "return_inspection",
+        ]
+
+    def _get_inspection(self, obj, inspection_type):
+        inspections = getattr(obj, "prefetched_inspections", None)
+        if inspections is None:
+            inspections = list(
+                obj.inspections.select_related("completed_by").prefetch_related("photos")
+            )
+
+        for inspection in inspections:
+            if inspection.inspection_type == inspection_type:
+                return inspection
+        return None
+
+    def get_departure_inspection(self, obj):
+        inspection = self._get_inspection(obj, Inspection.Type.INITIAL)
+        if inspection is None:
+            return None
+        return ReservationInspectionDetailSerializer(inspection, context=self.context).data
+
+    def get_return_inspection(self, obj):
+        inspection = self._get_inspection(obj, Inspection.Type.FINAL)
+        if inspection is None:
+            return None
+        return ReservationInspectionDetailSerializer(inspection, context=self.context).data
 
 
 # ==============================================================================

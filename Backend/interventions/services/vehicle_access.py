@@ -197,32 +197,34 @@ def _assert_unlock_business_rules(
             http_status=403,
         )
 
-    if reservation.status != Reservation.Status.EN_COURS:
+    if reservation.status not in {
+        Reservation.Status.CONFIRMEE,
+        Reservation.Status.EN_COURS,
+        Reservation.Status.A_CONTROLER,
+    }:
         _raise_vehicle_access_error(
             "INVALID_RESERVATION_STATUS",
-            "La reservation doit etre EN_COURS.",
+            "La reservation doit etre confirmee pour permettre le deverrouillage.",
             http_status=409,
         )
 
-    initial_inspection = _find_initial_inspection(reservation=reservation)
-    if initial_inspection is None:
+    now = timezone.now()
+    unlock_early_tolerance = timedelta(
+        minutes=getattr(settings, "VEHICLE_UNLOCK_EARLY_TOLERANCE_MINUTES", 15)
+    )
+    unlock_available_at = reservation.start_at - unlock_early_tolerance
+
+    if now < unlock_available_at:
         _raise_vehicle_access_error(
-            "INITIAL_INSPECTION_REQUIRED",
-            "Inspection INITIAL introuvable.",
+            "ACCESS_NOT_STARTED",
+            "Le deverrouillage sera disponible 15 minutes avant le debut de la reservation.",
             http_status=409,
         )
 
-    if initial_inspection.status != Inspection.Status.TERMINE:
+    if now > reservation.end_at:
         _raise_vehicle_access_error(
-            "INITIAL_INSPECTION_NOT_COMPLETED",
-            "Inspection INITIAL non terminee.",
-            http_status=409,
-        )
-
-    if _has_blocking_critical_issue(initial_inspection=initial_inspection):
-        _raise_vehicle_access_error(
-            "CRITICAL_ISSUE",
-            "Un probleme critique bloque le deverrouillage.",
+            "ACCESS_EXPIRED",
+            "Le deverrouillage n'est plus autorise apres la fin de la reservation.",
             http_status=409,
         )
 
@@ -268,7 +270,6 @@ def _assert_unlock_business_rules(
             http_status=409,
         )
 
-    now = timezone.now()
     if now < vehicle_access.valid_from:
         _raise_vehicle_access_error(
             "ACCESS_NOT_STARTED",
@@ -287,13 +288,6 @@ def _assert_unlock_business_rules(
         _raise_vehicle_access_error(
             "WRONG_VEHICLE",
             "Vehicule cible invalide pour cette reservation.",
-            http_status=409,
-        )
-
-    if vehicle.status != Vehicle.Status.LOUE:
-        _raise_vehicle_access_error(
-            "VEHICLE_NOT_RENTED",
-            "Le vehicule n'est pas en statut LOUE.",
             http_status=409,
         )
 
@@ -492,10 +486,9 @@ def _lock_vehicle_internal(
             resolved_vehicle = vehicle_locked
 
             if vehicle_access_locked is None:
-                _raise_vehicle_access_error(
-                    "ACCESS_NOT_FOUND",
-                    "Aucun acces vehicule n'est associe a cette reservation.",
-                    http_status=404,
+                vehicle_access_locked = activate_vehicle_access(
+                    reservation=reservation_locked,
+                    requested_by=requested_by,
                 )
 
             resolved_vehicle_access = vehicle_access_locked
@@ -638,10 +631,9 @@ def unlock_vehicle(
             resolved_vehicle = vehicle_locked
 
             if vehicle_access_locked is None:
-                _raise_vehicle_access_error(
-                    "ACCESS_NOT_FOUND",
-                    "Aucun acces vehicule n'est associe a cette reservation.",
-                    http_status=404,
+                vehicle_access_locked = activate_vehicle_access(
+                    reservation=reservation_locked,
+                    requested_by=requested_by,
                 )
 
             resolved_vehicle_access = vehicle_access_locked
@@ -699,9 +691,8 @@ def unlock_vehicle(
 
 
 def _build_validity_window(*, reservation: Reservation) -> tuple:
-    early_tolerance = timedelta(minutes=getattr(settings, "VEHICLE_ACCESS_EARLY_TOLERANCE_MINUTES", 30))
-    late_tolerance = timedelta(minutes=getattr(settings, "VEHICLE_ACCESS_LATE_TOLERANCE_MINUTES", 120))
-    return reservation.start_at - early_tolerance, reservation.end_at + late_tolerance
+    early_tolerance = timedelta(minutes=getattr(settings, "VEHICLE_UNLOCK_EARLY_TOLERANCE_MINUTES", 15))
+    return reservation.start_at - early_tolerance, reservation.end_at
 
 
 def _find_initial_inspection(*, reservation: Reservation) -> Inspection | None:
@@ -807,20 +798,14 @@ def activate_vehicle_access(
         if reservation_locked.vehicle_id != vehicle_locked.id:
             _raise_access_error("VEHICLE_MISMATCH", "Le vehicule de la reservation est incoherent.")
 
-        initial_inspection = _find_initial_inspection(reservation=reservation_locked)
-        if initial_inspection is None:
-            _raise_access_error("INITIAL_INSPECTION_MISSING", "Inspection INITIAL introuvable.")
-
-        if initial_inspection.status != Inspection.Status.TERMINE:
-            _raise_access_error("INITIAL_NOT_COMPLETED", "Inspection INITIAL non terminee.")
-
-        if _has_blocking_critical_issue(initial_inspection=initial_inspection):
-            _raise_access_error("CRITICAL_ISSUE_BLOCKING", "Probleme critique detecte sur l'inspection INITIAL.")
-
-        if reservation_locked.status != Reservation.Status.EN_COURS:
+        if reservation_locked.status not in {
+            Reservation.Status.CONFIRMEE,
+            Reservation.Status.EN_COURS,
+            Reservation.Status.A_CONTROLER,
+        }:
             _raise_access_error(
                 "INVALID_RESERVATION_STATUS",
-                "La reservation doit etre EN_COURS pour activer le droit d'acces.",
+                "La reservation doit etre confirmee pour activer le droit d'acces.",
             )
 
         valid_from, valid_until = _build_validity_window(reservation=reservation_locked)

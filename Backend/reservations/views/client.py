@@ -27,6 +27,7 @@ from reservations.serializers.reservation import (
     ReservationCreateResponseSerializer,
     ReservationDepositRequestSerializer,
     ReservationDepositResponseSerializer,
+    ReservationClientDetailSerializer,
     ReservationListDetailSerializer,
     ReservationPaymentIntentRequestSerializer,
     ReservationPaymentIntentResponseSerializer,
@@ -201,7 +202,7 @@ class ReservationClientListCreateView(generics.ListCreateAPIView):
 
 class ReservationClientDetailView(generics.RetrieveAPIView):
     permission_classes = [IsAuthenticated, IsClient, IsReservationOwner]
-    serializer_class = ReservationListDetailSerializer
+    serializer_class = ReservationClientDetailSerializer
     lookup_field = "id"
     lookup_url_kwarg = "pk"
 
@@ -215,6 +216,8 @@ class ReservationClientDetailView(generics.RetrieveAPIView):
             "vehicle",
             "vehicle__brand",
             "vehicle__category",
+        ).prefetch_related(
+            "inspections__photos",
         )
 
     @extend_schema(

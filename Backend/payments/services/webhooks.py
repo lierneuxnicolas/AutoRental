@@ -15,6 +15,7 @@ from invoicing.services import InvoiceCreationNotAvailable, create_invoice_for_r
 from notifications.services import create_notification
 from common.models import SystemLog
 from common.services import create_system_log
+from interventions.services.vehicle_access import activate_vehicle_access
 from payments.models import Deposit, Payment, StripeEvent
 from reservations.models import Reservation
 from vehicles.models import Vehicle
@@ -473,6 +474,11 @@ def _handle_success(
         reservation.save(update_fields=["status", "confirmed_at", "updated_at"])
     else:
         reservation.save(update_fields=["status", "updated_at"])
+
+    activate_vehicle_access(
+        reservation=reservation,
+        requested_by=reservation.client.user,
+    )
 
     if vehicle.status != Vehicle.Status.RESERVE:
         vehicle.status = Vehicle.Status.RESERVE
