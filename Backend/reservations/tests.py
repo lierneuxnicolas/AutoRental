@@ -2438,6 +2438,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(payment.stripe_payment_intent_id, "pi_pay_123")
 		self.assertEqual(payment.amount, Decimal("88.00"))
 		create_kwargs = mocked_create.call_args.kwargs
+		self.assertEqual(create_kwargs["payment_method_types"], ["card", "bancontact"])
 		self.assertEqual(create_kwargs["metadata"]["reservation_id"], str(reservation.id))
 		self.assertEqual(create_kwargs["metadata"]["user_id"], str(self.client_user_1.id))
 		self.assertEqual(create_kwargs["metadata"]["vehicle_id"], str(reservation.vehicle_id))
@@ -2553,13 +2554,50 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		kwargs = mocked_create.call_args.kwargs
-		expected_key = f"reservation-payment-{reservation.id}-8000"
+		expected_key = f"reservation-payment-v2-{reservation.id}-8000"
 		self.assertEqual(kwargs["idempotency_key"], expected_key)
 		self.assertEqual(kwargs["currency"], "eur")
+		self.assertEqual(kwargs["payment_method_types"], ["card", "bancontact"])
 		self.assertEqual(kwargs["metadata"]["reservation_id"], str(reservation.id))
 		self.assertEqual(kwargs["metadata"]["user_id"], str(self.client_user_1.id))
 		self.assertEqual(kwargs["metadata"]["vehicle_id"], str(reservation.vehicle_id))
 		self.assertEqual(kwargs["metadata"]["insurance_type"], reservation.insurance_type)
+
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.retrieve")
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_existing_payment_intent_with_unwanted_methods_is_not_reused(self, mocked_create, mocked_retrieve):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		Payment.objects.create(
+			reservation=reservation,
+			provider=Payment.Provider.STRIPE,
+			amount=Decimal("80.00"),
+			currency="EUR",
+			status=Payment.Status.EN_ATTENTE,
+			stripe_payment_intent_id="pi_old_methods",
+		)
+
+		mocked_retrieve.return_value = SimpleNamespace(
+			id="pi_old_methods",
+			status="requires_payment_method",
+			client_secret="old_secret",
+			payment_method_types=["card", "link", "klarna"],
+		)
+		mocked_create.return_value = SimpleNamespace(
+			id="pi_new_methods",
+			status="requires_payment_method",
+			client_secret="new_secret",
+		)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["client_secret"], "new_secret")
+		mocked_create.assert_called_once()
+		self.assertEqual(mocked_create.call_args.kwargs["payment_method_types"], ["card", "bancontact"])
 
 	@patch("payments.services.payment_intents.stripe.PaymentIntent.retrieve")
 	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
@@ -2586,6 +2624,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 			id="pi_existing_123",
 			status="requires_payment_method",
 			client_secret="secret_existing",
+			payment_method_types=["card", "bancontact"],
 		)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):

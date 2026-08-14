@@ -18,6 +18,10 @@ from vehicles.models import Vehicle
 from vehicles.services import BOOKABLE_VEHICLE_STATUSES, get_blocking_reservation_statuses
 
 
+ALLOWED_PAYMENT_METHOD_TYPES = ["card", "bancontact"]
+PAYMENT_INTENT_CONFIGURATION_VERSION = "v2"
+
+
 @dataclass(frozen=True)
 class PaymentIntentError(ValueError):
     code: str
@@ -167,7 +171,12 @@ def _recalculate_payable_amount(reservation: Reservation) -> Decimal:
 
 def _build_idempotency_key(*, reservation_id: int, amount: Decimal) -> str:
     amount_version = _amount_to_minor_units(amount)
-    return f"reservation-payment-{reservation_id}-{amount_version}"
+    return f"reservation-payment-{PAYMENT_INTENT_CONFIGURATION_VERSION}-{reservation_id}-{amount_version}"
+
+
+def _matches_allowed_payment_method_types(payment_intent) -> bool:
+    payment_method_types = list(getattr(payment_intent, "payment_method_types", []) or [])
+    return payment_method_types == ALLOWED_PAYMENT_METHOD_TYPES
 
 
 def _find_reusable_payment(*, reservation: Reservation, amount: Decimal) -> Payment | None:
@@ -221,6 +230,7 @@ def _create_payment_intent(*, reservation: Reservation, payment: Payment, amount
         return stripe.PaymentIntent.create(
             amount=_amount_to_minor_units(amount),
             currency="eur",
+            payment_method_types=ALLOWED_PAYMENT_METHOD_TYPES,
             metadata=metadata,
             idempotency_key=_build_idempotency_key(reservation_id=reservation.id, amount=amount),
         )
@@ -276,18 +286,19 @@ def create_or_reuse_payment_intent(
                 )
 
             if _is_reusable_stripe_status(existing_pi.status):
-                reusable_payment.status = _status_from_stripe(existing_pi.status)
-                reusable_payment.amount = payable_amount
-                reusable_payment.currency = "EUR"
-                reusable_payment.save(update_fields=["status", "amount", "currency", "updated_at"])
+                if _matches_allowed_payment_method_types(existing_pi):
+                    reusable_payment.status = _status_from_stripe(existing_pi.status)
+                    reusable_payment.amount = payable_amount
+                    reusable_payment.currency = "EUR"
+                    reusable_payment.save(update_fields=["status", "amount", "currency", "updated_at"])
 
-                reservation_locked.status = Reservation.Status.EN_ATTENTE_PAIEMENT
-                reservation_locked.save(update_fields=["status", "updated_at"])
+                    reservation_locked.status = Reservation.Status.EN_ATTENTE_PAIEMENT
+                    reservation_locked.save(update_fields=["status", "updated_at"])
 
-                return {
-                    "client_secret": getattr(existing_pi, "client_secret", None),
-                    "payment_id": reusable_payment.id,
-                }
+                    return {
+                        "client_secret": getattr(existing_pi, "client_secret", None),
+                        "payment_id": reusable_payment.id,
+                    }
 
         payment = Payment.objects.create(
             reservation=reservation_locked,
