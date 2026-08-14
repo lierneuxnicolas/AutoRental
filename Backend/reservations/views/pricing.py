@@ -11,7 +11,7 @@ from reservations.serializers import PriceSimulationRequestSerializer, PriceSimu
 from reservations.serializers.pricing import pricing_error_to_serializer_error
 from reservations.services import PricingError, calculate_price_simulation
 from vehicles.models import Vehicle
-from vehicles.services import AvailabilityValidationError, is_vehicle_available
+from vehicles.services import AvailabilityValidationError, get_blocking_reservation_statuses, is_vehicle_available
 
 
 ErrorDetailResponseSerializer = inline_serializer(
@@ -44,6 +44,32 @@ def _get_indicative_reservation_queryset():
     return reservation_model.objects.all()
 
 
+def _resolve_reservation_context(payload):
+    reservation_id = payload.get("reservation_id")
+    if reservation_id is None:
+        return None
+
+    reservation_model = apps.get_model("reservations", "Reservation")
+    if reservation_model is None:
+        raise ImproperlyConfigured("The reservations.Reservation model is required for reservation context simulation.")
+
+    reservation = (
+        reservation_model.objects.select_related("vehicle")
+        .filter(pk=reservation_id)
+        .first()
+    )
+    if reservation is None:
+        return "NOT_FOUND"
+
+    if reservation.vehicle_id != payload["vehicle_id"]:
+        return "VEHICLE_MISMATCH"
+
+    if reservation.start_at != payload["start_at"] or reservation.end_at != payload["end_at"]:
+        return "PERIOD_MISMATCH"
+
+    return reservation
+
+
 class PriceSimulationView(APIView):
     permission_classes = [AllowAny]
 
@@ -68,8 +94,39 @@ class PriceSimulationView(APIView):
 
         payload = request_serializer.validated_data
 
+        try:
+            reservation_context = _resolve_reservation_context(payload)
+        except ImproperlyConfigured:
+            return Response(
+                {
+                    "detail": (
+                        "La verification de disponibilite est temporairement indisponible. "
+                        "Merci de reessayer plus tard."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if reservation_context == "NOT_FOUND":
+            return Response(
+                {"detail": "La reservation de contexte est introuvable."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if reservation_context == "VEHICLE_MISMATCH":
+            return Response(
+                {"detail": "La reservation de contexte ne correspond pas au vehicule demande."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if reservation_context == "PERIOD_MISMATCH":
+            return Response(
+                {"detail": "La reservation de contexte ne correspond pas a la periode demandee."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         vehicle = (
-            Vehicle.objects.select_related("category")
+            Vehicle.objects.select_related("category", "brand")
             .filter(pk=payload["vehicle_id"], is_active=True)
             .first()
         )
@@ -85,7 +142,7 @@ class PriceSimulationView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if vehicle.status not in (Vehicle.Status.DISPONIBLE,):
+        if reservation_context is None and vehicle.status not in (Vehicle.Status.DISPONIBLE,):
             return Response(
                 {"detail": "Le vehicule n'est pas reservable dans son statut actuel."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -94,12 +151,27 @@ class PriceSimulationView(APIView):
         # Availability stays indicative at simulation step and will be rechecked later.
         try:
             reservation_queryset = _get_indicative_reservation_queryset()
-            is_available = is_vehicle_available(
-                vehicle=vehicle,
-                start=payload["start_at"],
-                end=payload["end_at"],
-                reservation_queryset=reservation_queryset,
-            )
+            if reservation_context is not None:
+                reservation_queryset = reservation_queryset.exclude(pk=reservation_context.pk)
+                overlap_exists = reservation_queryset.filter(
+                    vehicle_id=vehicle.pk,
+                    status__in=get_blocking_reservation_statuses(),
+                    start_at__lt=payload["end_at"],
+                    end_at__gt=payload["start_at"],
+                ).exists()
+                is_available = (
+                    vehicle.is_active
+                    and vehicle.brand.is_active
+                    and vehicle.category.is_active
+                    and not overlap_exists
+                )
+            else:
+                is_available = is_vehicle_available(
+                    vehicle=vehicle,
+                    start=payload["start_at"],
+                    end=payload["end_at"],
+                    reservation_queryset=reservation_queryset,
+                )
         except ImproperlyConfigured:
             return Response(
                 {
@@ -125,11 +197,15 @@ class PriceSimulationView(APIView):
             )
 
         try:
+            effective_insurance_type = payload.get("insurance_type")
+            if effective_insurance_type is None and reservation_context is not None:
+                effective_insurance_type = reservation_context.insurance_type
+
             pricing_result = calculate_price_simulation(
                 vehicle=vehicle,
                 start_at=payload["start_at"],
                 end_at=payload["end_at"],
-                insurance_type=payload.get("insurance_type", "STANDARD"),
+                insurance_type=effective_insurance_type or "STANDARD",
             )
         except PricingError as exc:
             error = pricing_error_to_serializer_error(exc)

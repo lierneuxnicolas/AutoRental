@@ -8,11 +8,12 @@ from reservations.services.pricing import PricingError
 from vehicles.models import Vehicle
 
 
-ALLOWED_REQUEST_FIELDS = {"vehicle_id", "start_at", "end_at", "insurance_type"}
+ALLOWED_REQUEST_FIELDS = {"vehicle_id", "start_at", "end_at", "insurance_type", "reservation_id"}
 
 
 class PriceSimulationRequestSerializer(serializers.Serializer):
     vehicle_id = serializers.IntegerField(required=True)
+    reservation_id = serializers.IntegerField(required=False)
     start_at = serializers.DateTimeField(
         required=True,
         error_messages={
@@ -30,7 +31,6 @@ class PriceSimulationRequestSerializer(serializers.Serializer):
     insurance_type = serializers.ChoiceField(
         choices=["STANDARD", "DUO", "OMNIUM"],
         required=False,
-        default="STANDARD",
     )
 
     @staticmethod

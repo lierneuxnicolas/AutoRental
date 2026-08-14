@@ -432,6 +432,16 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 	def setUp(self):
 		self.client_api = APIClient()
 		self.url = reverse("reservations:price-simulation")
+		roles = ensure_roles()
+		self.client_user = create_user(
+			email="simulation.endpoint.client@example.com",
+			password="Pass1234!",
+			role=roles[Role.Code.CLIENT],
+		)
+		self.client_profile = ClientProfile.objects.create(
+			user=self.client_user,
+			profile_status=ClientProfile.ProfileStatus.VALIDE,
+		)
 
 	def _payload(self, *, vehicle_id=None, start_at=None, end_at=None, **extra):
 		start = start_at or (timezone.now() + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
@@ -531,6 +541,94 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertIn("statut", response.data["detail"].lower())
+
+	def test_simulation_with_reservation_context_allows_reserved_vehicle(self):
+		start_at, end_at = self._future_period(duration_hours=2)
+		reservation = Reservation.objects.create(
+			client=self.client_profile,
+			vehicle=self.vehicle_hybrid,
+			start_at=start_at,
+			end_at=end_at,
+			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+			rental_amount=Decimal("24.00"),
+			insurance_type=Reservation.InsuranceType.STANDARD,
+			deposit_amount=Decimal("500.00"),
+		)
+		self.vehicle_hybrid.status = Vehicle.Status.RESERVE
+		self.vehicle_hybrid.save(update_fields=["status"])
+
+		response = self.client_api.post(
+			self.url,
+			self._payload(
+				vehicle_id=self.vehicle_hybrid.id,
+				start_at=start_at,
+				end_at=end_at,
+				reservation_id=reservation.id,
+				insurance_type="STANDARD",
+			),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["vehicle_id"], self.vehicle_hybrid.id)
+		self.assertEqual(response.data["insurance_type"], "STANDARD")
+
+	def test_simulation_with_reservation_context_rejects_mismatched_period(self):
+		start_at, end_at = self._future_period(duration_hours=2)
+		reservation = Reservation.objects.create(
+			client=self.client_profile,
+			vehicle=self.vehicle_hybrid,
+			start_at=start_at,
+			end_at=end_at,
+			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+			rental_amount=Decimal("24.00"),
+			insurance_type=Reservation.InsuranceType.STANDARD,
+			deposit_amount=Decimal("500.00"),
+		)
+
+		response = self.client_api.post(
+			self.url,
+			self._payload(
+				vehicle_id=self.vehicle_hybrid.id,
+				start_at=start_at + timedelta(hours=1),
+				end_at=end_at + timedelta(hours=1),
+				reservation_id=reservation.id,
+			),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("periode", response.data["detail"].lower())
+
+	def test_simulation_with_reservation_context_uses_reservation_insurance_if_missing(self):
+		start_at, end_at = self._future_period(duration_hours=26)
+		reservation = Reservation.objects.create(
+			client=self.client_profile,
+			vehicle=self.vehicle_hybrid,
+			start_at=start_at,
+			end_at=end_at,
+			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+			rental_amount=Decimal("100.00"),
+			insurance_type=Reservation.InsuranceType.DUO,
+			deposit_amount=Decimal("500.00"),
+		)
+		self.vehicle_hybrid.status = Vehicle.Status.RESERVE
+		self.vehicle_hybrid.save(update_fields=["status"])
+
+		response = self.client_api.post(
+			self.url,
+			self._payload(
+				vehicle_id=self.vehicle_hybrid.id,
+				start_at=start_at,
+				end_at=end_at,
+				reservation_id=reservation.id,
+			),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["insurance_type"], "DUO")
+		self.assertEqual(Decimal(str(response.data["insurance_amount"])), Decimal("16.00"))
 
 	@patch("reservations.views.pricing.is_vehicle_available", return_value=False)
 	def test_unavailable_vehicle_returns_400_and_indicative_message(self, mock_is_available):
