@@ -8,7 +8,8 @@ from django.utils import timezone
 from accounts.models import Role, User
 from inspections.models import Damage, Inspection, InspectionPhoto
 from inspections.services.departure import DepartureInspectionError
-from interventions.services.vehicle_access import lock_and_revoke_after_return
+from interventions.models import VehicleAccess
+from interventions.services.vehicle_access import VehicleAccessError, lock_and_revoke_after_return
 from notifications.services import create_notification
 from payments.services import mark_authorized_deposit_for_verification
 from reservations.models import Reservation
@@ -191,6 +192,14 @@ def _integrate_intervention_for_major_or_critical_damage(*, inspection: Inspecti
     """Integration hook for intervention creation when workflows are implemented."""
 
 
+def _is_vehicle_already_locked(*, reservation: Reservation) -> bool:
+    access = VehicleAccess.objects.filter(reservation=reservation).first()
+    if access is None:
+        return False
+
+    return access.lock_state == VehicleAccess.LockState.LOCKED
+
+
 def create_return_inspection(*, reservation: Reservation, requested_by) -> Inspection:
     _assert_request_context(reservation=reservation, requested_by=requested_by)
 
@@ -271,13 +280,16 @@ def complete_return_inspection(
             ]
         )
 
-        reservation_locked.status = Reservation.Status.A_CONTROLER
-        reservation_locked.save(update_fields=["status", "updated_at"])
-
-        if mileage >= vehicle_locked.mileage:
-            vehicle_locked.mileage = mileage
-        vehicle_locked.status = Vehicle.Status.A_CONTROLER
-        vehicle_locked.save(update_fields=["status", "mileage", "updated_at"])
+        vehicle_already_locked = _is_vehicle_already_locked(reservation=reservation_locked)
+        if not vehicle_already_locked:
+            try:
+                lock_and_revoke_after_return(
+                    reservation=reservation_locked,
+                    requested_by=requested_by,
+                )
+            except VehicleAccessError as exc:
+                if exc.code != "ALREADY_LOCKED":
+                    raise
 
         has_major_or_critical_damage = inspection_locked.damages.filter(
             severity__in=[Damage.Severity.MAJEUR, Damage.Severity.CRITIQUE]
@@ -285,17 +297,20 @@ def complete_return_inspection(
         if has_major_or_critical_damage:
             _integrate_intervention_for_major_or_critical_damage(inspection=inspection_locked)
 
-        mark_authorized_deposit_for_verification(reservation=reservation_locked)
+        reservation_locked.status = Reservation.Status.TERMINEE
+        reservation_locked.save(update_fields=["status", "updated_at"])
 
-        lock_and_revoke_after_return(
-            reservation=reservation_locked,
-            requested_by=requested_by,
-        )
+        if mileage >= vehicle_locked.mileage:
+            vehicle_locked.mileage = mileage
+        vehicle_locked.status = Vehicle.Status.DISPONIBLE
+        vehicle_locked.save(update_fields=["status", "mileage", "updated_at"])
+
+        mark_authorized_deposit_for_verification(reservation=reservation_locked)
 
         client_notification_message = (
             f"L'inspection de retour pour la reservation {reservation_locked.reference} est terminee."
         )
-        manager_notification_message = "Un véhicule retourné est en attente de vérification."
+        manager_notification_message = "Un véhicule restitué est en attente de vérification."
         transaction.on_commit(
             lambda: _notify_once(
                 user=reservation_locked.client.user,

@@ -16,7 +16,7 @@ from accounts.models import Role
 from accounts.tests.utils import create_user, ensure_roles
 from accounts.models import ClientProfile
 from inspections.models import Damage, Inspection, InspectionPhoto
-from interventions.models import VehicleAccess
+from interventions.models import LockingLog, VehicleAccess
 from notifications.models import Notification
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
@@ -1109,8 +1109,8 @@ class ReturnInspectionFlowTests(TestCase):
         self.assertEqual(final_inspection.energy_level_percent, 70)
         self.assertEqual(final_inspection.comments, "Retour effectue")
         self.assertIsNotNone(final_inspection.completed_at)
-        self.assertEqual(self.reservation.status, Reservation.Status.A_CONTROLER)
-        self.assertEqual(self.vehicle.status, Vehicle.Status.A_CONTROLER)
+        self.assertEqual(self.reservation.status, Reservation.Status.TERMINEE)
+        self.assertEqual(self.vehicle.status, Vehicle.Status.DISPONIBLE)
         self.assertEqual(self.vehicle.mileage, 1300)
 
         deposit = Deposit.objects.get(reservation=self.reservation)
@@ -1141,7 +1141,63 @@ class ReturnInspectionFlowTests(TestCase):
             related_object_type="Inspection",
             related_object_id=final_inspection.id,
         )
-        self.assertEqual(manager_notification.message, "Un véhicule retourné est en attente de vérification.")
+        self.assertEqual(manager_notification.message, "Un véhicule restitué est en attente de vérification.")
+
+    def test_completes_return_inspection_when_vehicle_already_locked(self):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.EN_COURS,
+        )
+        self._create_required_photos(final_inspection)
+        Deposit.objects.create(
+            reservation=self.reservation,
+            mode=Deposit.Mode.STRIPE_TEST,
+            amount=Decimal("500.00"),
+            currency="EUR",
+            status=Deposit.Status.AUTORISEE,
+            authorized_at=timezone.now(),
+            stripe_payment_intent_id="pi_dep_return_002",
+        )
+        now = timezone.now()
+        VehicleAccess.objects.create(
+            reservation=self.reservation,
+            vehicle=self.vehicle,
+            client=self.client_user,
+            status=VehicleAccess.Status.ACTIVE,
+            lock_state=VehicleAccess.LockState.LOCKED,
+            valid_from=now - timedelta(hours=1),
+            valid_until=now + timedelta(hours=1),
+            is_active=True,
+        )
+        self.api.force_authenticate(self.client_user)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.api.post(
+                self._complete_url(final_inspection.id),
+                {"mileage": 1310, "energy_level_percent": 66, "comments": "Retour avec vehicule deja verrouille"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        final_inspection.refresh_from_db()
+        self.reservation.refresh_from_db()
+        self.vehicle.refresh_from_db()
+
+        self.assertEqual(final_inspection.status, Inspection.Status.TERMINE)
+        self.assertEqual(self.reservation.status, Reservation.Status.TERMINEE)
+        self.assertEqual(self.vehicle.status, Vehicle.Status.DISPONIBLE)
+
+        access = VehicleAccess.objects.get(reservation=self.reservation)
+        self.assertEqual(access.lock_state, VehicleAccess.LockState.LOCKED)
+
+        self.assertFalse(
+            LockingLog.objects.filter(
+                reservation=self.reservation,
+                action=LockingLog.Action.LOCK,
+                result=LockingLog.Result.SUCCESS,
+            ).exists()
+        )
 
     def test_refuses_second_completion_without_duplicate_notifications(self):
         final_inspection = Inspection.objects.create(
