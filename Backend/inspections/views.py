@@ -28,6 +28,15 @@ from reservations.models import Reservation
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou ressource introuvable.")
+UPLOAD_PHOTO_TYPES = [
+	InspectionPhoto.PhotoType.AVANT,
+	InspectionPhoto.PhotoType.ARRIERE,
+	InspectionPhoto.PhotoType.COTE_GAUCHE,
+	InspectionPhoto.PhotoType.COTE_DROIT,
+	InspectionPhoto.PhotoType.INTERIEUR,
+	InspectionPhoto.PhotoType.TABLEAU_DE_BORD,
+	InspectionPhoto.PhotoType.AUTRE,
+]
 
 
 class InspectionSummarySerializer(serializers.ModelSerializer):
@@ -209,7 +218,7 @@ class InspectionPhotoCreateView(generics.GenericAPIView):
 					"file": {"type": "string", "format": "binary"},
 					"photo_type": {
 						"type": "string",
-						"enum": [choice[0] for choice in InspectionPhoto.PhotoType.choices],
+						"enum": UPLOAD_PHOTO_TYPES,
 					},
 					"position": {"type": "integer", "minimum": 0},
 				},

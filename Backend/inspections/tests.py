@@ -459,6 +459,13 @@ class InspectionMediaUploadTests(TestCase):
     def _damage_url(self, inspection_id):
         return reverse("inspections:inspection-damages-create", kwargs={"pk": inspection_id})
 
+    def _upload_photo(self, *, photo_type, position=None, name="photo.jpg"):
+        payload = {"file": _create_test_image_file(name, "JPEG", "image/jpeg"), "photo_type": photo_type}
+        if position is not None:
+            payload["position"] = position
+
+        return self.api.post(self._photo_url(self.initial_inspection.id), payload, format="multipart")
+
     def test_add_jpg_photo(self):
         self.api.force_authenticate(self.client_user)
         response = self.api.post(
@@ -486,6 +493,57 @@ class InspectionMediaUploadTests(TestCase):
             format="multipart",
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_add_all_required_photo_slots(self):
+        self.api.force_authenticate(self.client_user)
+
+        cases = [
+            ("AVANT", InspectionPhoto.PhotoType.AVANT, None, 0),
+            ("ARRIERE", InspectionPhoto.PhotoType.ARRIERE, None, 0),
+            ("COTE_GAUCHE", InspectionPhoto.PhotoType.COTE_GAUCHE, None, 0),
+            ("COTE_DROIT", InspectionPhoto.PhotoType.COTE_DROIT, None, 0),
+            ("TABLEAU_DE_BORD", InspectionPhoto.PhotoType.TABLEAU_DE_BORD, None, 0),
+            ("INTERIEUR_AVANT", InspectionPhoto.PhotoType.INTERIEUR, 1, 1),
+            ("INTERIEUR_ARRIERE", InspectionPhoto.PhotoType.INTERIEUR, 2, 2),
+            ("AUTRE", InspectionPhoto.PhotoType.AUTRE, 1, 1),
+        ]
+
+        for label, photo_type, position, expected_position in cases:
+            with self.subTest(label=label):
+                response = self._upload_photo(photo_type=photo_type, position=position, name=f"{label.lower()}.jpg")
+                self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+                self.assertEqual(response.data["photo_type"], photo_type)
+                self.assertEqual(response.data["position"], expected_position)
+
+                self.assertTrue(
+                    InspectionPhoto.objects.filter(
+                        inspection=self.initial_inspection,
+                        photo_type=photo_type,
+                        position=expected_position,
+                    ).exists()
+                )
+
+        self.assertEqual(InspectionPhoto.objects.filter(inspection=self.initial_inspection).count(), len(cases))
+
+    def test_upload_replaces_existing_slot_photo(self):
+        self.api.force_authenticate(self.client_user)
+
+        first_response = self._upload_photo(photo_type=InspectionPhoto.PhotoType.INTERIEUR, position=1, name="first.jpg")
+        self.assertEqual(first_response.status_code, status.HTTP_201_CREATED)
+
+        first_photo = InspectionPhoto.objects.get(pk=first_response.data["id"])
+        first_file_name = first_photo.file.name
+
+        second_response = self._upload_photo(photo_type=InspectionPhoto.PhotoType.INTERIEUR, position=1, name="second.jpg")
+        self.assertEqual(second_response.status_code, status.HTTP_201_CREATED)
+
+        self.assertEqual(InspectionPhoto.objects.filter(inspection=self.initial_inspection, photo_type=InspectionPhoto.PhotoType.INTERIEUR, position=1).count(), 1)
+
+        first_photo.refresh_from_db()
+        self.assertEqual(first_photo.id, second_response.data["id"])
+        self.assertNotEqual(first_file_name, first_photo.file.name)
+        self.assertEqual(second_response.data["photo_type"], InspectionPhoto.PhotoType.INTERIEUR)
+        self.assertEqual(second_response.data["position"], 1)
 
     def test_pdf_photo_rejected(self):
         self.api.force_authenticate(self.client_user)
