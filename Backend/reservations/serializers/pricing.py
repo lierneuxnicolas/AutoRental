@@ -33,6 +33,20 @@ class PriceSimulationRequestSerializer(serializers.Serializer):
         default="STANDARD",
     )
 
+    @staticmethod
+    def _validate_hour_precision(value):
+        if value.minute != 0:
+            raise serializers.ValidationError(
+                "Les heures de reservation doivent etre a l'heure pleine (minutes = 00)."
+            )
+        return value
+
+    def validate_start_at(self, value):
+        return self._validate_hour_precision(value)
+
+    def validate_end_at(self, value):
+        return self._validate_hour_precision(value)
+
     def to_internal_value(self, data):
         if hasattr(data, "keys"):
             unexpected_fields = sorted(set(data.keys()) - ALLOWED_REQUEST_FIELDS)

@@ -38,6 +38,20 @@ class VehicleAvailabilityQuerySerializer(serializers.Serializer):
 		}
 	)
 
+	@staticmethod
+	def _validate_hour_precision(value):
+		if value.minute != 0:
+			raise serializers.ValidationError(
+				"Les heures de reservation doivent etre a l'heure pleine (minutes = 00)."
+			)
+		return value
+
+	def validate_start(self, value):
+		return self._validate_hour_precision(value)
+
+	def validate_end(self, value):
+		return self._validate_hour_precision(value)
+
 	def validate(self, attrs):
 		minimum_hours = self.context.get("minimum_hours")
 		try:
