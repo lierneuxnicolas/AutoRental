@@ -86,7 +86,6 @@ class InspectionPhoto(models.Model):
 		PhotoType.ARRIERE,
 		PhotoType.COTE_GAUCHE,
 		PhotoType.COTE_DROIT,
-		PhotoType.INTERIEUR,
 		PhotoType.TABLEAU_DE_BORD,
 	}
 
@@ -111,7 +110,7 @@ class InspectionPhoto(models.Model):
 				name="insp_photo_position_gte_0",
 			),
 			models.CheckConstraint(
-				condition=Q(photo_type__in=["DOMMAGE", "AUTRE"]) | Q(position=0),
+				condition=Q(photo_type__in=["DOMMAGE", "AUTRE", "INTERIEUR"]) | Q(position=0),
 				name="insp_photo_single_views_pos0",
 			),
 			models.UniqueConstraint(

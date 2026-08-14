@@ -5,6 +5,7 @@ import uuid
 
 from django.conf import settings
 from django.db import transaction
+from django.core.files.storage import default_storage
 from PIL import Image, UnidentifiedImageError
 from rest_framework import serializers
 
@@ -15,6 +16,15 @@ from reservations.models import Reservation
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+UPLOAD_PHOTO_TYPES = {
+	InspectionPhoto.PhotoType.AVANT,
+	InspectionPhoto.PhotoType.ARRIERE,
+	InspectionPhoto.PhotoType.COTE_GAUCHE,
+	InspectionPhoto.PhotoType.COTE_DROIT,
+	InspectionPhoto.PhotoType.INTERIEUR,
+	InspectionPhoto.PhotoType.TABLEAU_DE_BORD,
+	InspectionPhoto.PhotoType.AUTRE,
+}
 MANDATORY_PHOTO_TYPES = [
 	InspectionPhoto.PhotoType.AVANT,
 	InspectionPhoto.PhotoType.ARRIERE,
@@ -88,6 +98,32 @@ class InspectionPhotoCreateSerializer(serializers.ModelSerializer):
 		inspection = self.context["inspection"]
 		requested_by = self.context["requested_by"]
 		ensure_inspection_is_photo_eligible(inspection=inspection, requested_by=requested_by)
+
+		photo_type = attrs.get("photo_type")
+		position = attrs.get("position")
+
+		if photo_type not in UPLOAD_PHOTO_TYPES:
+			raise serializers.ValidationError({"photo_type": "Type de photo non autorise pour cet upload."})
+
+		if photo_type in {
+			InspectionPhoto.PhotoType.AVANT,
+			InspectionPhoto.PhotoType.ARRIERE,
+			InspectionPhoto.PhotoType.COTE_GAUCHE,
+			InspectionPhoto.PhotoType.COTE_DROIT,
+			InspectionPhoto.PhotoType.TABLEAU_DE_BORD,
+		}:
+			if position not in (None, 0):
+				raise serializers.ValidationError({"position": "La position doit etre 0 pour ce type de photo."})
+			attrs["position"] = 0
+		elif photo_type == InspectionPhoto.PhotoType.INTERIEUR:
+			if position not in (1, 2):
+				raise serializers.ValidationError({"position": "La position doit etre 1 ou 2 pour INTERIEUR."})
+		elif photo_type == InspectionPhoto.PhotoType.AUTRE:
+			if position != 1:
+				raise serializers.ValidationError({"position": "La position doit etre 1 pour AUTRE."})
+		else:
+			raise serializers.ValidationError({"photo_type": "Type de photo non autorise pour cet upload."})
+
 		return attrs
 
 	def validate_file(self, uploaded_file):
@@ -134,12 +170,28 @@ class InspectionPhotoCreateSerializer(serializers.ModelSerializer):
 		uploaded_file.name = f"{uuid.uuid4().hex}{safe_ext}"
 
 		position = validated_data.get("position", 0)
-		if validated_data["photo_type"] in InspectionPhoto.SINGLE_VIEW_TYPES:
-			position = 0
+		photo_type = validated_data["photo_type"]
+		existing_photo = InspectionPhoto.objects.filter(
+			inspection=inspection,
+			photo_type=photo_type,
+			position=position,
+		).first()
+
+		if existing_photo is not None:
+			old_file_name = existing_photo.file.name
+			existing_photo.file = uploaded_file
+			existing_photo.save(update_fields=["file"])
+
+			def _delete_previous_file(previous_file_name: str = old_file_name) -> None:
+				if previous_file_name:
+					default_storage.delete(previous_file_name)
+
+			transaction.on_commit(_delete_previous_file)
+			return existing_photo
 
 		return InspectionPhoto.objects.create(
 			inspection=inspection,
-			photo_type=validated_data["photo_type"],
+			photo_type=photo_type,
 			file=uploaded_file,
 			position=position,
 		)
