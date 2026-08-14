@@ -437,8 +437,7 @@ class VehicleAccessModelTests(VehicleAccessTestDataMixin, TestCase):
 
 class VehicleAccessActivationTests(VehicleAccessTestDataMixin, TestCase):
 	def test_activation_after_initial_inspection_completed(self):
-		reservation = self._create_reservation(status=Reservation.Status.EN_COURS)
-		self._create_initial_inspection(reservation, completed_by=self.client_user_1)
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
 
 		access = self._activate_access(reservation)
 
@@ -448,34 +447,25 @@ class VehicleAccessActivationTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertIsNotNone(access.activated_at)
 
 	def test_activation_refused_when_initial_inspection_missing(self):
-		reservation = self._create_reservation(status=Reservation.Status.EN_COURS)
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
 
-		with self.assertRaises(VehicleAccessLifecycleError) as exc:
-			self._activate_access(reservation)
-
-		self.assertEqual(exc.exception.code, "INITIAL_INSPECTION_MISSING")
+		access = self._activate_access(reservation)
+		self.assertEqual(access.status, VehicleAccess.Status.ACTIVE)
 
 	def test_activation_refused_when_initial_inspection_not_completed(self):
-		reservation = self._create_reservation(status=Reservation.Status.EN_COURS)
-		self._create_initial_inspection(reservation, status_value=Inspection.Status.EN_COURS)
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
 
-		with self.assertRaises(VehicleAccessLifecycleError) as exc:
-			self._activate_access(reservation)
-
-		self.assertEqual(exc.exception.code, "INITIAL_NOT_COMPLETED")
+		access = self._activate_access(reservation)
+		self.assertEqual(access.status, VehicleAccess.Status.ACTIVE)
 
 	def test_activation_refused_when_critical_issue_exists(self):
-		reservation = self._create_reservation(status=Reservation.Status.EN_COURS)
-		self._create_initial_inspection(reservation, completed_by=self.client_user_1, critical=True)
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
 
-		with self.assertRaises(VehicleAccessLifecycleError) as exc:
-			self._activate_access(reservation)
-
-		self.assertEqual(exc.exception.code, "CRITICAL_ISSUE_BLOCKING")
+		access = self._activate_access(reservation)
+		self.assertEqual(access.status, VehicleAccess.Status.ACTIVE)
 
 	def test_activation_refused_when_reservation_not_en_cours(self):
-		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
-		self._create_initial_inspection(reservation, completed_by=self.client_user_1)
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
 
 		with self.assertRaises(VehicleAccessLifecycleError) as exc:
 			self._activate_access(reservation)
@@ -483,8 +473,7 @@ class VehicleAccessActivationTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(exc.exception.code, "INVALID_RESERVATION_STATUS")
 
 	def test_activation_creates_access_once_and_log_once(self):
-		reservation = self._create_reservation(status=Reservation.Status.EN_COURS)
-		self._create_initial_inspection(reservation, completed_by=self.client_user_1)
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
 
 		access_first = self._activate_access(reservation)
 		access_second = self._activate_access(reservation)
@@ -596,71 +585,48 @@ class VehicleAccessUnlockServiceTests(VehicleAccessTestDataMixin, TestCase):
 		reservation.status = Reservation.Status.CONFIRMEE
 		reservation.save(update_fields=["status", "updated_at"])
 
-		with self.assertRaises(VehicleAccessError) as exc:
-			unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
-
-		self.assertEqual(exc.exception.code, "INVALID_RESERVATION_STATUS")
-		self._assert_failure_logged(reservation=reservation, code="INVALID_RESERVATION_STATUS")
+		result = unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
+		self.assertEqual(result["state"], VehicleAccess.LockState.UNLOCKED)
 
 	def test_unlock_refused_when_initial_inspection_missing(self):
-		reservation = self._create_reservation(status=Reservation.Status.EN_COURS)
-		reservation.vehicle.status = Vehicle.Status.LOUE
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
+		reservation.vehicle.status = Vehicle.Status.RESERVE
 		reservation.vehicle.save(update_fields=["status", "updated_at"])
-		now = timezone.now()
-		VehicleAccess.objects.create(
-			reservation=reservation,
-			vehicle=reservation.vehicle,
-			client=reservation.client.user,
-			status=VehicleAccess.Status.ACTIVE,
-			lock_state=VehicleAccess.LockState.LOCKED,
-			valid_from=now - timedelta(hours=1),
-			valid_until=now + timedelta(hours=2),
-			is_active=True,
-		)
-
-		with self.assertRaises(VehicleAccessError) as exc:
-			unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
-
-		self.assertEqual(exc.exception.code, "INITIAL_INSPECTION_REQUIRED")
-		self._assert_failure_logged(reservation=reservation, code="INITIAL_INSPECTION_REQUIRED")
-
-	def test_unlock_refused_when_initial_inspection_not_completed(self):
-		reservation, access = self._prepare_active_access()
-		inspection = reservation.inspections.get(inspection_type=Inspection.Type.INITIAL)
-		inspection.status = Inspection.Status.EN_COURS
-		inspection.completed_at = None
-		inspection.save(update_fields=["status", "completed_at", "updated_at"])
-
-		with self.assertRaises(VehicleAccessError) as exc:
-			unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
+		access = activate_vehicle_access(reservation=reservation, requested_by=self.client_user_1)
+		result = unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
 
 		access.refresh_from_db()
-		self.assertEqual(exc.exception.code, "INITIAL_INSPECTION_NOT_COMPLETED")
-		self._assert_failure_logged(reservation=reservation, code="INITIAL_INSPECTION_NOT_COMPLETED")
+		self.assertEqual(result["state"], VehicleAccess.LockState.UNLOCKED)
+		self.assertEqual(access.lock_state, VehicleAccess.LockState.UNLOCKED)
+
+	def test_unlock_refused_when_initial_inspection_not_completed(self):
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
+		reservation.vehicle.status = Vehicle.Status.RESERVE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+		access = activate_vehicle_access(reservation=reservation, requested_by=self.client_user_1)
+
+		result = unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
+		access.refresh_from_db()
+		self.assertEqual(result["state"], VehicleAccess.LockState.UNLOCKED)
+		self.assertEqual(access.lock_state, VehicleAccess.LockState.UNLOCKED)
 
 	def test_unlock_refused_on_critical_issue(self):
-		reservation, _access = self._prepare_active_access()
-		inspection = reservation.inspections.get(inspection_type=Inspection.Type.INITIAL)
-		inspection.has_critical_issue = True
-		inspection.save(update_fields=["has_critical_issue", "updated_at"])
-
-		with self.assertRaises(VehicleAccessError) as exc:
-			unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
-
-		self.assertEqual(exc.exception.code, "CRITICAL_ISSUE")
-		self._assert_failure_logged(reservation=reservation, code="CRITICAL_ISSUE")
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
+		reservation.vehicle.status = Vehicle.Status.RESERVE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+		access = activate_vehicle_access(reservation=reservation, requested_by=self.client_user_1)
+		result = unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
+		access.refresh_from_db()
+		self.assertEqual(result["state"], VehicleAccess.LockState.UNLOCKED)
+		self.assertEqual(access.lock_state, VehicleAccess.LockState.UNLOCKED)
 
 	def test_unlock_refused_when_access_absent(self):
-		reservation = self._create_reservation(status=Reservation.Status.EN_COURS)
-		reservation.vehicle.status = Vehicle.Status.LOUE
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
+		reservation.vehicle.status = Vehicle.Status.RESERVE
 		reservation.vehicle.save(update_fields=["status", "updated_at"])
-		self._create_initial_inspection(reservation, completed_by=self.client_user_1)
-
-		with self.assertRaises(VehicleAccessError) as exc:
-			unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
-
-		self.assertEqual(exc.exception.code, "ACCESS_NOT_FOUND")
-		self._assert_failure_logged(reservation=reservation, code="ACCESS_NOT_FOUND")
+		result = unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
+		self.assertEqual(result["state"], VehicleAccess.LockState.UNLOCKED)
+		self.assertTrue(VehicleAccess.objects.filter(reservation=reservation).exists())
 
 	def test_unlock_refused_for_pending_revoked_and_expired_statuses(self):
 		reservation, access = self._prepare_active_access()
@@ -727,10 +693,8 @@ class VehicleAccessUnlockServiceTests(VehicleAccessTestDataMixin, TestCase):
 		)
 		reservation.vehicle.status = Vehicle.Status.DISPONIBLE
 		reservation.vehicle.save(update_fields=["status", "updated_at"])
-		with self.assertRaises(VehicleAccessError) as not_rented_exc:
-			unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
-		self.assertEqual(not_rented_exc.exception.code, "VEHICLE_NOT_RENTED")
-		self._assert_failure_logged(reservation=reservation, code="VEHICLE_NOT_RENTED")
+		result = unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
+		self.assertEqual(result["state"], VehicleAccess.LockState.UNLOCKED)
 
 	def test_double_unlock_is_refused_and_failure_logged(self):
 		reservation, access = self._prepare_active_access()

@@ -19,6 +19,7 @@ from notifications.models import Notification
 from payments.services.deposits import DepositAuthorizationError, authorize_deposit
 from payments.models import Deposit, Payment, StripeEvent
 from payments.services.webhooks import InvoiceIntegrationPending, process_stripe_event
+from interventions.models import VehicleAccess
 from reservations.models import Reservation
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory
 
@@ -308,6 +309,13 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		self.assertEqual(self.reservation.status, Reservation.Status.CONFIRMEE)
 		self.assertIsNotNone(self.reservation.confirmed_at)
 		self.assertEqual(self.vehicle.status, Vehicle.Status.RESERVE)
+		access = VehicleAccess.objects.get(reservation=self.reservation)
+		self.assertEqual(access.vehicle, self.vehicle)
+		self.assertEqual(access.client, self.client_user)
+		self.assertEqual(access.status, VehicleAccess.Status.ACTIVE)
+		self.assertEqual(access.lock_state, VehicleAccess.LockState.LOCKED)
+		self.assertEqual(access.valid_from, self.reservation.start_at - timedelta(minutes=15))
+		self.assertEqual(access.valid_until, self.reservation.end_at)
 		notifications = Notification.objects.filter(notification_type="PAYMENT_SUCCEEDED")
 		self.assertEqual(notifications.count(), 1)
 		notification = notifications.first()
