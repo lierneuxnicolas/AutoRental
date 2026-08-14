@@ -968,8 +968,11 @@ class VehicleAvailableEndpointTests(VehicleTestDataMixin, TestCase):
 	def setUp(self):
 		self.client_api = APIClient()
 
+	def _full_hour(self, dt):
+		return dt.replace(minute=0, second=0, microsecond=0)
+
 	def _availability_params(self, *, start=None, end=None):
-		start_dt = start or (timezone.now() + timedelta(days=1, hours=1))
+		start_dt = start or self._full_hour(timezone.now() + timedelta(days=1, hours=1))
 		end_dt = end or (start_dt + timedelta(hours=3))
 		return {
 			"start": start_dt.isoformat(),
@@ -1000,7 +1003,7 @@ class VehicleAvailableEndpointTests(VehicleTestDataMixin, TestCase):
 	@patch("vehicles.views.public.get_available_vehicles")
 	def test_available_endpoint_returns_only_expected_public_vehicles(self, mocked_get_available_vehicles):
 		mocked_get_available_vehicles.side_effect = self._fake_get_available_vehicles
-		start_dt = timezone.now() + timedelta(days=1)
+		start_dt = self._full_hour(timezone.now() + timedelta(days=1))
 		end_dt = start_dt + timedelta(hours=5)  # > 4h to satisfy vehicle_min_4h
 
 		response = self.client_api.get("/api/v1/vehicles/available/", self._availability_params(start=start_dt, end=end_dt))
@@ -1016,7 +1019,7 @@ class VehicleAvailableEndpointTests(VehicleTestDataMixin, TestCase):
 	@patch("vehicles.views.public.get_available_vehicles")
 	def test_available_endpoint_filters_by_category_minimum_rental_hours(self, mocked_get_available_vehicles):
 		mocked_get_available_vehicles.side_effect = self._fake_get_available_vehicles
-		start_dt = timezone.now() + timedelta(days=1)
+		start_dt = self._full_hour(timezone.now() + timedelta(days=1))
 		end_dt = start_dt + timedelta(hours=2)
 
 		response = self.client_api.get(

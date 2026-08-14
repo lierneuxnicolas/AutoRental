@@ -189,7 +189,7 @@ class PricingSimulationDataMixin:
 		)
 
 	def _future_period(self, *, start_delta_hours=2, duration_hours=6):
-		start_at = timezone.now() + timedelta(hours=start_delta_hours)
+		start_at = (timezone.now() + timedelta(hours=start_delta_hours)).replace(minute=0, second=0, microsecond=0)
 		end_at = start_at + timedelta(hours=duration_hours)
 		return start_at, end_at
 
@@ -434,7 +434,7 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		self.url = reverse("reservations:price-simulation")
 
 	def _payload(self, *, vehicle_id=None, start_at=None, end_at=None, **extra):
-		start = start_at or (timezone.now() + timedelta(hours=2))
+		start = start_at or (timezone.now() + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
 		end = end_at or (start + timedelta(hours=6))
 		data = {
 			"vehicle_id": vehicle_id if vehicle_id is not None else self.vehicle_hybrid.id,
@@ -559,7 +559,7 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		self.assertIn("end_at", response.data)
 
 	def test_end_before_start_returns_400(self):
-		start = timezone.now() + timedelta(hours=8)
+		start = (timezone.now() + timedelta(hours=8)).replace(minute=0, second=0, microsecond=0)
 		end = start - timedelta(hours=1)
 		response = self.client_api.post(
 			self.url,
@@ -571,8 +571,8 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		self.assertIn("end_at", response.data)
 
 	def test_start_in_past_returns_400(self):
-		start = timezone.now() - timedelta(hours=1)
-		end = timezone.now() + timedelta(hours=2)
+		start = (timezone.now() - timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+		end = start + timedelta(hours=3)
 		response = self.client_api.post(
 			self.url,
 			self._payload(start_at=start, end_at=end),
@@ -583,8 +583,8 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		self.assertIn("start_at", response.data)
 
 	def test_duration_too_short_returns_400(self):
-		start = timezone.now() + timedelta(hours=2)
-		end = start + timedelta(seconds=60)
+		start = (timezone.now() + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
+		end = start + timedelta(hours=1)
 		response = self.client_api.post(
 			self.url,
 			self._payload(vehicle_id=self.vehicle_min_4h.id, start_at=start, end_at=end),
@@ -863,7 +863,7 @@ class ReservationTestDataMixin:
 		)
 
 	def _period(self, *, start_hours=6, duration_hours=4):
-		start_at = timezone.now() + timedelta(hours=start_hours)
+		start_at = (timezone.now() + timedelta(hours=start_hours)).replace(minute=0, second=0, microsecond=0)
 		end_at = start_at + timedelta(hours=duration_hours)
 		return start_at, end_at
 
@@ -1218,7 +1218,7 @@ class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
 
 	def test_periode_invalide_refuse(self):
 		self.client_api.force_authenticate(self.client_user_1)
-		start = timezone.now() + timedelta(hours=10)
+		start = (timezone.now() + timedelta(hours=10)).replace(minute=0, second=0, microsecond=0)
 		end = start - timedelta(hours=1)
 		response = self.client_api.post(
 			self.url,
