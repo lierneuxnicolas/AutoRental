@@ -4,84 +4,199 @@
   <meta charset="utf-8">
   <title>Facture {{ invoice.number }}</title>
   <style>
-    @page { size: A4; margin: 16mm; }
-    body { font-family: sans-serif; color: #1f2937; font-size: 12px; }
-    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
-    .brand { font-size: 22px; font-weight: 700; color: #0f172a; }
+    @page { size: A4; margin: 10mm 12mm; }
+    body { font-family: sans-serif; color: #1f2937; font-size: 11.5px; line-height: 1.32; margin: 0; }
+    .header { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; margin-bottom: 8px; }
+    .brand-block { display: flex; flex-direction: column; gap: 6px; max-width: 62%; }
+    .brand-logo { width: 142px; height: auto; display: block; object-fit: contain; }
+    .brand-logo-placeholder { width: 142px; height: 30px; border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc; }
+    .brand-details { display: flex; flex-direction: column; gap: 1px; }
+    .brand-name { font-size: 18px; font-weight: 700; color: #0f172a; line-height: 1.05; }
+    .brand-line { font-weight: 600; color: #0f172a; }
     .muted { color: #6b7280; }
-    .section { margin-bottom: 16px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid #d1d5db; padding: 8px; }
+    .section { margin: 0 0 8px; page-break-inside: avoid; break-inside: avoid-page; }
+    .section h2 { margin: 0 0 4px; font-size: 14px; font-weight: 700; color: #0f172a; letter-spacing: 0.01em; }
+    .section p { margin: 3px 0 0; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #d1d5db; padding: 5px 7px; vertical-align: top; word-wrap: break-word; overflow-wrap: anywhere; }
     th { background: #f3f4f6; text-align: left; }
-    .right { text-align: right; }
-    .totals { width: 45%; margin-left: auto; margin-top: 16px; }
-    .totals td { border: none; padding: 4px 0; }
-    .totals .strong { font-weight: 700; font-size: 13px; }
+    .right { text-align: right; white-space: nowrap; }
+    .invoice-meta { text-align: right; min-width: 198px; font-size: 11px; line-height: 1.28; }
+    .invoice-meta div { margin-bottom: 2px; }
+    .financial-table { width: 100%; }
+    .financial-table td { vertical-align: top; }
+    .financial-table .label-cell { width: 75%; }
+    .financial-table .strong td { font-weight: 800; font-size: 13.5px; }
+    .financial-table .strong .right { font-size: 14.5px; }
+    .total-row td { border-top: 2px solid #94a3b8; }
+    .reservation-table th,
+    .payment-table th,
+    .deposit-table th { width: 37%; }
+    .billed-to > div { margin: 1px 0; }
+    .post-billed-gap { height: 50mm; }
+    .bottom-sections { display: block; }
+    .bottom-sections .section { width: 100%; margin: 0 0 6px; }
+    .bottom-sections .section:last-child { margin-bottom: 0; }
+    .compact-table th,
+    .compact-table td { padding: 4px 6px; }
+    .note { margin-top: 5px; color: #6b7280; font-size: 10.5px; line-height: 1.28; }
   </style>
 </head>
 <body>
   <div class="header">
-    <div>
-      <div class="brand">AutoRental</div>
-      <div class="muted">Facture client</div>
+    <div class="brand-block">
+      {% if logo_url %}
+      <img class="brand-logo" src="{{ logo_url }}" alt="GetaCar" />
+      {% else %}
+      <div class="brand-logo-placeholder" aria-hidden="true"></div>
+      {% endif %}
+      <div class="brand-details">
+        <div class="brand-name">GetaCar</div>
+        <div class="brand-line">Parking GetaCar - Gare Centrale</div>
+        <div class="muted">Rue des Mobilites 12</div>
+        <div class="muted">1000 Bruxelles</div>
+        <div class="muted">Belgique</div>
+        <div class="muted">Facture client</div>
+      </div>
     </div>
-    <div>
-      <div><strong>Numero:</strong> {{ invoice.number }}</div>
-      <div><strong>Date d'emission:</strong> {{ invoice.issue_date }}</div>
-      <div><strong>Statut:</strong> {{ invoice.get_status_display }}</div>
+    <div class="invoice-meta">
+      <div><strong>Numéro:</strong> {{ invoice_details.number }}</div>
+      <div><strong>Date d'émission:</strong> {{ invoice_details.issue_date }}</div>
+      <div><strong>Statut:</strong> {{ invoice_details.status }}</div>
     </div>
   </div>
+
+  <div class="section billed-to">
+    <h2>Facturé à</h2>
+    <div><strong>{{ billed_to_details.name }}</strong></div>
+    {% if billed_to_details.address %}
+    <div>{{ billed_to_details.address|linebreaksbr }}</div>
+    {% endif %}
+    {% if billed_to_details.email %}
+    <div>{{ billed_to_details.email }}</div>
+    {% endif %}
+  </div>
+
+  <div class="post-billed-gap" aria-hidden="true"></div>
 
   <div class="section">
-    <div><strong>Facture a :</strong></div>
-    <div>{{ invoice.billing_name }}</div>
-    <div>{{ invoice.billing_address|linebreaksbr }}</div>
+    <h2>Détails de la location</h2>
+    <table class="reservation-table compact-table">
+      <tbody>
+        <tr>
+          <th>Référence de réservation</th>
+          <td>{{ reservation_details.reference }}</td>
+        </tr>
+        <tr>
+          <th>Véhicule</th>
+          <td>{{ reservation_details.vehicle }}</td>
+        </tr>
+        <tr>
+          <th>Date et heure de départ</th>
+          <td>{{ reservation_details.start_at }}</td>
+        </tr>
+        <tr>
+          <th>Date et heure de retour</th>
+          <td>{{ reservation_details.end_at }}</td>
+        </tr>
+        <tr>
+          <th>Durée de location</th>
+          <td>{{ reservation_details.duration }}</td>
+        </tr>
+        <tr>
+          <th>Assurance choisie</th>
+          <td>{{ reservation_details.insurance }}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
-
   <div class="section">
-    <div><strong>Reservation:</strong> {{ invoice.reservation.reference }}</div>
+    <h2>Détails financiers</h2>
+    <table class="financial-table compact-table">
+      <tbody>
+        {% for line in financial_details.line_items %}
+        <tr>
+          <td class="label-cell">{{ line.label }}</td>
+          <td class="right">{{ line.amount_display }}</td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td class="label-cell">Sous-total HTVA</td>
+          <td class="right">{{ financial_details.subtotal_display }}</td>
+        </tr>
+        <tr>
+          <td class="label-cell">TVA ({{ financial_details.tax_rate_display }})</td>
+          <td class="right">{{ financial_details.tax_amount_display }}</td>
+        </tr>
+        <tr class="strong">
+          <td class="label-cell">Total TVAC</td>
+          <td class="right">{{ financial_details.total_display }}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Description</th>
-        <th>Type</th>
-        <th class="right">Quantite</th>
-        <th class="right">Prix unitaire</th>
-        <th class="right">Total</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for line in lines %}
-      <tr>
-        <td>{{ line.description }}</td>
-        <td>{{ line.get_line_type_display }}</td>
-        <td class="right">{{ line.quantity }}</td>
-        <td class="right">{{ line.unit_price }} {{ invoice.currency }}</td>
-        <td class="right">{{ line.total_price }} {{ invoice.currency }}</td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="5" class="muted">Aucune ligne de facturation.</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="bottom-sections">
+    <div class="section">
+      <h2>Paiement</h2>
+      {% if financial_details.payment.available %}
+      <table class="payment-table compact-table">
+        <tbody>
+          <tr>
+            <th>Statut du paiement</th>
+            <td>{{ financial_details.payment.status }}</td>
+          </tr>
+          <tr>
+            <th>Date du paiement</th>
+            <td>{{ financial_details.payment.date }}</td>
+          </tr>
+          <tr>
+            <th>Moyen de paiement</th>
+            <td>{{ financial_details.payment.method }}</td>
+          </tr>
+          {% if financial_details.payment.reference %}
+          <tr>
+            <th>Référence du paiement</th>
+            <td>{{ financial_details.payment.reference }}</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">Aucune information de paiement disponible dans le backend pour cette facture.</p>
+      {% endif %}
+    </div>
 
-  <table class="totals">
-    <tr>
-      <td>Sous-total</td>
-      <td class="right">{{ invoice.subtotal }} {{ invoice.currency }}</td>
-    </tr>
-    <tr>
-      <td>Taxes</td>
-      <td class="right">{{ invoice.tax_amount }} {{ invoice.currency }}</td>
-    </tr>
-    <tr class="strong">
-      <td>Total</td>
-      <td class="right">{{ invoice.total_amount }} {{ invoice.currency }}</td>
-    </tr>
-  </table>
+    <div class="section">
+      <h2>Caution</h2>
+      <table class="deposit-table compact-table">
+        <tbody>
+          <tr>
+            <th>Caution</th>
+            <td>{{ financial_details.deposit.amount_display }}</td>
+          </tr>
+          {% if financial_details.deposit.available and financial_details.deposit.status %}
+          <tr>
+            <th>Statut de la caution</th>
+            <td>{{ financial_details.deposit.status }}</td>
+          </tr>
+          {% endif %}
+          {% if financial_details.deposit.available and financial_details.deposit.date %}
+          <tr>
+            <th>Date de la caution</th>
+            <td>{{ financial_details.deposit.date }}</td>
+          </tr>
+          {% endif %}
+          {% if financial_details.deposit.available and financial_details.deposit.reference %}
+          <tr>
+            <th>Référence de la caution</th>
+            <td>{{ financial_details.deposit.reference }}</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+      <p class="note">La caution est une préautorisation et n’est pas comprise dans le total payé.</p>
+    </div>
+  </div>
 </body>
 </html>
