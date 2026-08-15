@@ -8,6 +8,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from accounts.models import Role, User
 from inspections.models import Inspection, InspectionPhoto
 from interventions.services.vehicle_access import activate_vehicle_access
 from notifications.services import create_notification
@@ -32,6 +33,9 @@ MISSING_FIELDS = [
     "has_critical_issue",
     "critical_issue_description",
 ]
+
+DEPARTURE_DAMAGE_DEFAULT_LOCATION = "Etat du vehicule"
+CRITICAL_VEHICLE_STATUS = Vehicle.Status.A_CONTROLER
 
 
 @dataclass(frozen=True)
@@ -156,6 +160,11 @@ def _assert_mandatory_photos_present(*, inspection: Inspection) -> None:
 
 
 def _assert_measurements(*, inspection: Inspection, vehicle, mileage: int, energy_level_percent: int) -> None:
+    _assert_measurements_input(vehicle=vehicle, mileage=mileage, energy_level_percent=energy_level_percent)
+    _assert_no_blocking_critical_issues(inspection=inspection)
+
+
+def _assert_measurements_input(*, vehicle, mileage: int, energy_level_percent: int) -> None:
     if mileage is None:
         _raise_departure_error("MILEAGE_REQUIRED", "Le kilometrage est obligatoire.")
 
@@ -176,6 +185,8 @@ def _assert_measurements(*, inspection: Inspection, vehicle, mileage: int, energ
             details={"provided_energy_level_percent": energy_level_percent},
         )
 
+
+def _assert_no_blocking_critical_issues(*, inspection: Inspection) -> None:
     if inspection.has_critical_issue:
         _raise_departure_error(
             "CRITICAL_ISSUE_UNRESOLVED",
@@ -192,6 +203,54 @@ def _assert_measurements(*, inspection: Inspection, vehicle, mileage: int, energ
             "CRITICAL_DAMAGE_UNRESOLVED",
             "Un dommage critique non traite bloque la cloture de l'inspection.",
         )
+
+
+def _resolve_managers_for_notification():
+    return User.objects.select_related("role").filter(
+        is_active=True,
+        role__is_active=True,
+        role__code=Role.Code.GESTIONNAIRE_COMPTABLE,
+    )
+
+
+def _notify_managers_for_critical_departure_issue_once(*, inspection: Inspection, reservation_reference: str) -> None:
+    message = (
+        f"Une anomalie critique a ete signalee sur l'inspection de depart de la reservation {reservation_reference}."
+    )
+    for manager in _resolve_managers_for_notification():
+        if manager.notifications.filter(
+            notification_type="VEHICLE_REQUIRES_REVIEW",
+            related_object_type="Inspection",
+            related_object_id=inspection.id,
+        ).exists():
+            continue
+
+        create_notification(
+            user=manager,
+            notification_type="VEHICLE_REQUIRES_REVIEW",
+            title="Vehicule a controler",
+            message=message,
+            related_object_type="Inspection",
+            related_object_id=inspection.id,
+        )
+
+
+def _validate_damage_photo_ids(*, inspection: Inspection, photo_ids: list[int]) -> list[int]:
+    if not photo_ids:
+        return []
+
+    unique_ids = list(dict.fromkeys(photo_ids))
+    photos = list(InspectionPhoto.objects.filter(inspection=inspection, id__in=unique_ids).only("id"))
+    found_ids = {photo.id for photo in photos}
+    missing_ids = [photo_id for photo_id in unique_ids if photo_id not in found_ids]
+    if missing_ids:
+        _raise_departure_error(
+            "INVALID_PHOTO_IDS",
+            "Certaines photos ne sont pas liees a cette inspection.",
+            details={"photo_ids": missing_ids},
+        )
+
+    return unique_ids
 
 
 def _notify_once(*, user, notification_type: str, title: str, message: str, related_object_type: str, related_object_id: int):
@@ -253,7 +312,6 @@ def complete_departure_inspection(
         _assert_request_context(reservation=reservation_locked, requested_by=requested_by)
         _assert_initial_inspection_can_be_completed(inspection=inspection_locked)
         _assert_reservation_is_ready(reservation_locked)
-        _assert_departure_window(reservation_locked)
         _assert_mandatory_photos_present(inspection=inspection_locked)
         _assert_measurements(
             inspection=inspection_locked,
@@ -341,3 +399,118 @@ def create_departure_inspection(*, reservation: Reservation, requested_by) -> In
         )
 
     return inspection
+
+
+def save_departure_vehicle_state(
+    *,
+    inspection: Inspection,
+    requested_by,
+    mileage: int,
+    energy_level_percent: int,
+    anomaly_present: bool,
+    anomaly_description: str = "",
+    anomaly_severity: str | None = None,
+    photo_ids: list[int] | None = None,
+) -> tuple[Inspection, object | None, str]:
+    with transaction.atomic():
+        inspection_locked = (
+            Inspection.objects.select_for_update()
+            .select_related(
+                "reservation",
+                "reservation__client",
+                "reservation__client__user",
+                "reservation__vehicle",
+                "reservation__vehicle__brand",
+                "reservation__vehicle__category",
+            )
+            .get(pk=inspection.pk)
+        )
+        reservation_locked = (
+            Reservation.objects.select_for_update()
+            .select_related("client", "client__user", "vehicle", "vehicle__brand", "vehicle__category")
+            .get(pk=inspection_locked.reservation_id)
+        )
+        vehicle_locked = Vehicle.objects.select_for_update().get(pk=reservation_locked.vehicle_id)
+
+        _assert_request_context(reservation=reservation_locked, requested_by=requested_by)
+        _assert_initial_inspection_can_be_completed(inspection=inspection_locked)
+        _assert_reservation_is_ready(reservation_locked)
+        _assert_measurements_input(
+            vehicle=vehicle_locked,
+            mileage=mileage,
+            energy_level_percent=energy_level_percent,
+        )
+
+        normalized_photo_ids = _validate_damage_photo_ids(
+            inspection=inspection_locked,
+            photo_ids=photo_ids or [],
+        )
+
+        if not anomaly_present and normalized_photo_ids:
+            _raise_departure_error(
+                "PHOTOS_WITHOUT_ANOMALY",
+                "Des photos d'anomalie ne peuvent pas etre envoyees sans anomalie.",
+            )
+
+        cleaned_description = (anomaly_description or "").strip()
+        created_damage = None
+        is_critical = False
+        if anomaly_present:
+            if not cleaned_description:
+                _raise_departure_error(
+                    "ANOMALY_DESCRIPTION_REQUIRED",
+                    "La description de l'anomalie est obligatoire.",
+                )
+            valid_severities = {choice[0] for choice in inspection_locked.damages.model.Severity.choices}
+            if anomaly_severity not in valid_severities:
+                _raise_departure_error(
+                    "ANOMALY_SEVERITY_REQUIRED",
+                    "La gravite de l'anomalie est obligatoire.",
+                )
+
+            created_damage = inspection_locked.damages.model.objects.create(
+                inspection=inspection_locked,
+                vehicle=vehicle_locked,
+                reported_by=requested_by,
+                description=cleaned_description,
+                severity=anomaly_severity,
+                location=DEPARTURE_DAMAGE_DEFAULT_LOCATION,
+            )
+            if normalized_photo_ids:
+                created_damage.evidence_photos.set(
+                    InspectionPhoto.objects.filter(inspection=inspection_locked, id__in=normalized_photo_ids)
+                )
+
+            is_critical = anomaly_severity == inspection_locked.damages.model.Severity.CRITIQUE
+
+        inspection_locked.mileage = mileage
+        inspection_locked.energy_level_percent = energy_level_percent
+        inspection_locked.has_critical_issue = is_critical
+        inspection_locked.critical_issue_description = cleaned_description if is_critical else ""
+        inspection_locked.save(
+            update_fields=[
+                "mileage",
+                "energy_level_percent",
+                "has_critical_issue",
+                "critical_issue_description",
+                "updated_at",
+            ]
+        )
+
+        if is_critical and vehicle_locked.status != CRITICAL_VEHICLE_STATUS:
+            vehicle_locked.status = CRITICAL_VEHICLE_STATUS
+            vehicle_locked.save(update_fields=["status", "updated_at"])
+
+            transaction.on_commit(
+                lambda: _notify_managers_for_critical_departure_issue_once(
+                    inspection=inspection_locked,
+                    reservation_reference=reservation_locked.reference,
+                )
+            )
+
+        inspection.mileage = inspection_locked.mileage
+        inspection.energy_level_percent = inspection_locked.energy_level_percent
+        inspection.has_critical_issue = inspection_locked.has_critical_issue
+        inspection.critical_issue_description = inspection_locked.critical_issue_description
+
+    return inspection, created_damage, vehicle_locked.status

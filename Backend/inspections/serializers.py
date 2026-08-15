@@ -23,6 +23,7 @@ UPLOAD_PHOTO_TYPES = {
 	InspectionPhoto.PhotoType.COTE_DROIT,
 	InspectionPhoto.PhotoType.INTERIEUR,
 	InspectionPhoto.PhotoType.TABLEAU_DE_BORD,
+	InspectionPhoto.PhotoType.DOMMAGE,
 	InspectionPhoto.PhotoType.AUTRE,
 }
 MANDATORY_PHOTO_TYPES = [
@@ -121,6 +122,9 @@ class InspectionPhotoCreateSerializer(serializers.ModelSerializer):
 		elif photo_type == InspectionPhoto.PhotoType.AUTRE:
 			if position != 1:
 				raise serializers.ValidationError({"position": "La position doit etre 1 pour AUTRE."})
+		elif photo_type == InspectionPhoto.PhotoType.DOMMAGE:
+			if position not in (1, 2):
+				raise serializers.ValidationError({"position": "La position doit etre 1 ou 2 pour DOMMAGE."})
 		else:
 			raise serializers.ValidationError({"photo_type": "Type de photo non autorise pour cet upload."})
 
