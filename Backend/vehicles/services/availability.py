@@ -24,7 +24,10 @@ def _raise_validation_error(code, message):
     raise AvailabilityValidationError(code=code, message=message)
 
 
-BOOKABLE_VEHICLE_STATUSES = (Vehicle.Status.DISPONIBLE,)
+BOOKABLE_VEHICLE_STATUSES = (
+    Vehicle.Status.DISPONIBLE,
+    Vehicle.Status.RESERVE,
+)
 
 
 def _normalize_datetime(value, *, field_name, invalid_code):

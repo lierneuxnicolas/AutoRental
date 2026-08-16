@@ -1,5 +1,6 @@
 from .client import (
     ReservationClientCancelView,
+    ReservationClientCancelPreviewView,
     ReservationClientDepositAuthorizeView,
     ReservationClientDetailView,
     ReservationClientListCreateView,
@@ -15,6 +16,7 @@ __all__ = [
     "ReservationClientListCreateView",
     "ReservationClientDetailView",
     "ReservationClientCancelView",
+    "ReservationClientCancelPreviewView",
     "ReservationClientDepositAuthorizeView",
     "ReservationClientPaymentIntentView",
     "ReservationManagementListView",

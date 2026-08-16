@@ -8,6 +8,7 @@ from .pricing import PriceSimulationRequestSerializer, PriceSimulationResponseSe
 from .reservation import (
 	ReservationCancelRequestSerializer,
 	ReservationCancelResponseSerializer,
+	ReservationCancellationPreviewSerializer,
 	ReservationCreateRequestSerializer,
 	ReservationCreateResponseSerializer,
 	ReservationDepositRequestSerializer,
@@ -28,6 +29,7 @@ __all__ = [
 	"ReservationVehicleSummarySerializer",
 	"ReservationCancelRequestSerializer",
 	"ReservationCancelResponseSerializer",
+	"ReservationCancellationPreviewSerializer",
 	"ReservationDepositRequestSerializer",
 	"ReservationDepositResponseSerializer",
 	"ReservationPaymentIntentRequestSerializer",

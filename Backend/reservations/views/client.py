@@ -23,6 +23,7 @@ from reservations.models import Reservation
 from reservations.serializers.reservation import (
     ReservationCancelRequestSerializer,
     ReservationCancelResponseSerializer,
+    ReservationCancellationPreviewSerializer,
     ReservationCreateRequestSerializer,
     ReservationCreateResponseSerializer,
     ReservationDepositRequestSerializer,
@@ -33,7 +34,7 @@ from reservations.serializers.reservation import (
     ReservationPaymentIntentResponseSerializer,
 )
 from reservations.services import ReservationCreationError, create_draft_reservation
-from reservations.services.cancellation import CancellationError, cancel_reservation
+from reservations.services.cancellation import CancellationError, build_cancellation_preview, cancel_reservation
 from vehicles.models import Vehicle
 
 
@@ -326,8 +327,61 @@ class ReservationClientCancelView(generics.GenericAPIView):
         response_data = {
             "message": "Réservation annulée.",
             "reservation": ReservationListDetailSerializer(cancelled_reservation).data,
+            "cancellation_financials": {
+                "amount_paid": cancelled_reservation.cancellation_financials.amount_paid,
+                "cancellation_fee": cancelled_reservation.cancellation_financials.cancellation_fee,
+                "refundable_amount": cancelled_reservation.cancellation_financials.refundable_amount,
+                "deposit_release": "Liberee integralement",
+            },
         }
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class ReservationClientCancelPreviewView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsClient, IsReservationOwner]
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return Reservation.objects.filter(client__user=self.request.user).select_related(
+            "client",
+            "client__user",
+            "vehicle",
+            "vehicle__brand",
+            "vehicle__category",
+        )
+
+    def get_object(self):
+        queryset = self.get_queryset()
+        reservation = get_object_or_404(queryset, pk=self.kwargs[self.lookup_url_kwarg])
+        self.check_object_permissions(self.request, reservation)
+        return reservation
+
+    @extend_schema(
+        tags=["Reservations"],
+        description="Prévisualise les montants d'annulation calculés côté backend.",
+        responses={
+            200: ReservationCancellationPreviewSerializer,
+            401: ErrorDetailResponseSerializer,
+            403: ErrorDetailResponseSerializer,
+            404: ErrorDetailResponseSerializer,
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        reservation = self.get_object()
+        preview = build_cancellation_preview(reservation=reservation)
+        response_payload = {
+            "can_cancel": preview.can_cancel,
+            "amount_paid": preview.amount_paid,
+            "cancellation_fee": preview.cancellation_fee,
+            "refundable_amount": preview.refundable_amount,
+            "deposit_release": "Liberee integralement",
+        }
+        serializer = ReservationCancellationPreviewSerializer(instance=response_payload)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class ReservationClientDepositAuthorizeView(generics.GenericAPIView):

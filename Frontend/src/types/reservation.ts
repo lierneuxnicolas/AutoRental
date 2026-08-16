@@ -75,7 +75,19 @@ export interface ReservationCancelRequest {
   reason: string
 }
 
+export interface ReservationCancellationFinancials {
+  amount_paid: string | number
+  cancellation_fee: string | number
+  refundable_amount: string | number
+  deposit_release: string
+}
+
+export interface ReservationCancellationPreview extends ReservationCancellationFinancials {
+  can_cancel: boolean
+}
+
 export interface ReservationCancelResponse {
   message: string
   reservation: ReservationDetail
+  cancellation_financials: ReservationCancellationFinancials
 }

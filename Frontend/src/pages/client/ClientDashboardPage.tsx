@@ -134,7 +134,15 @@ function isReservationInProgress(reservation: ReservationDetail, now: number): b
     return false
   }
 
-  return currentReservationStatuses.has(status) && start <= now && now <= end
+  if (status === 'EN_COURS') {
+    return true
+  }
+
+  if (status === 'CONFIRMEE') {
+    return start <= now && now <= end
+  }
+
+  return false
 }
 
 function isUpcomingReservation(reservation: ReservationDetail, now: number): boolean {
