@@ -31,17 +31,25 @@ api.interceptors.request.use((config) => {
     return config
   }
 
+  const headers = config.headers ?? new AxiosHeaders()
+
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    // Let the browser generate multipart boundaries for file uploads.
+    headers.delete('Content-Type')
+  }
+
   if (config.url?.includes('/auth/token/refresh/') || config.url?.includes('/auth/login/')) {
+    config.headers = headers
     return config
   }
 
   const accessToken = window.localStorage.getItem('accessToken')
 
   if (accessToken) {
-    const headers = config.headers ?? new AxiosHeaders()
     headers.set('Authorization', `Bearer ${accessToken}`)
-    config.headers = headers
   }
+
+  config.headers = headers
 
   return config
 })

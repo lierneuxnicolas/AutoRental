@@ -1,22 +1,20 @@
-import { useMemo, useState } from 'react'
-import axios from 'axios'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { useNavigate, useParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
-import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
-import Input from '../../components/ui/Input'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
-import { cancelReservation, getReservationById } from '../../services/reservationService'
+import { getReservationById } from '../../services/reservationService'
 import type { ReservationStatus } from '../../types/reservation'
 
-type ReservationTimelineItem = {
-  key: string
-  label: string
-  at: string
+type UnlockButtonAvailability = {
+  isVisible: boolean
+  isEnabled: boolean
+  showTooEarlyMessage: boolean
 }
+
+const UNLOCK_EARLY_WINDOW_MINUTES = 15
 
 function formatDateTime(value: string): string {
   const parsed = new Date(value)
@@ -70,57 +68,53 @@ function statusToBadge(status: ReservationStatus | undefined): { label: string; 
   }
 }
 
-function canContinuePayment(status: ReservationStatus | undefined): boolean {
-  return status === 'BROUILLON' || status === 'EN_ATTENTE_CAUTION' || status === 'EN_ATTENTE_PAIEMENT'
-}
-
-function canCancelReservation(status: ReservationStatus | undefined, startAt: string): boolean {
-  if (status === 'BROUILLON' || status === 'EN_ATTENTE_CAUTION' || status === 'EN_ATTENTE_PAIEMENT') {
-    return true
+function normalizeReservationStatus(status: ReservationStatus | undefined): ReservationStatus | undefined {
+  if (!status) {
+    return undefined
   }
 
+  const normalized = status.trim().toUpperCase() as ReservationStatus
+  return normalized
+}
+
+function getUnlockButtonAvailability(
+  status: ReservationStatus | undefined,
+  startAt: string,
+  endAt: string,
+): UnlockButtonAvailability {
   if (status !== 'CONFIRMEE') {
-    return false
+    return {
+      isVisible: false,
+      isEnabled: false,
+      showTooEarlyMessage: false,
+    }
   }
 
   const startDate = new Date(startAt)
+  const endDate = new Date(endAt)
 
-  if (Number.isNaN(startDate.getTime())) {
-    return false
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return {
+      isVisible: true,
+      isEnabled: false,
+      showTooEarlyMessage: false,
+    }
   }
 
-  return startDate.getTime() > Date.now()
-}
+  const unlockWindowStart = startDate.getTime() - (UNLOCK_EARLY_WINDOW_MINUTES * 60 * 1000)
+  const now = Date.now()
+  const isEnabled = now >= unlockWindowStart && now <= endDate.getTime()
 
-function errorMessage(error: unknown): string {
-  if (!axios.isAxiosError(error)) {
-    return 'Une erreur est survenue. Veuillez réessayer.'
+  return {
+    isVisible: true,
+    isEnabled,
+    showTooEarlyMessage: now < unlockWindowStart,
   }
-
-  const payload = error.response?.data as {
-    detail?: string
-    message?: string
-    code?: string
-  } | undefined
-
-  if (typeof payload?.detail === 'string' && payload.detail.trim().length > 0) {
-    return payload.detail
-  }
-
-  if (typeof payload?.message === 'string' && payload.message.trim().length > 0) {
-    return payload.message
-  }
-
-  return 'Une erreur est survenue. Veuillez réessayer.'
 }
 
 export default function ClientReservationDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const [cancelReason, setCancelReason] = useState('')
-  const [cancelError, setCancelError] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   const reservationId = Number(id)
   const isValidReservationId = Number.isInteger(reservationId) && reservationId > 0
@@ -130,54 +124,6 @@ export default function ClientReservationDetailPage() {
     queryFn: () => getReservationById(reservationId),
     enabled: isValidReservationId,
   })
-
-  const cancelMutation = useMutation({
-    mutationFn: async () => cancelReservation(reservationId, { reason: cancelReason.trim() }),
-    onSuccess: async () => {
-      setCancelError(null)
-      setSuccessMessage('Réservation annulée avec succès.')
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['client-reservation', reservationId] }),
-        queryClient.invalidateQueries({ queryKey: ['client-reservations'] }),
-      ])
-    },
-    onError: (error) => {
-      setSuccessMessage(null)
-      setCancelError(errorMessage(error))
-    },
-  })
-
-  const timelineItems = useMemo<ReservationTimelineItem[]>(() => {
-    if (!reservationQuery.data) {
-      return []
-    }
-
-    const events: ReservationTimelineItem[] = [
-      {
-        key: 'created',
-        label: 'Réservation créée',
-        at: reservationQuery.data.created_at,
-      },
-    ]
-
-    if (reservationQuery.data.confirmed_at) {
-      events.push({
-        key: 'confirmed',
-        label: 'Réservation confirmée',
-        at: reservationQuery.data.confirmed_at,
-      })
-    }
-
-    if (reservationQuery.data.cancelled_at) {
-      events.push({
-        key: 'cancelled',
-        label: 'Réservation annulée',
-        at: reservationQuery.data.cancelled_at,
-      })
-    }
-
-    return events
-  }, [reservationQuery.data])
 
   if (!isValidReservationId) {
     return (
@@ -215,16 +161,21 @@ export default function ClientReservationDetailPage() {
   }
 
   const reservation = reservationQuery.data
-  const badge = statusToBadge(reservation.status)
-  const paymentAllowed = canContinuePayment(reservation.status)
-  const cancellationAllowed = canCancelReservation(reservation.status, reservation.start_at)
+  const normalizedStatus = normalizeReservationStatus(reservation.status)
+  const badge = statusToBadge(normalizedStatus)
+  const unlockButtonAvailability = getUnlockButtonAvailability(
+    normalizedStatus,
+    reservation.start_at,
+    reservation.end_at,
+  )
+  const shouldShowUnlockButton = normalizedStatus === 'CONFIRMEE' && unlockButtonAvailability.isVisible
+  const shouldShowReturnButton = normalizedStatus === 'EN_COURS'
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Mes réservations</p>
-          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Détail de la réservation</h1>
+          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Ma réservation</h1>
         </div>
         <Button variant="secondary" onClick={() => navigate('/client/reservations')}>
           Retour à mes réservations
@@ -271,78 +222,37 @@ export default function ClientReservationDetailPage() {
         </div>
       </Card>
 
-      <Card className="mb-6" header={<h2 className="text-lg font-semibold text-[#1F2937]">Historique disponible</h2>}>
-        {timelineItems.length === 0 ? (
-          <EmptyState title="Aucun historique" description="Aucun historique disponible." />
-        ) : (
-          <ul className="space-y-3">
-            {timelineItems.map((item) => (
-              <li key={item.key} className="rounded-2xl border border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3">
-                <p className="text-sm font-semibold text-[#1F2937]">{item.label}</p>
-                <p className="mt-1 text-sm text-slate-600">{formatDateTime(item.at)}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+      {shouldShowUnlockButton ? (
+        <div className="flex flex-col gap-2">
+          <Button
+            className="mx-auto h-[52px] w-full max-w-[420px] text-base"
+            disabled={!unlockButtonAvailability.isEnabled}
+            onClick={() => {
+              if (!unlockButtonAvailability.isEnabled) {
+                return
+              }
 
-      {successMessage ? <Alert variant="success" title="Action réussie" message={successMessage} className="mb-4" /> : null}
-      {cancelError ? <Alert variant="danger" title="Action impossible" message={cancelError} className="mb-4" /> : null}
-
-      <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Actions</h2>}>
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          {paymentAllowed ? (
-            <Link to={`/payment?reservationId=${reservation.id}`}>
-              <Button className="w-full sm:w-auto">Continuer le paiement</Button>
-            </Link>
-          ) : null}
-
-          {cancellationAllowed ? (
-            <div className="w-full space-y-3">
-              <Input
-                label="Motif d'annulation"
-                placeholder="Indiquez la raison de l'annulation"
-                value={cancelReason}
-                onChange={(event) => setCancelReason(event.target.value)}
-              />
-              <Button
-                variant="danger"
-                onClick={() => {
-                  setCancelError(null)
-                  setSuccessMessage(null)
-
-                  if (!cancelReason.trim()) {
-                    setCancelError("Le motif d'annulation est requis.")
-                    return
-                  }
-
-                  void cancelMutation.mutateAsync()
-                }}
-                disabled={cancelMutation.isPending}
-                className="w-full sm:w-auto"
-              >
-                {cancelMutation.isPending ? (
-                  <span className="flex items-center gap-2">
-                    <LoadingSpinner size="sm" aria-label="Annulation en cours" />
-                    Annulation en cours...
-                  </span>
-                ) : (
-                  'Annuler la réservation'
-                )}
-              </Button>
-            </div>
-          ) : null}
-
-          {!paymentAllowed && !cancellationAllowed ? (
-            <Alert
-              variant="info"
-              title="Aucune action disponible"
-              message="Aucune action supplémentaire n'est autorisée pour cette réservation selon les règles backend."
-              className="w-full"
-            />
+              navigate(`/client/reservations/${reservation.id}/unlock`)
+            }}
+          >
+            Aller vers le déverrouillage du véhicule
+          </Button>
+          {!unlockButtonAvailability.isEnabled ? (
+            <p className="text-sm text-slate-600">Disponible 15 min avant le départ</p>
           ) : null}
         </div>
-      </Card>
+      ) : null}
+
+      {shouldShowReturnButton ? (
+        <div className="flex justify-center">
+          <Button
+            className="mx-auto h-[52px] w-full max-w-[420px] bg-[#F97316] text-base text-white hover:bg-[#EA580C]"
+            onClick={() => navigate(`/client/reservations/${reservation.id}/return-inspection`)}
+          >
+            Restituer le véhicule
+          </Button>
+        </div>
+      ) : null}
     </section>
   )
 }

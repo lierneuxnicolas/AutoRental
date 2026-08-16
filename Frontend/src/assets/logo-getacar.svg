@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 220" role="img" aria-labelledby="logoTitle logoDesc">
+  <title id="logoTitle">GetaCar logo</title>
+  <desc id="logoDesc">GetaCar wordmark with front-facing car icon, blue open arc and orange accent.</desc>
+
+  <g transform="translate(8 6)">
+    <path
+      d="M120 20 A120 120 0 0 1 270 180"
+      fill="none"
+      stroke="#1464F6"
+      stroke-width="16"
+      stroke-linecap="round"
+    />
+
+    <path
+      d="M14 82 H48 C56 82 62 88 62 96 V100"
+      fill="none"
+      stroke="#FF5A00"
+      stroke-width="11"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+
+    <g transform="translate(41 52) scale(0.90 1)">
+      <path
+        d="M52 54 C62 24 76 12 110 10 H184 C220 12 234 24 244 54 L254 88 C257 96 252 104 244 104 H48 C40 104 35 96 38 88 Z"
+        fill="#0B2740"
+      />
+
+      <path
+        d="M108 18 H186 C210 18 219 26 226 42 L236 58 H56 L66 42 C73 26 82 18 108 18 Z"
+        fill="#F4F8FF"
+      />
+
+      <path d="M56 58 H236" stroke="#15375B" stroke-width="4" stroke-linecap="round" />
+
+      <ellipse cx="66" cy="76" rx="19" ry="11" fill="#FFFFFF" />
+      <ellipse cx="226" cy="76" rx="19" ry="11" fill="#FFFFFF" />
+
+      <rect x="36" y="56" width="18" height="15" rx="7.5" fill="#0B2740" />
+      <rect x="238" y="56" width="18" height="15" rx="7.5" fill="#0B2740" />
+
+      <rect x="46" y="101" width="38" height="28" rx="9" fill="#0B2740" />
+      <rect x="208" y="101" width="38" height="28" rx="9" fill="#0B2740" />
+    </g>
+  </g>
+
+  <g transform="translate(332 176)">
+    <text
+      x="0"
+      y="0"
+      font-family="Nunito Sans, Poppins, Montserrat, Arial, sans-serif"
+      font-size="142"
+      font-weight="800"
+      letter-spacing="0"
+      fill="#0B2740"
+    >
+      Geta
+    </text>
+    <text
+      x="375"
+      y="0"
+      font-family="Nunito Sans, Poppins, Montserrat, Arial, sans-serif"
+      font-size="142"
+      font-weight="800"
+      letter-spacing="0"
+      fill="#1464F6"
+    >
+      Car
+    </text>
+  </g>
+</svg>

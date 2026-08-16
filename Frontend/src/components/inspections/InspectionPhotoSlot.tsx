@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useRef } from 'react'
 import Alert from '../feedback/Alert'
 import LoadingSpinner from '../feedback/LoadingSpinner'
 import Button from '../ui/Button'
@@ -13,9 +13,7 @@ export interface InspectionPhotoSlotProps {
   uploadedUrl: string | null
   isUploading: boolean
   errorMessage: string | null
-  hasSelectedFile: boolean
   onFileChange: (file: File | null) => void
-  onUpload: () => void
 }
 
 export default function InspectionPhotoSlot({
@@ -25,32 +23,40 @@ export default function InspectionPhotoSlot({
   uploadedUrl,
   isUploading,
   errorMessage,
-  hasSelectedFile,
   onFileChange,
-  onUpload,
 }: InspectionPhotoSlotProps) {
-  const inputId = useId()
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const isUploaded = Boolean(uploadedUrl)
-  const canUpload = hasSelectedFile && !isUploading
+  const status = isUploading
+    ? { variant: 'info' as const, label: 'Envoi...' }
+    : errorMessage
+      ? { variant: 'danger' as const, label: "Erreur d'envoi" }
+      : isUploaded
+        ? { variant: 'success' as const, label: 'Envoyee ✓' }
+        : { variant: 'warning' as const, label: 'A envoyer' }
 
   return (
     <Card
       className="h-full"
       header={
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-[#1F2937]">{label}</h3>
-          <StatusBadge variant={isUploaded ? 'success' : 'warning'} label={isUploaded ? 'Envoyee' : 'A envoyer'} />
+          <h3 className="text-sm font-semibold text-[#1F2937]">
+            {label}
+            {isUploaded ? <span className="ml-2 text-[#16A34A]">✓</span> : null}
+          </h3>
+          <StatusBadge variant={status.variant} label={status.label} />
         </div>
       }
     >
       <div className="space-y-4">
         <input
-          id={inputId}
+          ref={fileInputRef}
           type="file"
           accept="image/*"
           capture="environment"
-          className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-slate-600 shadow-sm file:mr-3 file:rounded-full file:border-0 file:bg-[#DBEAFE] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[#2563EB]"
+          disabled={isUploading}
+          className="hidden"
           onChange={(event) => {
             const selectedFile = event.target.files?.[0] ?? null
             onFileChange(selectedFile)
@@ -69,7 +75,13 @@ export default function InspectionPhotoSlot({
 
         {errorMessage ? <Alert variant="danger" message={errorMessage} /> : null}
 
-        <Button className="w-full" disabled={!canUpload} onClick={onUpload}>
+        <Button
+          className="w-full"
+          disabled={isUploading}
+          onClick={() => {
+            fileInputRef.current?.click()
+          }}
+        >
           {isUploading ? (
             <span className="flex items-center gap-2">
               <LoadingSpinner size="sm" aria-label="Envoi de photo" />
@@ -78,7 +90,7 @@ export default function InspectionPhotoSlot({
           ) : isUploaded ? (
             'Remplacer la photo'
           ) : (
-            'Envoyer la photo'
+            'Sélectionner la photo'
           )}
         </Button>
       </div>

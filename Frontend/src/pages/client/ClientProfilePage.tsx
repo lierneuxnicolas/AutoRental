@@ -1,7 +1,8 @@
 import axios from 'axios'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useForm } from 'react-hook-form'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link, useSearchParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
@@ -107,9 +108,103 @@ function profileProgressItems(progress: ClientProfileProgress | undefined) {
   ]
 }
 
+function isProfileFullyValidated(progress: ClientProfileProgress | undefined): boolean {
+  if (!progress) {
+    return false
+  }
+
+  return progress.percentage >= 100
+    && progress.account_created
+    && progress.email_verified
+    && progress.personal_information_complete
+    && progress.identity_card_valid
+    && progress.driving_license_valid
+}
+
 type ApiErrorPayload = {
   detail?: string
+  date_of_birth?: string | string[]
   [key: string]: unknown
+}
+
+const MINIMUM_AGE = 18
+const MAXIMUM_AGE = 90
+
+function subtractYears(referenceDate: Date, years: number): Date {
+  const targetYear = referenceDate.getFullYear() - years
+  const month = referenceDate.getMonth()
+  const day = referenceDate.getDate()
+  const candidate = new Date(targetYear, month, day)
+
+  if (candidate.getMonth() !== month) {
+    return new Date(targetYear, month + 1, 0)
+  }
+
+  return candidate
+}
+
+function parseDateInput(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) {
+    return null
+  }
+
+  const year = Number(match[1])
+  const monthIndex = Number(match[2]) - 1
+  const day = Number(match[3])
+  const parsed = new Date(year, monthIndex, day)
+
+  if (parsed.getFullYear() !== year || parsed.getMonth() !== monthIndex || parsed.getDate() !== day) {
+    return null
+  }
+
+  return parsed
+}
+
+function validateDateOfBirth(value: string): true | string {
+  if (!value) {
+    return true
+  }
+
+  const birthDate = parseDateInput(value)
+  if (!birthDate) {
+    return 'La date de naissance est invalide.'
+  }
+
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const youngestAllowedBirthDate = subtractYears(today, MINIMUM_AGE)
+  const oldestAllowedBirthDate = subtractYears(today, MAXIMUM_AGE)
+
+  if (birthDate > today) {
+    return 'La date de naissance ne peut pas etre dans le futur.'
+  }
+
+  if (birthDate > youngestAllowedBirthDate) {
+    return 'Vous devez avoir au moins 18 ans pour utiliser GetACar.'
+  }
+
+  if (birthDate < oldestAllowedBirthDate) {
+    return "L'âge maximum autorisé pour une location GetACar est de 90 ans."
+  }
+
+  return true
+}
+
+function extractFieldError(payload: ApiErrorPayload | undefined, field: string): string | null {
+  if (!payload) {
+    return null
+  }
+
+  const raw = payload[field]
+  if (typeof raw === 'string' && raw.trim().length > 0) {
+    return raw
+  }
+  if (Array.isArray(raw) && typeof raw[0] === 'string' && raw[0].trim().length > 0) {
+    return raw[0]
+  }
+
+  return null
 }
 
 function extractApiErrorMessage(error: unknown): string {
@@ -131,6 +226,7 @@ function extractApiErrorMessage(error: unknown): string {
 }
 
 export default function ClientProfilePage() {
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [formError, setFormError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
@@ -150,6 +246,8 @@ export default function ClientProfilePage() {
     register,
     handleSubmit,
     reset,
+    setError,
+    clearErrors,
     formState: { errors, isSubmitting },
   } = useForm<ProfileFormValues>({
     defaultValues: {
@@ -173,6 +271,18 @@ export default function ClientProfilePage() {
     }
   }, [profileQuery.data, reset])
 
+  useEffect(() => {
+    const requestedTab = searchParams.get('tab')
+    if (requestedTab === 'documents') {
+      setActiveTab('documents')
+      return
+    }
+
+    if (requestedTab === 'personal') {
+      setActiveTab('personal')
+    }
+  }, [searchParams])
+
   const updateProfileMutation = useMutation({
     mutationFn: async (values: ProfileFormValues) => {
       const payload: ClientProfileUpdateRequest = {
@@ -195,6 +305,17 @@ export default function ClientProfilePage() {
     },
     onError: (error) => {
       setSuccessMessage(null)
+
+      if (axios.isAxiosError<ApiErrorPayload>(error)) {
+        const payload = error.response?.data
+        const dateOfBirthError = extractFieldError(payload, 'date_of_birth')
+        if (dateOfBirthError) {
+          setError('date_of_birth', { type: 'server', message: dateOfBirthError })
+          setFormError(null)
+          return
+        }
+      }
+
       setFormError(extractApiErrorMessage(error))
     },
   })
@@ -202,9 +323,16 @@ export default function ClientProfilePage() {
   const onSubmit = (values: ProfileFormValues) => {
     setFormError(null)
     setSuccessMessage(null)
+    clearErrors('date_of_birth')
 
     if (!values.first_name.trim() || !values.last_name.trim() || !values.address.trim()) {
       setFormError('Le prénom, le nom et l’adresse sont obligatoires.')
+      return
+    }
+
+    const dateOfBirthError = validateDateOfBirth(values.date_of_birth)
+    if (dateOfBirthError !== true) {
+      setError('date_of_birth', { type: 'validate', message: dateOfBirthError })
       return
     }
 
@@ -214,6 +342,9 @@ export default function ClientProfilePage() {
   const profileStatus = useMemo(() => profileStatusDetails(profileQuery.data), [profileQuery.data])
   const progressItems = useMemo(() => profileProgressItems(progressQuery.data), [progressQuery.data])
   const isLoading = profileQuery.isLoading || progressQuery.isLoading
+  const completion = progressQuery.data?.percentage ?? 0
+  const profileIsFullyValidated = isProfileFullyValidated(progressQuery.data)
+  const progressCircleStyle = { '--progress': completion } as CSSProperties
 
   if (isLoading) {
     return (
@@ -225,22 +356,12 @@ export default function ClientProfilePage() {
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-8 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Mon profil</p>
-          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Informations personnelles et documents</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Mettez à jour vos informations client et suivez la progression de votre profil.
-          </p>
-        </div>
-      </div>
-
       {profileQuery.error || progressQuery.error ? (
         <Alert variant="danger" title="Chargement impossible" message="Les informations de profil n’ont pas pu être récupérées. Veuillez réessayer." />
       ) : null}
 
-      <div className="mb-6 mt-6 border-b border-[#E5E7EB]">
-        <div className="flex w-full gap-2 overflow-x-auto pb-2" role="tablist" aria-label="Sections du profil client">
+      <div className="mb-4 mt-2 border-b border-[#E5E7EB]">
+        <div className="flex w-full flex-nowrap gap-3 overflow-x-auto pb-2" role="tablist" aria-label="Sections du profil client">
           <button
             type="button"
             role="tab"
@@ -248,7 +369,7 @@ export default function ClientProfilePage() {
             aria-controls="profile-tab-personal"
             id="profile-tab-trigger-personal"
             onClick={() => setActiveTab('personal')}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+            className={`whitespace-nowrap rounded-full px-8 py-3.5 text-xl font-bold leading-none transition ${
               activeTab === 'personal' ? 'bg-[#2563EB] text-white shadow-sm' : 'bg-[#F3F4F6] text-[#374151] hover:bg-[#E5E7EB]'
             }`}
           >
@@ -261,7 +382,7 @@ export default function ClientProfilePage() {
             aria-controls="profile-tab-documents"
             id="profile-tab-trigger-documents"
             onClick={() => setActiveTab('documents')}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+            className={`whitespace-nowrap rounded-full px-8 py-3.5 text-xl font-bold leading-none transition ${
               activeTab === 'documents' ? 'bg-[#2563EB] text-white shadow-sm' : 'bg-[#F3F4F6] text-[#374151] hover:bg-[#E5E7EB]'
             }`}
           >
@@ -283,7 +404,14 @@ export default function ClientProfilePage() {
               </div>
 
               <Input label="Téléphone" error={errors.phone?.message} {...register('phone')} />
-              <Input label="Date de naissance" type="date" error={errors.date_of_birth?.message} {...register('date_of_birth')} />
+              <Input
+                label="Date de naissance"
+                type="date"
+                error={errors.date_of_birth?.message}
+                {...register('date_of_birth', {
+                  validate: validateDateOfBirth,
+                })}
+              />
               <Input label="Adresse" error={errors.address?.message} {...register('address')} />
 
               <Button type="submit" className="w-full" disabled={isSubmitting || updateProfileMutation.isPending}>
@@ -312,27 +440,52 @@ export default function ClientProfilePage() {
               </div>
             </Card>
 
-            <Card header={<div><h2 className="text-lg font-semibold text-[#1F2937]">Progression du profil</h2><p className="text-sm text-slate-500">Pourcentage réel fourni par l’API</p></div>}>
-              <div className="space-y-4">
-                <div className="flex items-end justify-between gap-3">
-                  <div>
-                    <p className="text-4xl font-semibold text-[#0F172A]">{progressQuery.data?.percentage ?? 0}%</p>
-                    <p className="mt-1 text-sm text-slate-500">Progression actuelle</p>
+            <Card className="rounded-4xl border-none bg-white shadow-[0_22px_60px_rgba(15,23,42,0.08)]">
+              <div className="flex flex-col gap-4">
+                <div>
+                  <h2 className="text-[1.85rem] font-semibold tracking-tight text-[#0F172A]">Progression de votre profil</h2>
+                </div>
+
+                <div className="grid gap-x-10 gap-y-4 md:grid-cols-[192px_1fr] md:items-center">
+                  <div className="relative mx-auto flex h-38 w-38 items-center justify-center rounded-full bg-[conic-gradient(#4F46E5_0deg,#4F46E5_calc(var(--progress)*3.6deg),#E2E8F0_calc(var(--progress)*3.6deg),#E2E8F0_360deg)]" style={progressCircleStyle}>
+                    <div className="flex h-26 w-26 flex-col items-center justify-center rounded-full bg-white text-center shadow-[inset_0_1px_6px_rgba(15,23,42,0.08)]">
+                      <span className="text-3xl font-semibold text-[#0F172A]">{completion}%</span>
+                      <span className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Complet</span>
+                    </div>
                   </div>
+
+                  <ul className="space-y-3">
+                    {progressItems.map((item) => (
+                      <li key={item.key} className="flex items-center gap-3 text-[0.92rem] font-semibold text-[#0F172A]">
+                        <span
+                          className={`flex h-5 w-5 items-center justify-center rounded-full border ${item.done ? 'border-[#16A34A] bg-[#DCFCE7] text-[#16A34A]' : 'border-slate-300 bg-slate-100 text-transparent'}`}
+                          aria-hidden="true"
+                        >
+                          ✓
+                        </span>
+                        <span>{item.label}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
 
-                <div className="h-3 overflow-hidden rounded-full bg-[#E5E7EB]">
-                  <div className="h-full rounded-full bg-[#2563EB]" style={{ width: `${Math.max(0, Math.min(100, progressQuery.data?.percentage ?? 0))}%` }} />
-                </div>
+                {profileIsFullyValidated ? (
+                  <div className="w-full rounded-2xl border border-[#BBF7D0] bg-[#DCFCE7] px-4 py-2 text-sm font-medium text-[#166534]">
+                    ✓ Votre profil est complet. Vous pouvez réserver un véhicule.
+                  </div>
+                ) : (
+                  <div className="w-full rounded-2xl border border-[#FCD34D] bg-[#FFEDD5] px-4 py-2 text-sm text-[#9A3412]">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="font-medium">⚠ Votre profil doit être complété et vos documents validés avant de pouvoir réserver un véhicule.</p>
+                      <Link to="/client/profile?tab=documents" className="shrink-0">
+                        <Button className="bg-[#F97316] text-white hover:bg-[#EA580C] focus-visible:ring-[#F97316]">
+                          Compléter mon profil
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+                )}
 
-                <ul className="space-y-3">
-                  {progressItems.map((item) => (
-                    <li key={item.key} className="flex items-center justify-between rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937]">
-                      <span>{item.label}</span>
-                      <span className={`font-semibold ${item.done ? 'text-[#15803D]' : 'text-[#C2410C]'}`}>{item.done ? 'OK' : 'À faire'}</span>
-                    </li>
-                  ))}
-                </ul>
               </div>
             </Card>
           </div>

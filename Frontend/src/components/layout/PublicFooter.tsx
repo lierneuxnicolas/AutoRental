@@ -1,38 +1,50 @@
 import { Link } from 'react-router-dom'
 
-const footerLinks = [
-  { label: 'Véhicules', to: '/vehicles' },
-  { label: 'Fonctionnement', to: '/#fonctionnement' },
-  { label: 'FAQ', to: '/#faq' },
-  { label: 'Assistance', to: '/#assistance' },
-  { label: 'Conditions générales', to: '/terms' },
-  { label: 'Politique de confidentialité', to: '/terms' },
-]
-
 export default function PublicFooter() {
   return (
-    <footer className="border-t border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-8 sm:px-6 lg:flex-row lg:items-start lg:justify-between lg:px-8">
-        <div className="max-w-md">
-          <p className="text-lg font-semibold tracking-tight text-[#1F2937]">
-            <span className="text-[#2563EB]">Auto</span>Rental
-          </p>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            Une expérience simple et fiable pour réserver, conduire et gérer votre location en toute sérénité.
-          </p>
-        </div>
+    <footer className="border-t border-[#002B50]/30 bg-[#002B50] text-white">
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 gap-8 md:grid-cols-2 xl:grid-cols-4">
+          <div>
+            <h3 className="text-base font-semibold text-white">À propos</h3>
+            <div className="mt-4 flex flex-col gap-3 text-sm text-slate-200">
+              <Link to="/about" className="transition hover:text-white">Qui sommes-nous ?</Link>
+              <Link to="/terms" className="transition hover:text-white">Conditions de location</Link>
+              <Link to="/legal-notice" className="transition hover:text-white">Mentions légales</Link>
+            </div>
+          </div>
 
-        <div className="grid gap-4 text-sm text-slate-600 sm:grid-cols-2 lg:min-w-[420px] lg:grid-cols-3">
-          {footerLinks.map((item) => (
-            <Link key={`${item.to}-${item.label}`} to={item.to} className="transition hover:text-[#2563EB]">
-              {item.label}
-            </Link>
-          ))}
+          <div>
+            <h3 className="text-base font-semibold text-white">Confidentialité</h3>
+            <div className="mt-4 flex flex-col gap-3 text-sm text-slate-200">
+              <Link to="/privacy" className="transition hover:text-white">Données personnelles</Link>
+              <Link to="/cookies" className="transition hover:text-white">Paramètres des cookies</Link>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-base font-semibold text-white">Réseaux sociaux</h3>
+            <div className="mt-4 flex flex-col gap-3 text-sm text-slate-200">
+              <a href="https://www.instagram.com" target="_blank" rel="noreferrer" className="transition hover:text-white">Instagram</a>
+              <a href="https://www.facebook.com" target="_blank" rel="noreferrer" className="transition hover:text-white">Facebook</a>
+              <a href="https://www.linkedin.com" target="_blank" rel="noreferrer" className="transition hover:text-white">LinkedIn</a>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-base font-semibold text-white">Avis clients</h3>
+            <div className="mt-4 rounded-2xl border border-white/15 bg-white/5 p-4">
+              <p className="text-sm font-medium text-white">Avis clients</p>
+              <p className="mt-2 text-sm text-slate-200">Les avis GetACar seront bientôt disponibles.</p>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="border-t border-slate-200 bg-[#F5F5F5] px-4 py-4 text-center text-sm text-slate-500 sm:px-6 lg:px-8">
-        © {new Date().getFullYear()} AutoRental. Tous droits réservés.
+      <div className="border-t border-white/15 bg-[#002B50] px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex max-w-7xl items-center justify-center text-sm text-white">
+          <p>© 2026 GetACar</p>
+        </div>
       </div>
     </footer>
   )

@@ -132,6 +132,15 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
     })
   }, [activeFilter, reservations, search])
 
+  const returnsToVerify = useMemo(
+    () => reservations.filter((reservation) => reservation.status === 'A_CONTROLER'),
+    [reservations],
+  )
+
+  const resolveReturnDateTime = (reservation: ReservationManagementDetail): string => {
+    return reservation.return_inspection?.completed_at ?? reservation.end_at
+  }
+
   return (
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div>
@@ -162,6 +171,61 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
             ))}
           </div>
         </div>
+      </Card>
+
+      <Card
+        header={(
+          <div>
+            <h2 className="text-lg font-semibold text-[#0F172A]">Retours a verifier</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Reservations restituees en attente de controle gestionnaire.
+            </p>
+          </div>
+        )}
+      >
+        {returnsToVerify.length === 0 ? (
+          <EmptyState
+            title="Aucun retour en attente"
+            description="Tous les retours ont ete traites ou aucun vehicule n'a encore ete restitue."
+          />
+        ) : (
+          <div className="space-y-4">
+            {returnsToVerify.map((reservation) => (
+              <article key={reservation.id} className="rounded-3xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
+                <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 lg:grid-cols-5">
+                  <div>
+                    <p className="font-medium text-[#1F2937]">Numero reservation</p>
+                    <p className="mt-1">{reservation.reference}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-[#1F2937]">Client</p>
+                    <p className="mt-1">{clientLabel(reservation) ?? 'Client indisponible'}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-[#1F2937]">Vehicule</p>
+                    <p className="mt-1">{vehicleLabel(reservation)}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-[#1F2937]">Date/heure retour</p>
+                    <p className="mt-1">{formatDateTime(resolveReturnDateTime(reservation))}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-[#1F2937]">Statut</p>
+                    <div className="mt-1">
+                      <StatusBadge variant="warning" label="A verifier" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <Link to={`${basePath}/reservations/${reservation.id}`}>
+                    <Button size="sm">Verifier le retour</Button>
+                  </Link>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </Card>
 
       {reservationsQuery.isLoading ? (
@@ -253,7 +317,7 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
                 <div className="mt-5 flex justify-end">
                   <Link to={`${basePath}/reservations/${reservation.id}`}>
                     <Button variant="secondary" size="sm">
-                      Voir le detail
+                      {reservation.status === 'A_CONTROLER' ? 'Verifier le retour' : 'Voir le detail'}
                     </Button>
                   </Link>
                 </div>

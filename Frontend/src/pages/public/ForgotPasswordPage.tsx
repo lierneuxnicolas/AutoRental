@@ -52,11 +52,11 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-[70vh] items-center justify-center bg-[radial-gradient(circle_at_top,#EFF6FF,#FFFFFF_70%)] px-4 py-12">
+    <div className="flex min-h-[70vh] items-center justify-center px-4 py-12">
       <div className="w-full max-w-4xl overflow-hidden rounded-4xl border border-slate-200 bg-white shadow-[0_20px_60px_-20px_rgba(37,99,235,0.35)]">
         <div className="grid gap-0 lg:grid-cols-[1fr_1fr]">
           <div className="bg-[#0F172A] p-8 text-white sm:p-10 lg:p-12">
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-blue-200">AutoRental</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-blue-200">GetaCar</p>
             <h1 className="mt-4 text-3xl font-semibold sm:text-4xl">Mot de passe oublié</h1>
             <p className="mt-4 max-w-md text-sm leading-7 text-slate-300 sm:text-base">
               Saisissez l’adresse e-mail liée à votre compte. Si elle correspond à un compte actif, vous recevrez des instructions de réinitialisation.

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AxiosError } from 'axios'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { CardElement, Elements, useElements, useStripe } from '@stripe/react-stripe-js'
+import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js'
 import { loadStripe } from '@stripe/stripe-js'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, LoadingSpinner } from '../../components/feedback'
@@ -29,6 +29,19 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms)
   })
+}
+
+async function pollReservationConfirmation(reservationId: number): Promise<boolean> {
+  for (let attempt = 0; attempt < MAX_CONFIRMATION_POLLS; attempt += 1) {
+    await delay(CONFIRMATION_POLL_DELAY_MS)
+    const refreshedReservation = await getReservationById(reservationId)
+
+    if (refreshedReservation.status === 'CONFIRMEE') {
+      return true
+    }
+  }
+
+  return false
 }
 
 function formatDateTimeLabel(value: string): string {
@@ -111,12 +124,12 @@ function statusVariant(status?: ReservationStatus): 'neutral' | 'info' | 'succes
 }
 
 interface StripePaymentFormProps {
-  clientSecret: string
   isSubmitting: boolean
+  returnUrl: string
   onSubmit: () => Promise<void>
 }
 
-function StripePaymentForm({ clientSecret, isSubmitting, onSubmit }: StripePaymentFormProps) {
+function StripePaymentForm({ isSubmitting, returnUrl, onSubmit }: StripePaymentFormProps) {
   const stripe = useStripe()
   const elements = useElements()
   const [cardError, setCardError] = useState<string | null>(null)
@@ -126,23 +139,18 @@ function StripePaymentForm({ clientSecret, isSubmitting, onSubmit }: StripePayme
       return
     }
 
-    const cardElement = elements.getElement(CardElement)
-
-    if (!cardElement) {
-      setCardError('Le formulaire de carte est indisponible. Rechargez la page.')
-      return
-    }
-
     setCardError(null)
 
-    const result = await stripe.confirmCardPayment(clientSecret, {
-      payment_method: {
-        card: cardElement,
+    const result = await stripe.confirmPayment({
+      elements,
+      confirmParams: {
+        return_url: returnUrl,
       },
+      redirect: 'if_required',
     })
 
     if (result.error) {
-      setCardError(result.error.message ?? 'Le paiement a ete refuse. Verifiez votre carte et reessayez.')
+      setCardError(result.error.message ?? 'Le paiement a ete refuse. Verifiez votre moyen de paiement et reessayez.')
       return
     }
 
@@ -152,16 +160,14 @@ function StripePaymentForm({ clientSecret, isSubmitting, onSubmit }: StripePayme
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <CardElement
+        <PaymentElement
           options={{
-            style: {
-              base: {
-                fontSize: '16px',
-                color: '#1F2937',
-                '::placeholder': {
-                  color: '#94A3B8',
-                },
-              },
+            layout: 'tabs',
+            paymentMethodOrder: ['card', 'bancontact'],
+            wallets: {
+              applePay: 'never',
+              googlePay: 'never',
+              link: 'never',
             },
           }}
         />
@@ -176,7 +182,7 @@ function StripePaymentForm({ clientSecret, isSubmitting, onSubmit }: StripePayme
             Paiement en cours...
           </span>
         ) : (
-          'Payer maintenant'
+          'Payer 97 € et préautoriser 500 €'
         )}
       </Button>
     </div>
@@ -191,10 +197,20 @@ export default function PaymentPage() {
   const reservationIdParam = searchParams.get('reservationId')
   const reservationId = reservationIdParam ? Number(reservationIdParam) : Number.NaN
   const isReservationIdValid = Number.isInteger(reservationId) && reservationId > 0
+  const paymentIntentClientSecretParam = searchParams.get('payment_intent_client_secret')
+  const redirectStatusParam = searchParams.get('redirect_status')
 
   const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null)
   const [workflowError, setWorkflowError] = useState<string | null>(null)
   const [isProcessingConfirmation, setIsProcessingConfirmation] = useState(false)
+
+  const stripeReturnUrl = useMemo(() => {
+    if (!isReservationIdValid) {
+      return `${window.location.origin}/payment`
+    }
+
+    return `${window.location.origin}/payment?reservationId=${reservationId}`
+  }, [isReservationIdValid, reservationId])
 
   useEffect(() => {
     if (!isAuthLoading && !isAuthenticated) {
@@ -246,25 +262,12 @@ export default function PaymentPage() {
     },
   })
 
-  const pollReservationConfirmation = async (): Promise<boolean> => {
-    for (let attempt = 0; attempt < MAX_CONFIRMATION_POLLS; attempt += 1) {
-      await delay(CONFIRMATION_POLL_DELAY_MS)
-      const refreshedReservation = await getReservationById(reservationId)
-
-      if (refreshedReservation.status === 'CONFIRMEE') {
-        return true
-      }
-    }
-
-    return false
-  }
-
   const handleStripeSuccess = async () => {
     setIsProcessingConfirmation(true)
     setWorkflowError(null)
 
     try {
-      const isConfirmed = await pollReservationConfirmation()
+      const isConfirmed = await pollReservationConfirmation(reservationId)
 
       if (isConfirmed) {
         navigate('/client')
@@ -280,6 +283,66 @@ export default function PaymentPage() {
     }
   }
 
+  useEffect(() => {
+    if (!isAuthenticated || !isReservationIdValid) {
+      return
+    }
+
+    if (!paymentIntentClientSecretParam && !redirectStatusParam) {
+      return
+    }
+
+    let isCancelled = false
+
+    const resumeAfterRedirect = async () => {
+      setIsProcessingConfirmation(true)
+      setWorkflowError(null)
+
+      try {
+        const isConfirmed = await pollReservationConfirmation(reservationId)
+
+        if (isCancelled) {
+          return
+        }
+
+        if (isConfirmed) {
+          navigate('/client')
+          return
+        }
+
+        if (redirectStatusParam === 'failed') {
+          setWorkflowError('Le paiement Bancontact a echoue. Veuillez reessayer.')
+          return
+        }
+
+        setWorkflowError('Retour Stripe recu, mais confirmation backend encore en attente. Rafraichissez dans quelques instants.')
+      } catch (error) {
+        if (!isCancelled) {
+          setWorkflowError(toErrorMessage(error))
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsProcessingConfirmation(false)
+          await reservationQuery.refetch()
+        }
+      }
+    }
+
+    void resumeAfterRedirect()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [
+    isAuthenticated,
+    isReservationIdValid,
+    navigate,
+    paymentIntentClientSecretParam,
+    redirectStatusParam,
+    reservationId,
+    reservationQuery,
+  ])
+
   const paymentSummary = useMemo(() => {
     if (!reservationQuery.data) {
       return null
@@ -287,14 +350,10 @@ export default function PaymentPage() {
 
     const rentalAmount = Number(reservationQuery.data.rental_amount)
     const depositAmount = Number(reservationQuery.data.deposit_amount)
-    const totalAmount = Number.isFinite(rentalAmount) && Number.isFinite(depositAmount)
-      ? rentalAmount + depositAmount
-      : null
 
     return {
       rentalAmount,
       depositAmount,
-      totalAmount,
     }
   }, [reservationQuery.data])
 
@@ -390,19 +449,15 @@ export default function PaymentPage() {
 
                 <div className="rounded-2xl border border-slate-200 p-4">
                   <div className="flex items-center justify-between py-2">
-                    <span className="text-sm text-slate-600">Location</span>
-                    <span className="font-semibold text-[#1F2937]">{formatCurrency(reservationQuery.data.rental_amount)}</span>
+                    <span className="text-sm text-slate-600">Paiement location</span>
+                    <span className="font-semibold text-[#1F2937]">
+                      {paymentSummary ? formatCurrency(paymentSummary.rentalAmount) : 'Indisponible'}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between py-2">
                     <span className="text-sm text-slate-600">Caution</span>
-                    <span className="font-semibold text-[#1F2937]">{formatCurrency(reservationQuery.data.deposit_amount)}</span>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between border-t border-slate-200 pt-3">
-                    <span className="text-base font-semibold text-[#1F2937]">Total</span>
-                    <span className="text-xl font-semibold text-[#2563EB]">
-                      {paymentSummary?.totalAmount !== null && paymentSummary?.totalAmount !== undefined
-                        ? formatCurrency(paymentSummary.totalAmount)
-                        : 'Indisponible'}
+                    <span className="font-semibold text-[#1F2937]">
+                      {paymentSummary ? formatCurrency(paymentSummary.depositAmount) : 'Indisponible'}
                     </span>
                   </div>
                 </div>
@@ -413,8 +468,8 @@ export default function PaymentPage() {
               <div className="space-y-4">
                 <Alert
                   variant="info"
-                  title="Workflow securise"
-                  message="Le backend calcule les montants, autorise d'abord la caution, puis cree le Payment Intent de location."
+                  title="Moyen de paiement"
+                  message="Le backend calcule les montants et prépare d'abord la préautorisation de caution, puis le paiement de location."
                 />
 
                 {workflowError ? <Alert variant="danger" title="Paiement impossible" message={workflowError} /> : null}
@@ -448,11 +503,17 @@ export default function PaymentPage() {
                   </Button>
                 ) : (
                   <Elements stripe={stripePromise} options={{ clientSecret: paymentClientSecret }}>
-                    <StripePaymentForm
-                      clientSecret={paymentClientSecret}
-                      isSubmitting={isProcessingConfirmation}
-                      onSubmit={handleStripeSuccess}
-                    />
+                    <div className="space-y-3">
+                      <StripePaymentForm
+                        isSubmitting={isProcessingConfirmation}
+                        returnUrl={stripeReturnUrl}
+                        onSubmit={handleStripeSuccess}
+                      />
+                      <p className="text-sm leading-6 text-slate-600">
+                        En confirmant, vous autorisez le paiement de {paymentSummary ? formatCurrency(paymentSummary.rentalAmount) : '97.00 EUR'} ainsi qu&apos;une préautorisation séparée de{' '}
+                        {paymentSummary ? formatCurrency(paymentSummary.depositAmount) : '500.00 EUR'} pour la caution.
+                      </p>
+                    </div>
                   </Elements>
                 )}
 

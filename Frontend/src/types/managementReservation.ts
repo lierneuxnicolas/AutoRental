@@ -1,4 +1,5 @@
-import type { CompleteInspectionRequest, Inspection } from './inspection'
+import type { Inspection, InspectionDamage, InspectionPhoto } from './inspection'
+import type { ManagementInterventionResponse } from './managementIntervention'
 import type { PaginatedResponse } from './vehicle'
 
 export type ManagementReservationStatus =
@@ -33,6 +34,23 @@ export interface ReservationManagementVehicleSummary {
   energy_type: string
   transmission: string
   seats: number
+  doors: number
+}
+
+export type ManagementDepositStatus =
+  | 'CREE'
+  | 'EN_ATTENTE'
+  | 'AUTORISEE'
+  | 'A_VERIFIER'
+  | 'CAPTUREE'
+  | 'LIBEREE'
+  | 'ECHOUEE'
+  | 'ANNULEE'
+  | 'EXPIREE'
+
+export interface ManagementInspection extends Inspection {
+  photos: InspectionPhoto[]
+  damages: InspectionDamage[]
 }
 
 export interface ReservationManagementDetail {
@@ -45,6 +63,10 @@ export interface ReservationManagementDetail {
   status: ManagementReservationStatus
   rental_amount: string
   deposit_amount: string
+  deposit_status: ManagementDepositStatus | null
+  departure_inspection: ManagementInspection | null
+  return_inspection: ManagementInspection | null
+  interventions: ManagementInterventionResponse[]
   created_at: string
   confirmed_at: string | null
   cancelled_at: string | null
@@ -86,6 +108,28 @@ export interface ManagementReservationDetailPathParams {
   id: number
 }
 
-export type ManagementReservationClosureRequest = CompleteInspectionRequest
+export interface ManagementReservationValidationRequest {
+  confirm_vehicle_available?: boolean
+}
 
-export type ManagementReservationClosureResponse = Inspection
+export interface ManagementReservationValidationResponse {
+  message: string
+  reservation: ReservationManagementDetail
+}
+
+export type ManagementIssueAnomalyType = 'MECANIQUE' | 'ACCIDENT' | 'NETTOYAGE' | 'AUTRE'
+
+export type ManagementIssueVehicleStatus = 'MAINTENANCE' | 'ACCIDENTE' | 'NETTOYAGE' | 'A_CONTROLER' | 'INDISPONIBLE'
+
+export interface ManagementReservationIssueRequest {
+  anomaly_type: ManagementIssueAnomalyType
+  comment?: string
+  vehicle_status: ManagementIssueVehicleStatus
+  evidence_files?: File[]
+}
+
+export interface ManagementReservationIssueResponse {
+  message: string
+  reservation: ReservationManagementDetail
+  intervention: ManagementInterventionResponse | null
+}

@@ -80,18 +80,13 @@ export default function ClientNotificationsPage() {
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mb-4 flex items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Mon espace</p>
-          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Notifications</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Consultez vos notifications et gérez rapidement celles qui restent à lire.
-          </p>
+          <h1 className="text-3xl font-semibold text-[#0F172A]">Notifications</h1>
         </div>
 
         <div className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 shadow-sm">
-          <p className="text-sm text-slate-600">Non lues</p>
-          <p className="text-2xl font-semibold text-[#0F172A]">{unreadCount}</p>
+          <p className="whitespace-nowrap text-sm font-semibold text-[#0F172A]">Non lu : {unreadCount}</p>
         </div>
       </div>
 
@@ -147,15 +142,10 @@ export default function ClientNotificationsPage() {
                   </div>
                 }
               >
-                <div className="space-y-4">
-                  <p className="text-sm leading-7 text-slate-700">{notification.message}</p>
-
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E7EB] pt-4">
-                    <div className="text-sm text-slate-500">
-                      {notification.read_at ? `Lue le ${formatDateTime(notification.read_at)}` : 'Pas encore lue'}
-                    </div>
-
-                    {!notification.is_read ? (
+                <div className="space-y-3">
+                  {!notification.is_read ? (
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <p className="flex-1 text-sm leading-7 text-slate-700">{notification.message}</p>
                       <Button
                         variant="secondary"
                         size="sm"
@@ -164,8 +154,16 @@ export default function ClientNotificationsPage() {
                       >
                         {isPending ? 'Mise à jour...' : 'Marquer comme lue'}
                       </Button>
-                    ) : null}
-                  </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm leading-7 text-slate-700">{notification.message}</p>
+                  )}
+
+                  {notification.read_at ? (
+                    <div className="text-sm text-slate-500">
+                      {`Lue le ${formatDateTime(notification.read_at)}`}
+                    </div>
+                  ) : null}
                 </div>
               </Card>
             )
