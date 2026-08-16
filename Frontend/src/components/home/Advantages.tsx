@@ -10,26 +10,26 @@ type Advantage = {
 
 const ADVANTAGES: Advantage[] = [
   {
-    title: 'Location 100 % en ligne',
+    title: 'Location 100 % autonome',
     description:
-      'Réservez, payez et gérez votre location directement depuis votre espace personnel.',
+      'Réservez et gérez votre location directement depuis votre espace personnel.',
     Icon: Smartphone,
   },
   {
-    title: 'Déverrouillage simple',
+    title: 'Déverrouillage facile',
     description:
       "Accédez à votre véhicule depuis l'application après avoir réalisé l'état des lieux.",
     Icon: Unlock,
   },
   {
-    title: 'Paiement sécurisé',
-    description: 'Vos paiements et votre caution sont traités de manière sécurisée.',
+    title: 'Assistance digitale',
+    description: 'Retrouvez les informations utiles et l’aide directement dans votre espace.',
     Icon: ShieldCheck,
   },
   {
-    title: 'Assistance',
+    title: 'Disponible 24h/24',
     description:
-      'Retrouvez facilement les informations utiles et signalez un problème pendant votre location.',
+      'Consultez vos informations de location à tout moment, en continu.',
     Icon: Headphones,
   },
 ]

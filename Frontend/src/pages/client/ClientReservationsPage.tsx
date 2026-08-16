@@ -6,38 +6,9 @@ import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
-import Input from '../../components/ui/Input'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import { getReservations } from '../../services/reservationService'
 import type { ReservationDetail, ReservationListQueryParams, ReservationStatus } from '../../types/reservation'
-
-type ReservationFilter = 'all' | 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled'
-
-const filterLabels: Record<ReservationFilter, string> = {
-  all: 'Toutes',
-  pending: 'En attente',
-  confirmed: 'Confirmées',
-  in_progress: 'En cours',
-  completed: 'Terminées',
-  cancelled: 'Annulées',
-}
-
-const pendingStatuses: ReservationStatus[] = ['BROUILLON', 'EN_ATTENTE_CAUTION', 'EN_ATTENTE_PAIEMENT', 'A_CONTROLER']
-
-function mapFilterToApiStatus(filter: ReservationFilter): string | undefined {
-  switch (filter) {
-    case 'confirmed':
-      return 'CONFIRMEE'
-    case 'in_progress':
-      return 'EN_COURS'
-    case 'completed':
-      return 'TERMINEE'
-    case 'cancelled':
-      return 'ANNULEE'
-    default:
-      return undefined
-  }
-}
 
 function mapStatusToUi(status: ReservationStatus | undefined): { label: string; variant: StatusVariant } {
   switch (status) {
@@ -99,9 +70,6 @@ function canContinuePayment(status: ReservationStatus | undefined): boolean {
 }
 
 export default function ClientReservationsPage() {
-  const [searchInput, setSearchInput] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [activeFilter, setActiveFilter] = useState<ReservationFilter>('all')
   const [page, setPage] = useState(1)
 
   const queryParams: ReservationListQueryParams = {
@@ -109,80 +77,18 @@ export default function ClientReservationsPage() {
     ordering: '-created_at',
   }
 
-  if (searchQuery.trim().length > 0) {
-    queryParams.search = searchQuery.trim()
-  }
-
-  const apiStatus = mapFilterToApiStatus(activeFilter)
-
-  if (apiStatus) {
-    queryParams.status = apiStatus
-  }
-
   const reservationsQuery = useQuery({
     queryKey: ['client-reservations', queryParams],
     queryFn: () => getReservations(queryParams),
   })
 
-  const reservations = useMemo(() => {
-    const results = reservationsQuery.data?.results ?? []
-
-    if (activeFilter !== 'pending') {
-      return results
-    }
-
-    return results.filter((reservation) => pendingStatuses.includes(reservation.status ?? 'BROUILLON'))
-  }, [activeFilter, reservationsQuery.data?.results])
-
-  const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setPage(1)
-    setSearchQuery(searchInput)
-  }
-
-  const handleFilterClick = (filter: ReservationFilter) => {
-    setActiveFilter(filter)
-    setPage(1)
-  }
+  const reservations = useMemo(() => reservationsQuery.data?.results ?? [], [reservationsQuery.data?.results])
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Mon espace</p>
-        <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Mes réservations</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-          Consultez l'historique, le statut et les informations clés de vos réservations.
-        </p>
+      <div className="mb-6">
+        <h1 className="text-3xl font-semibold text-[#0F172A]">Mes réservations</h1>
       </div>
-
-      <Card className="mb-6">
-        <form className="grid gap-4 md:grid-cols-[1fr_auto]" onSubmit={handleSearchSubmit}>
-          <Input
-            label="Recherche par référence"
-            placeholder="Ex: RES-2026-0001"
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-          />
-          <div className="flex items-end">
-            <Button type="submit" className="w-full md:w-auto">
-              Rechercher
-            </Button>
-          </div>
-        </form>
-
-        <div className="mt-5 flex flex-wrap gap-2">
-          {(Object.keys(filterLabels) as ReservationFilter[]).map((filter) => (
-            <Button
-              key={filter}
-              variant={activeFilter === filter ? 'primary' : 'secondary'}
-              size="sm"
-              onClick={() => handleFilterClick(filter)}
-            >
-              {filterLabels[filter]}
-            </Button>
-          ))}
-        </div>
-      </Card>
 
       {reservationsQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
@@ -219,8 +125,9 @@ export default function ClientReservationsPage() {
             return (
               <Card
                 key={reservation.id}
+                className="[&>div:first-child]:px-5 [&>div:first-child]:py-3 [&>div:nth-child(2)]:px-5 [&>div:nth-child(2)]:py-4"
                 header={
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Référence</p>
                       <p className="text-base font-semibold text-[#0F172A]">{reservation.reference}</p>
@@ -229,40 +136,40 @@ export default function ClientReservationsPage() {
                   </div>
                 }
               >
-                <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-x-4 gap-y-3 text-sm text-slate-700 md:grid-cols-2 lg:grid-cols-3">
                   <div>
                     <p className="font-medium text-[#1F2937]">Véhicule</p>
-                    <p className="mt-1">{vehicleLabel(reservation)}</p>
+                    <p>{vehicleLabel(reservation)}</p>
                   </div>
                   <div>
                     <p className="font-medium text-[#1F2937]">Période</p>
-                    <p className="mt-1">{formatPeriod(reservation.start_at, reservation.end_at)}</p>
+                    <p>{formatPeriod(reservation.start_at, reservation.end_at)}</p>
                   </div>
                   <div>
                     <p className="font-medium text-[#1F2937]">Date de création</p>
-                    <p className="mt-1">{formatDateTime(reservation.created_at)}</p>
+                    <p>{formatDateTime(reservation.created_at)}</p>
                   </div>
                   <div>
                     <p className="font-medium text-[#1F2937]">Montant</p>
-                    <p className="mt-1">{reservation.rental_amount} EUR</p>
+                    <p>{reservation.rental_amount} EUR</p>
                   </div>
                   <div>
                     <p className="font-medium text-[#1F2937]">Caution</p>
-                    <p className="mt-1">{reservation.deposit_amount} EUR</p>
+                    <p>{reservation.deposit_amount} EUR</p>
                   </div>
                 </div>
 
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <Link to={`/client/reservations/${reservation.id}`}>
-                    <Button variant="secondary" size="sm">
-                      Voir le détail
-                    </Button>
-                  </Link>
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
                   {canContinuePayment(reservation.status) ? (
                     <Link to={`/payment?reservationId=${reservation.id}`}>
                       <Button size="sm">Continuer le paiement</Button>
                     </Link>
                   ) : null}
+                  <Link to={`/client/reservations/${reservation.id}`}>
+                    <Button variant="secondary" size="sm">
+                      Voir les détails
+                    </Button>
+                  </Link>
                 </div>
               </Card>
             )

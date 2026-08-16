@@ -13,6 +13,7 @@ export interface GetVehiclesParams {
 export interface GetAvailableVehiclesParams {
   start?: string
   end?: string
+  page?: number
 }
 
 export async function getVehicles(params?: GetVehiclesParams): Promise<VehiclesApiResponse> {

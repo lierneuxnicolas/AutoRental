@@ -125,12 +125,8 @@ export default function ClientInvoicesPage() {
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Mon espace</p>
-        <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Mes factures</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-          Retrouvez vos factures, consultez leur detail et telechargez vos justificatifs PDF.
-        </p>
+      <div className="mb-6">
+        <h1 className="text-3xl font-semibold text-[#0F172A]">Mes factures</h1>
       </div>
 
       {invoicesQuery.isLoading ? (

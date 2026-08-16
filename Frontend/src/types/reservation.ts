@@ -1,7 +1,10 @@
+import type { Inspection, InspectionPhoto } from './inspection'
+
 export interface ReservationCreateRequest {
   vehicle_id: number
   start_at: string
   end_at: string
+  insurance_type?: 'STANDARD' | 'DUO' | 'OMNIUM'
 }
 
 export interface ReservationListQueryParams {
@@ -43,14 +46,23 @@ export interface ReservationCreateResponse {
   end_at: string
   status?: ReservationStatus
   rental_amount: string
+  insurance_type?: 'STANDARD' | 'DUO' | 'OMNIUM'
   deposit_amount: string
+  total_amount: string
   created_at: string
   confirmed_at?: string | null
   cancelled_at?: string | null
   cancellation_reason?: string
 }
 
-export type ReservationDetail = ReservationCreateResponse
+export interface ReservationInspectionDetail extends Inspection {
+  photos: InspectionPhoto[]
+}
+
+export interface ReservationDetail extends ReservationCreateResponse {
+  departure_inspection?: ReservationInspectionDetail | null
+  return_inspection?: ReservationInspectionDetail | null
+}
 
 export interface PaginatedReservationListResponse {
   count: number

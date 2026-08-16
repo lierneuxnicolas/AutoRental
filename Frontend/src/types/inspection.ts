@@ -41,6 +41,8 @@ export interface CompleteInspectionRequest {
   mileage: number
   energy_level_percent: number
   comments?: string
+  has_critical_issue?: boolean
+  critical_issue_description?: string
 }
 
 export interface InspectionPhoto {
@@ -73,9 +75,24 @@ export interface InspectionDamage {
   description: string
   severity: Severity
   location: string
-  photo_ids: string
+  photo_ids: number[]
   created_at: string
   updated_at: string
+}
+
+export interface DepartureVehicleStateRequest {
+  mileage: number
+  energy_level_percent: number
+  anomaly_present: boolean
+  anomaly_description?: string
+  anomaly_severity?: Severity
+  photo_ids?: number[]
+}
+
+export interface DepartureVehicleStateResponse {
+  inspection: Inspection
+  damage: InspectionDamage | null
+  vehicle_status: string
 }
 
 export interface VehicleAccessActionResponse {

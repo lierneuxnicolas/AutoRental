@@ -11,6 +11,8 @@ import PublicLayout from '../components/layout/PublicLayout'
 import ProtectedRoute from './ProtectedRoute'
 import FeaturePlaceholderPage from '../pages/private/FeaturePlaceholderPage'
 import PrivateAreaPage from '../pages/private/PrivateAreaPage'
+import FaqSection, { ContactSection } from '../components/home/FaqSection'
+import HowItWorks from '../components/home/HowItWorks'
 
 import HomePage from '../pages/public/HomePage'
 import VehiclesPage from '../pages/public/VehiclesPage'
@@ -24,12 +26,21 @@ import VerifyEmailPage from '../pages/public/VerifyEmailPage'
 import ResetPasswordPage from '../pages/public/ResetPasswordPage'
 import TermsPage from '../pages/public/TermsPage'
 import ReservationPage from '../pages/public/ReservationPage'
+import StaticInfoPage from '../pages/public/StaticInfoPage'
+import ClientDashboardPage from '../pages/client/ClientDashboardPage'
 import PaymentPage from '../pages/client/PaymentPage'
 import ClientProfilePage from '../pages/client/ClientProfilePage'
 import ClientReservationsPage from '../pages/client/ClientReservationsPage'
 import ClientReservationDetailPage from '../pages/client/ClientReservationDetailPage'
-import DepartureInspectionPage from '../pages/client/DepartureInspectionPage'
-import ReturnInspectionPage from '../pages/client/ReturnInspectionPage'
+import ClientVehicleUnlockPage from '../pages/client/ClientVehicleUnlockPage'
+import DepartureInspectionPage, { DepartureInspectionInteriorPage } from '../pages/client/DepartureInspectionPage'
+import DepartureInspectionVehicleStatePage from '../pages/client/DepartureInspectionVehicleStatePage'
+import DepartureInspectionConfirmationPage from '../pages/client/DepartureInspectionConfirmationPage'
+import ReturnInspectionPage, {
+  ReturnInspectionConfirmationPage,
+  ReturnInspectionInteriorPage,
+  ReturnInspectionVehicleStatePage,
+} from '../pages/client/ReturnInspectionPage'
 import ClientInvoicesPage from '../pages/client/ClientInvoicesPage'
 import ClientInvoiceDetailPage from '../pages/client/ClientInvoiceDetailPage'
 import ClientNotificationsPage from '../pages/client/ClientNotificationsPage'
@@ -63,8 +74,10 @@ export default function AppRouter() {
         <Route element={<PublicLayout />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/vehicles" element={<VehiclesPage />} />
+          <Route path="/vehicles/:id/reservation" element={<VehicleDetailPage />} />
           <Route path="/vehicles/:id" element={<VehicleDetailPage />} />
           <Route path="/search" element={<SearchPage />} />
+          <Route path="/vehicles/:vehicleId/simulation" element={<SimulationPage />} />
           <Route path="/simulation" element={<SimulationPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
@@ -72,6 +85,36 @@ export default function AppRouter() {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/terms" element={<TermsPage />} />
+          <Route
+            path="/about"
+            element={<StaticInfoPage title="Qui sommes-nous ?" description="GetACar simplifie la location de véhicules avec une expérience digitale claire, rapide et accessible." />}
+          />
+          <Route
+            path="/legal-notice"
+            element={<StaticInfoPage title="Mentions légales" description="Cette page regroupe les informations légales de GetACar. Le contenu détaillé sera publié prochainement." />}
+          />
+          <Route
+            path="/privacy"
+            element={<StaticInfoPage title="Données personnelles" description="GetACar prépare cette page pour détailler le traitement des données personnelles et vos droits." />}
+          />
+          <Route
+            path="/cookies"
+            element={<StaticInfoPage title="Paramètres des cookies" description="La gestion des cookies GetACar sera détaillée ici prochainement." />}
+          />
+          <Route
+            path="/sitemap"
+            element={<StaticInfoPage title="Plan du site" description="Retrouvez ici la structure des pages publiques et privées de GetACar." />}
+          />
+          <Route
+            path="/contact"
+            element={
+              <div className="mx-auto max-w-6xl px-4 pb-10">
+                <HowItWorks />
+                <FaqSection />
+                <ContactSection />
+              </div>
+            }
+          />
           <Route path="/reservation" element={<ReservationPage />} />
           <Route path="/payment" element={<PaymentPage />} />
         </Route>
@@ -81,16 +124,7 @@ export default function AppRouter() {
             path="/client"
             element={<PublicLayout />}
           >
-            <Route
-              index
-              element={
-                <PrivateAreaPage
-                  title="Mon espace"
-                  roleLabel="client"
-                  sections={['Informations personnelles', 'Mes réservations', 'Mes factures']}
-                />
-              }
-            />
+            <Route index element={<ClientDashboardPage />} />
             <Route
               path="reservations"
               element={<ClientReservationsPage />}
@@ -100,12 +134,40 @@ export default function AppRouter() {
               element={<ClientReservationDetailPage />}
             />
             <Route
+              path="reservations/:id/unlock"
+              element={<ClientVehicleUnlockPage />}
+            />
+            <Route
               path="reservations/:id/departure-inspection"
               element={<DepartureInspectionPage />}
             />
             <Route
+              path="reservations/:id/departure-inspection/interior"
+              element={<DepartureInspectionInteriorPage />}
+            />
+            <Route
+              path="reservations/:id/departure-inspection/vehicle-state"
+              element={<DepartureInspectionVehicleStatePage />}
+            />
+            <Route
+              path="reservations/:id/departure-inspection/confirmation"
+              element={<DepartureInspectionConfirmationPage />}
+            />
+            <Route
               path="reservations/:id/return-inspection"
               element={<ReturnInspectionPage />}
+            />
+            <Route
+              path="reservations/:id/return-inspection/interior"
+              element={<ReturnInspectionInteriorPage />}
+            />
+            <Route
+              path="reservations/:id/return-inspection/vehicle-state"
+              element={<ReturnInspectionVehicleStatePage />}
+            />
+            <Route
+              path="reservations/:id/return-inspection/confirmation"
+              element={<ReturnInspectionConfirmationPage />}
             />
             <Route
               path="profile"

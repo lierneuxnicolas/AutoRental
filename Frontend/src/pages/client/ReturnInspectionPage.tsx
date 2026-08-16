@@ -1,29 +1,33 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AxiosError } from 'axios'
-import { useMutation } from '@tanstack/react-query'
-import { Link, useParams } from 'react-router-dom'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
-import DamageForm from '../../components/inspections/DamageForm'
+import DepartureFlowProgress from '../../components/inspections/DepartureFlowProgress'
+import ReservationProgressBanner from '../../components/reservations/ReservationProgressBanner'
 import InspectionPhotoSlot from '../../components/inspections/InspectionPhotoSlot'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
-import Input from '../../components/ui/Input'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import {
   completeInspection,
   createReturnInspection,
   lockVehicle,
+  saveDepartureVehicleState,
   uploadInspectionPhoto,
 } from '../../services/inspectionService'
+import { getReservationById } from '../../services/reservationService'
 import type {
   CompleteInspectionRequest,
+  DepartureVehicleStateRequest,
   Inspection,
-  InspectionDamage,
   InspectionPhoto,
-  LockVehicleResponse,
   PhotoType,
+  Severity,
 } from '../../types/inspection'
+import type { ReservationInspectionDetail } from '../../types/reservation'
+import { resolveMediaUrl } from '../../utils/media'
 
 type ApiErrorPayload = {
   detail?: string
@@ -38,44 +42,82 @@ type PhotoSlotState = {
   errorMessage: string | null
 }
 
-const MANDATORY_PHOTO_ORDER: PhotoType[] = [
-  'AVANT',
-  'ARRIERE',
-  'COTE_GAUCHE',
-  'COTE_DROIT',
-  'INTERIEUR',
-  'TABLEAU_DE_BORD',
-]
-
-const PHOTO_LABELS: Record<PhotoType, string> = {
-  AVANT: 'Avant',
-  ARRIERE: 'Arriere',
-  COTE_GAUCHE: 'Cote gauche',
-  COTE_DROIT: 'Cote droit',
-  INTERIEUR: 'Interieur',
-  TABLEAU_DE_BORD: 'Tableau de bord',
-  DOMMAGE: 'Dommage',
-  AUTRE: 'Autre',
+type InspectionStepPhotoSlot = {
+  key: string
+  label: string
+  photoType: PhotoType
+  position?: number
 }
 
-function isPhotoType(value: string): value is PhotoType {
-  return ['AVANT', 'ARRIERE', 'COTE_GAUCHE', 'COTE_DROIT', 'INTERIEUR', 'TABLEAU_DE_BORD', 'DOMMAGE', 'AUTRE'].includes(value)
+const EXTERIOR_PHOTO_SLOTS: InspectionStepPhotoSlot[] = [
+  { key: 'exterior_front_left', label: 'Avant gauche', photoType: 'AVANT' },
+  { key: 'exterior_front_right', label: 'Avant droit', photoType: 'COTE_DROIT' },
+  { key: 'exterior_rear_left', label: 'Arriere gauche', photoType: 'COTE_GAUCHE' },
+  { key: 'exterior_rear_right', label: 'Arriere droit', photoType: 'ARRIERE' },
+]
+
+const INTERIOR_PHOTO_SLOTS: InspectionStepPhotoSlot[] = [
+  { key: 'interior_dashboard', label: 'Tableau de bord', photoType: 'TABLEAU_DE_BORD' },
+  { key: 'interior_front_seats', label: 'Sieges avant', photoType: 'INTERIEUR', position: 1 },
+  { key: 'interior_rear_seats', label: 'Sieges arriere', photoType: 'INTERIEUR', position: 2 },
+  { key: 'interior_trunk', label: 'Coffre', photoType: 'AUTRE', position: 1 },
+]
+
+const SEVERITY_OPTIONS: Array<{ value: Severity; label: string }> = [
+  { value: 'MINEUR', label: 'Mineure' },
+  { value: 'MODERE', label: 'Moderee' },
+  { value: 'MAJEUR', label: 'Majeure' },
+  { value: 'CRITIQUE', label: 'Critique' },
+]
+
+const ANOMALY_PHOTO_SLOTS = [
+  { key: 'slot1', label: "Photo de l'anomalie 1", position: 1 },
+  { key: 'slot2', label: "Photo de l'anomalie 2", position: 2 },
+] as const
+
+type AnomalyPhotoSlotKey = (typeof ANOMALY_PHOTO_SLOTS)[number]['key']
+
+type AnomalyPhotoSlotState = {
+  photoId: number | null
+  previewUrl: string | null
+  isUploading: boolean
+  errorMessage: string | null
+}
+
+function buildInitialAnomalyPhotoState(): Record<AnomalyPhotoSlotKey, AnomalyPhotoSlotState> {
+  return {
+    slot1: {
+      photoId: null,
+      previewUrl: null,
+      isUploading: false,
+      errorMessage: null,
+    },
+    slot2: {
+      photoId: null,
+      previewUrl: null,
+      isUploading: false,
+      errorMessage: null,
+    },
+  }
 }
 
 function toErrorMessage(error: unknown): string {
   const fallback = 'Une erreur est survenue. Veuillez reessayer.'
   const axiosError = error as AxiosError<ApiErrorPayload>
   const payload = axiosError.response?.data
-  if (!payload) return fallback
-  if (typeof payload.detail === 'string' && payload.detail.trim().length > 0) return payload.detail
-  if (Array.isArray(payload.non_field_errors) && payload.non_field_errors.length > 0) return payload.non_field_errors.join(' ')
-  const fieldEntries = Object.entries(payload).filter(
-    ([key, value]) => key !== 'detail' && key !== 'non_field_errors' && Array.isArray(value) && value.length > 0,
-  )
-  if (fieldEntries.length > 0) {
-    const [field, messages] = fieldEntries[0]
-    return `${field}: ${String((messages as unknown[])[0])}`
+
+  if (!payload) {
+    return fallback
   }
+
+  if (typeof payload.detail === 'string' && payload.detail.trim().length > 0) {
+    return payload.detail
+  }
+
+  if (Array.isArray(payload.non_field_errors) && payload.non_field_errors.length > 0) {
+    return payload.non_field_errors.join(' ')
+  }
+
   return fallback
 }
 
@@ -94,162 +136,471 @@ function inspectionStatusToBadge(status?: string): { variant: StatusVariant; lab
   }
 }
 
-function buildInitialPhotoState(): Record<PhotoType, PhotoSlotState> {
-  return {
-    AVANT: { selectedFile: null, previewUrl: null, uploadedPhoto: null, errorMessage: null },
-    ARRIERE: { selectedFile: null, previewUrl: null, uploadedPhoto: null, errorMessage: null },
-    COTE_GAUCHE: { selectedFile: null, previewUrl: null, uploadedPhoto: null, errorMessage: null },
-    COTE_DROIT: { selectedFile: null, previewUrl: null, uploadedPhoto: null, errorMessage: null },
-    INTERIEUR: { selectedFile: null, previewUrl: null, uploadedPhoto: null, errorMessage: null },
-    TABLEAU_DE_BORD: { selectedFile: null, previewUrl: null, uploadedPhoto: null, errorMessage: null },
-    DOMMAGE: { selectedFile: null, previewUrl: null, uploadedPhoto: null, errorMessage: null },
-    AUTRE: { selectedFile: null, previewUrl: null, uploadedPhoto: null, errorMessage: null },
+function buildInitialPhotoState(): Record<string, PhotoSlotState> {
+  const allSlots = [...EXTERIOR_PHOTO_SLOTS, ...INTERIOR_PHOTO_SLOTS]
+  return allSlots.reduce<Record<string, PhotoSlotState>>((accumulator, slot) => {
+    accumulator[slot.key] = {
+      selectedFile: null,
+      previewUrl: null,
+      uploadedPhoto: null,
+      errorMessage: null,
+    }
+    return accumulator
+  }, {})
+}
+
+function getPhotoSlotKeyFromServerPhoto(photo: InspectionPhoto): string | null {
+  switch (photo.photo_type) {
+    case 'AVANT':
+      return 'exterior_front_left'
+    case 'COTE_DROIT':
+      return 'exterior_front_right'
+    case 'COTE_GAUCHE':
+      return 'exterior_rear_left'
+    case 'ARRIERE':
+      return 'exterior_rear_right'
+    case 'TABLEAU_DE_BORD':
+      return 'interior_dashboard'
+    case 'INTERIEUR':
+      if (photo.position === 1) {
+        return 'interior_front_seats'
+      }
+      if (photo.position === 2) {
+        return 'interior_rear_seats'
+      }
+      return null
+    case 'AUTRE':
+      if (photo.position === 1) {
+        return 'interior_trunk'
+      }
+      return null
+    default:
+      return null
+  }
+}
+
+function buildPhotoStateFromInspection(inspection: ReservationInspectionDetail | null): Record<string, PhotoSlotState> {
+  const state = buildInitialPhotoState()
+
+  if (!inspection) {
+    return state
+  }
+
+  inspection.photos.forEach((photo) => {
+    const slotKey = getPhotoSlotKeyFromServerPhoto(photo)
+    if (!slotKey) {
+      return
+    }
+
+    state[slotKey] = {
+      selectedFile: null,
+      previewUrl: resolveMediaUrl(photo.file),
+      uploadedPhoto: photo,
+      errorMessage: null,
+    }
+  })
+
+  return state
+}
+
+function revokePreviewUrl(previewUrl: string | null) {
+  if (previewUrl?.startsWith('blob:')) {
+    URL.revokeObjectURL(previewUrl)
   }
 }
 
 function parsePositiveInteger(value: string): number | null {
-  if (value.trim().length === 0) return null
+  if (value.trim().length === 0) {
+    return null
+  }
+
   const parsed = Number(value)
-  if (!Number.isInteger(parsed) || parsed < 0) return null
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return null
+  }
+
   return parsed
 }
 
+function ReturnInspectionLayout({
+  children,
+  stepIndex,
+  inspection,
+  progress,
+  useDepartureProgressBanner = false,
+  showInspectionSummary = true,
+}: {
+  children: React.ReactNode
+  stepIndex: number
+  inspection: Inspection | null
+  progress: number
+  useDepartureProgressBanner?: boolean
+  showInspectionSummary?: boolean
+}) {
+  const steps = [
+    { index: 1, label: 'Extérieur', status: 'done' as const },
+    { index: 2, label: 'Intérieur', status: 'future' as const },
+    { index: 3, label: 'État du véhicule', status: 'future' as const },
+    { index: 4, label: 'Confirmation', status: 'future' as const },
+  ] as Array<{ index: number; label: string; status: 'done' | 'active' | 'future' }>
+
+  steps[stepIndex - 1] = { ...steps[stepIndex - 1], status: 'active' }
+  for (let i = 0; i < stepIndex - 1; i += 1) {
+    steps[i] = { ...steps[i], status: 'done' }
+  }
+
+  return (
+    <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="relative left-1/2 mb-6 w-[min(100vw-2rem,72rem)] -translate-x-1/2 sm:w-[min(100vw-3rem,72rem)] lg:w-[min(100vw-4rem,72rem)]">
+        {useDepartureProgressBanner ? (
+          <ReservationProgressBanner
+            className="mb-6 sm:mb-8"
+            steps={steps.map((step) => ({
+              order: step.index,
+              label: step.label,
+              status: step.status,
+            }))}
+          />
+        ) : (
+          <DepartureFlowProgress steps={steps} />
+        )}
+      </div>
+
+      {inspection && showInspectionSummary ? (
+        <Card className="mb-6">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-[#1F2937]">Progression</p>
+              <p className="text-sm font-semibold text-[#0F172A]">{progress}%</p>
+            </div>
+            <div className="h-3 overflow-hidden rounded-full bg-[#E5E7EB]">
+              <div className="h-full rounded-full bg-[#2563EB] transition-all" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inspection</p>
+                <p className="text-base font-semibold text-[#0F172A]">#{inspection.id}</p>
+              </div>
+              <StatusBadge variant={inspectionStatusToBadge(inspection.status).variant} label={inspectionStatusToBadge(inspection.status).label} />
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      <div className="space-y-6">{children}</div>
+    </section>
+  )
+}
+
 export default function ReturnInspectionPage() {
+  return <ReturnInspectionStepOne />
+}
+
+function ReturnInspectionStepOne() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const reservationId = Number(id)
   const isReservationIdValid = Number.isInteger(reservationId) && reservationId > 0
 
-  const [inspection, setInspection] = useState<Inspection | null>(null)
-  const [mandatoryPhotoTypes, setMandatoryPhotoTypes] = useState<PhotoType[]>([])
-  const [backendMissingFields, setBackendMissingFields] = useState<string[]>([])
-  const [photoState, setPhotoState] = useState<Record<PhotoType, PhotoSlotState>>(buildInitialPhotoState)
-  const [damages, setDamages] = useState<InspectionDamage[]>([])
+  const reservationQuery = useQuery({
+    queryKey: ['client-reservation', reservationId],
+    queryFn: () => getReservationById(reservationId),
+    enabled: isReservationIdValid,
+  })
 
-  const [mileageInput, setMileageInput] = useState('')
-  const [energyLevelInput, setEnergyLevelInput] = useState('')
-  const [commentsInput, setCommentsInput] = useState('')
+  const inspection = reservationQuery.data?.return_inspection ?? null
 
-  const [globalSuccess, setGlobalSuccess] = useState<string | null>(null)
+  const [photoState, setPhotoState] = useState<Record<string, PhotoSlotState>>(buildInitialPhotoState)
   const [globalError, setGlobalError] = useState<string | null>(null)
-  const [lockResult, setLockResult] = useState<LockVehicleResponse | null>(null)
-  const [lockError, setLockError] = useState<string | null>(null)
+  const uploadingSlotKeysRef = useRef<Set<string>>(new Set())
+  const hasAttemptedInitializationRef = useRef(false)
 
-  // Gather all successfully uploaded photos for DamageForm photo linking
-  const allUploadedPhotos = useMemo(() => {
-    return Object.values(photoState)
-      .map((slot) => slot.uploadedPhoto)
-      .filter((photo): photo is InspectionPhoto => photo !== null)
-  }, [photoState])
-
-  const startInspectionMutation = useMutation({
+  const startMutation = useMutation({
     mutationFn: () => createReturnInspection(reservationId),
     onSuccess: (response) => {
-      setInspection(response.inspection)
-      setBackendMissingFields(response.missing_fields)
-      setMandatoryPhotoTypes(
-        MANDATORY_PHOTO_ORDER.filter((photoType) =>
-          response.mandatory_photo_types.some((item) => isPhotoType(item) && item === photoType),
-        ),
-      )
+      const nextInspection = response.inspection
+      setPhotoState(buildPhotoStateFromInspection(response.inspection as unknown as ReservationInspectionDetail))
+      if (nextInspection && nextInspection.id) {
+        void reservationQuery.refetch()
+      }
       setGlobalError(null)
-      setGlobalSuccess("Etat des lieux de retour initialise. Ajoutez les photos et renseignez les donnees de cloture.")
     },
     onError: (error) => {
-      setGlobalSuccess(null)
       setGlobalError(toErrorMessage(error))
     },
   })
 
-  const uploadPhotoMutation = useMutation({
-    mutationFn: async ({ photoType, file }: { photoType: PhotoType; file: File }) => {
-      if (!inspection) throw new Error('Inspection non initialisee.')
-      const photo = await uploadInspectionPhoto(inspection.id, { file, photo_type: photoType })
-      return { photoType, photo }
-    },
-    onSuccess: ({ photoType, photo }) => {
+  useEffect(() => {
+    hasAttemptedInitializationRef.current = false
+  }, [reservationId])
+
+  useEffect(() => {
+    if (!isReservationIdValid || reservationQuery.isLoading || reservationQuery.isFetching || reservationQuery.isError) {
+      return
+    }
+    if (inspection || startMutation.isPending || hasAttemptedInitializationRef.current) {
+      return
+    }
+
+    hasAttemptedInitializationRef.current = true
+    void startMutation.mutate()
+  }, [inspection, isReservationIdValid, reservationQuery.isFetching, reservationQuery.isLoading, startMutation, startMutation.isPending])
+
+  useEffect(() => {
+    if (!reservationQuery.data?.return_inspection) {
+      return
+    }
+    setPhotoState(buildPhotoStateFromInspection(reservationQuery.data.return_inspection))
+    setGlobalError(null)
+  }, [reservationQuery.data?.return_inspection])
+
+  useEffect(() => {
+    return () => {
+      Object.values(photoState).forEach((slot) => {
+        revokePreviewUrl(slot.previewUrl)
+      })
+    }
+  }, [photoState])
+
+  const completedExteriorPhotos = useMemo(
+    () => EXTERIOR_PHOTO_SLOTS.filter((slot) => photoState[slot.key]?.uploadedPhoto !== null).length,
+    [photoState],
+  )
+
+  const canContinue = Boolean(inspection) && completedExteriorPhotos === EXTERIOR_PHOTO_SLOTS.length
+
+  const uploadSlotPhoto = async (slotConfig: InspectionStepPhotoSlot, file: File) => {
+    if (!inspection) {
+      return
+    }
+    if (uploadingSlotKeysRef.current.has(slotConfig.key)) {
+      return
+    }
+    uploadingSlotKeysRef.current.add(slotConfig.key)
+
+    setPhotoState((currentState) => {
+      const existingPreviewUrl = currentState[slotConfig.key].previewUrl
+      revokePreviewUrl(existingPreviewUrl)
+      return {
+        ...currentState,
+        [slotConfig.key]: {
+          ...currentState[slotConfig.key],
+          selectedFile: file,
+          previewUrl: URL.createObjectURL(file),
+          errorMessage: null,
+        },
+      }
+    })
+
+    setGlobalError(null)
+
+    try {
+      const uploadedPhoto = await uploadInspectionPhoto(inspection.id, {
+        file,
+        photo_type: slotConfig.photoType,
+        position: slotConfig.position,
+      })
+
       setPhotoState((currentState) => ({
         ...currentState,
-        [photoType]: { ...currentState[photoType], uploadedPhoto: photo, errorMessage: null },
+        [slotConfig.key]: {
+          ...currentState[slotConfig.key],
+          selectedFile: null,
+          previewUrl: resolveMediaUrl(uploadedPhoto.file),
+          uploadedPhoto,
+          errorMessage: null,
+        },
       }))
-      setGlobalError(null)
-    },
-    onError: (error, variables) => {
+
+      await reservationQuery.refetch()
+    } catch (error) {
       setPhotoState((currentState) => ({
         ...currentState,
-        [variables.photoType]: { ...currentState[variables.photoType], errorMessage: toErrorMessage(error) },
+        [slotConfig.key]: {
+          ...currentState[slotConfig.key],
+          errorMessage: toErrorMessage(error),
+        },
       }))
-    },
+    } finally {
+      uploadingSlotKeysRef.current.delete(slotConfig.key)
+    }
+  }
+
+  if (!isReservationIdValid) {
+    return (
+      <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+      </section>
+    )
+  }
+
+  const progress = Math.round((completedExteriorPhotos / EXTERIOR_PHOTO_SLOTS.length) * 100)
+  const reservationLoadErrorMessage = !inspection && reservationQuery.isError
+    ? `Impossible de charger la reservation pour initialiser l'etat des lieux de retour. ${toErrorMessage(reservationQuery.error)}`
+    : null
+  const isInitializingInspection = !inspection && !reservationLoadErrorMessage && (reservationQuery.isLoading || reservationQuery.isFetching || startMutation.isPending)
+  const initializationErrorMessage = !inspection && globalError
+    ? `Impossible d'initialiser automatiquement l'etat des lieux de retour. ${globalError}`
+    : null
+
+  return (
+    <ReturnInspectionLayout
+      stepIndex={1}
+      inspection={inspection}
+      progress={progress}
+      useDepartureProgressBanner
+      showInspectionSummary={false}
+    >
+      {reservationLoadErrorMessage ? <Alert className="mb-4" variant="danger" title="Chargement impossible" message={reservationLoadErrorMessage} /> : null}
+      {initializationErrorMessage ? <Alert className="mb-4" variant="danger" title="Initialisation impossible" message={initializationErrorMessage} /> : null}
+
+      {isInitializingInspection ? (
+        <Card>
+          <div className="flex items-center gap-3 text-sm text-slate-600">
+            <LoadingSpinner size="sm" aria-label="Initialisation" />
+            <p>Initialisation automatique de l'etat des lieux de retour...</p>
+          </div>
+        </Card>
+      ) : null}
+
+      {inspection ? (
+        <Card
+          header={(
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat des lieux - Extérieur</h2>
+              <Link to={`/client/reservations/${reservationId}`}>
+                <Button variant="secondary">Retour a la reservation</Button>
+              </Link>
+            </div>
+          )}
+        >
+          <p className="mb-4 text-base text-slate-600 sm:text-lg">{completedExteriorPhotos}/{EXTERIOR_PHOTO_SLOTS.length} photo(s) extérieure(s) obligatoire(s) envoyée(s).</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {EXTERIOR_PHOTO_SLOTS.map((slotConfig) => {
+              const slot = photoState[slotConfig.key]
+              return (
+                <InspectionPhotoSlot
+                  key={slotConfig.key}
+                  photoType={slotConfig.photoType}
+                  label={slotConfig.label}
+                  previewUrl={slot.previewUrl}
+                  uploadedUrl={slot.uploadedPhoto?.file ?? null}
+                  isUploading={uploadingSlotKeysRef.current.has(slotConfig.key)}
+                  errorMessage={slot.errorMessage}
+                  onFileChange={(file) => {
+                    if (!file) {
+                      return
+                    }
+                    void uploadSlotPhoto(slotConfig, file)
+                  }}
+                />
+              )
+            })}
+          </div>
+          <div className="mt-4 flex justify-center">
+            <Button className="w-full sm:w-auto" disabled={!canContinue} onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/interior`)}>
+              Continuer
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+    </ReturnInspectionLayout>
+  )
+}
+
+export function ReturnInspectionInteriorPage() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const reservationId = Number(id)
+  const isReservationIdValid = Number.isInteger(reservationId) && reservationId > 0
+  const reservationQuery = useQuery({
+    queryKey: ['client-reservation', reservationId],
+    queryFn: () => getReservationById(reservationId),
+    enabled: isReservationIdValid,
   })
 
-  const completeInspectionMutation = useMutation({
-    mutationFn: (payload: CompleteInspectionRequest) => {
-      if (!inspection) throw new Error('Inspection non initialisee.')
-      return completeInspection(inspection.id, payload)
-    },
-    onSuccess: (response) => {
-      setInspection(response)
-      setGlobalError(null)
-      setGlobalSuccess("Etat des lieux de retour termine. Vous pouvez maintenant verrouiller le vehicule.")
-      setBackendMissingFields([])
-    },
-    onError: (error) => {
-      setGlobalSuccess(null)
-      setGlobalError(toErrorMessage(error))
-    },
-  })
+  const inspection = reservationQuery.data?.return_inspection ?? null
+  const [photoState, setPhotoState] = useState<Record<string, PhotoSlotState>>(buildInitialPhotoState)
+  const [globalError, setGlobalError] = useState<string | null>(null)
+  const uploadingSlotKeysRef = useRef<Set<string>>(new Set())
 
-  const lockMutation = useMutation({
-    mutationFn: () => lockVehicle(reservationId),
-    onSuccess: (response) => {
-      setLockResult(response)
-      setLockError(null)
-    },
-    onError: (error) => {
-      setLockResult(null)
-      setLockError(toErrorMessage(error))
-    },
-  })
+  useEffect(() => {
+    if (!reservationQuery.data?.return_inspection) {
+      return
+    }
+    setPhotoState(buildPhotoStateFromInspection(reservationQuery.data.return_inspection))
+  }, [reservationQuery.data?.return_inspection])
 
-  const requiredPhotoTypes = mandatoryPhotoTypes
+  useEffect(() => {
+    return () => {
+      Object.values(photoState).forEach((slot) => {
+        revokePreviewUrl(slot.previewUrl)
+      })
+    }
+  }, [photoState])
 
-  const completedRequiredPhotos = useMemo(
-    () => requiredPhotoTypes.filter((photoType) => photoState[photoType].uploadedPhoto !== null).length,
-    [photoState, requiredPhotoTypes],
+  const completedInteriorPhotos = useMemo(
+    () => INTERIOR_PHOTO_SLOTS.filter((slot) => photoState[slot.key]?.uploadedPhoto !== null).length,
+    [photoState],
   )
 
-  const missingRequiredPhotos = useMemo(
-    () => requiredPhotoTypes.filter((photoType) => photoState[photoType].uploadedPhoto === null),
-    [photoState, requiredPhotoTypes],
-  )
+  const uploadSlotPhoto = async (slotConfig: InspectionStepPhotoSlot, file: File) => {
+    if (!inspection) {
+      return
+    }
+    if (uploadingSlotKeysRef.current.has(slotConfig.key)) {
+      return
+    }
+    uploadingSlotKeysRef.current.add(slotConfig.key)
 
-  const mileageValue = parsePositiveInteger(mileageInput)
-  const energyLevelValue = parsePositiveInteger(energyLevelInput)
+    setPhotoState((currentState) => {
+      const existingPreviewUrl = currentState[slotConfig.key].previewUrl
+      revokePreviewUrl(existingPreviewUrl)
+      return {
+        ...currentState,
+        [slotConfig.key]: {
+          ...currentState[slotConfig.key],
+          selectedFile: file,
+          previewUrl: URL.createObjectURL(file),
+          errorMessage: null,
+        },
+      }
+    })
 
-  const isMileageValid = mileageValue !== null
-  const isEnergyValid = energyLevelValue !== null && energyLevelValue >= 0 && energyLevelValue <= 100
+    setGlobalError(null)
 
-  const localMissingFields = useMemo(() => {
-    const missing: string[] = []
-    if (!isMileageValid) missing.push('mileage')
-    if (!isEnergyValid) missing.push('energy_level_percent')
-    return missing
-  }, [isEnergyValid, isMileageValid])
+    try {
+      const uploadedPhoto = await uploadInspectionPhoto(inspection.id, {
+        file,
+        photo_type: slotConfig.photoType,
+        position: slotConfig.position,
+      })
 
-  const progress = useMemo(() => {
-    const totalItems = requiredPhotoTypes.length + 2
-    const completedItems = completedRequiredPhotos + (isMileageValid ? 1 : 0) + (isEnergyValid ? 1 : 0)
-    if (totalItems <= 0) return 0
-    return Math.round((completedItems / totalItems) * 100)
-  }, [completedRequiredPhotos, isEnergyValid, isMileageValid, requiredPhotoTypes.length])
+      setPhotoState((currentState) => ({
+        ...currentState,
+        [slotConfig.key]: {
+          ...currentState[slotConfig.key],
+          selectedFile: null,
+          previewUrl: resolveMediaUrl(uploadedPhoto.file),
+          uploadedPhoto,
+          errorMessage: null,
+        },
+      }))
+      await reservationQuery.refetch()
+    } catch (error) {
+      setPhotoState((currentState) => ({
+        ...currentState,
+        [slotConfig.key]: {
+          ...currentState[slotConfig.key],
+          errorMessage: toErrorMessage(error),
+        },
+      }))
+    } finally {
+      uploadingSlotKeysRef.current.delete(slotConfig.key)
+    }
+  }
 
-  const canCompleteInspection = Boolean(
-    inspection &&
-      missingRequiredPhotos.length === 0 &&
-      localMissingFields.length === 0 &&
-      !completeInspectionMutation.isPending,
-  )
-
-  const canLockVehicle = inspection?.status === 'TERMINE' && !lockMutation.isPending && lockResult === null
+  const canContinue = Boolean(inspection) && completedInteriorPhotos === INTERIOR_PHOTO_SLOTS.length
 
   if (!isReservationIdValid) {
     return (
@@ -260,328 +611,578 @@ export default function ReturnInspectionPage() {
   }
 
   return (
-    <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Inspection de retour</p>
-          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Etat des lieux de retour</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Reservation #{reservationId}. Prenez les photos obligatoires, signalez les dommages eventuels puis renseignez le kilometrage et l'energie.
-          </p>
-        </div>
-        <Link to={`/client/reservations/${reservationId}`}>
-          <Button variant="secondary">Retour a la reservation</Button>
-        </Link>
-      </div>
-
-      {globalSuccess ? <Alert className="mb-4" variant="success" title="Succes" message={globalSuccess} /> : null}
+    <ReturnInspectionLayout
+      stepIndex={2}
+      inspection={inspection}
+      progress={Math.round((completedInteriorPhotos / INTERIOR_PHOTO_SLOTS.length) * 100)}
+      useDepartureProgressBanner
+      showInspectionSummary={false}
+    >
       {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
-
-      {!inspection ? (
-        <Card>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-slate-600">
-              Lancez l'inspection pour obtenir les photos obligatoires et l'identifiant d'etat des lieux de retour.
-            </p>
-            <Button
-              onClick={() => void startInspectionMutation.mutate()}
-              disabled={startInspectionMutation.isPending}
-            >
-              {startInspectionMutation.isPending ? (
-                <span className="flex items-center gap-2">
-                  <LoadingSpinner size="sm" aria-label="Initialisation" />
-                  Initialisation...
-                </span>
-              ) : (
-                "Commencer l'etat des lieux de retour"
-              )}
-            </Button>
+      <Card
+        header={(
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat des lieux - Intérieur</h2>
+            <Link to={`/client/reservations/${reservationId}`}>
+              <Button variant="secondary">Retour a la reservation</Button>
+            </Link>
           </div>
-        </Card>
-      ) : (
-        <div className="space-y-6">
-          {/* Inspection header */}
-          <Card
-            header={
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inspection</p>
-                  <p className="text-base font-semibold text-[#0F172A]">#{inspection.id}</p>
-                </div>
-                <StatusBadge
-                  variant={inspectionStatusToBadge(inspection.status).variant}
-                  label={inspectionStatusToBadge(inspection.status).label}
-                />
-              </div>
-            }
-          >
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium text-[#1F2937]">Progression</p>
-                <p className="text-sm font-semibold text-[#0F172A]">{progress}%</p>
-              </div>
-              <div className="h-3 overflow-hidden rounded-full bg-[#E5E7EB]">
-                <div
-                  className="h-full rounded-full bg-[#2563EB] transition-all"
-                  style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
-                />
-              </div>
-              {backendMissingFields.length > 0 ? (
-                <Alert
-                  variant="info"
-                  title="Champs signales par le backend"
-                  message={
-                    <ul className="list-disc pl-5">
-                      {backendMissingFields.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
+        )}
+      >
+        <p className="mb-4 text-base text-slate-600 sm:text-lg">{completedInteriorPhotos}/{INTERIOR_PHOTO_SLOTS.length} photo(s) intérieure(s) obligatoire(s) envoyée(s).</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {INTERIOR_PHOTO_SLOTS.map((slotConfig) => {
+            const slot = photoState[slotConfig.key]
+            return (
+              <InspectionPhotoSlot
+                key={slotConfig.key}
+                photoType={slotConfig.photoType}
+                label={slotConfig.label}
+                previewUrl={slot.previewUrl}
+                uploadedUrl={slot.uploadedPhoto?.file ?? null}
+                isUploading={uploadingSlotKeysRef.current.has(slotConfig.key)}
+                errorMessage={slot.errorMessage}
+                onFileChange={(file) => {
+                  if (!file) {
+                    return
                   }
-                />
-              ) : null}
-            </div>
-          </Card>
-
-          {/* Mandatory photos */}
-          <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Photos obligatoires</h2>}>
-            {requiredPhotoTypes.length === 0 ? (
-              <Alert
-                variant="warning"
-                title="Aucune photo obligatoire"
-                message="Le backend n'a pas retourne de photos obligatoires pour cette inspection."
+                  void uploadSlotPhoto(slotConfig, file)
+                }}
               />
-            ) : (
-              <>
-                <p className="mb-4 text-sm text-slate-600">
-                  {completedRequiredPhotos}/{requiredPhotoTypes.length} photo(s) obligatoire(s) envoyee(s).
-                </p>
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {requiredPhotoTypes.map((photoType) => {
-                    const slot = photoState[photoType]
-                    return (
-                      <InspectionPhotoSlot
-                        key={photoType}
-                        photoType={photoType}
-                        label={PHOTO_LABELS[photoType]}
-                        previewUrl={slot.previewUrl}
-                        uploadedUrl={slot.uploadedPhoto?.file ?? null}
-                        isUploading={
-                          uploadPhotoMutation.isPending &&
-                          uploadPhotoMutation.variables?.photoType === photoType
-                        }
-                        errorMessage={slot.errorMessage}
-                        hasSelectedFile={slot.selectedFile !== null}
-                        onFileChange={(file) => {
-                          setPhotoState((currentState) => {
-                            const existingPreviewUrl = currentState[photoType].previewUrl
-                            if (existingPreviewUrl) URL.revokeObjectURL(existingPreviewUrl)
-                            return {
-                              ...currentState,
-                              [photoType]: {
-                                ...currentState[photoType],
-                                selectedFile: file,
-                                previewUrl: file ? URL.createObjectURL(file) : null,
-                                errorMessage: null,
-                              },
-                            }
-                          })
-                        }}
-                        onUpload={() => {
-                          const selectedFile = photoState[photoType].selectedFile
-                          if (!selectedFile) {
-                            setPhotoState((currentState) => ({
-                              ...currentState,
-                              [photoType]: {
-                                ...currentState[photoType],
-                                errorMessage: 'Selectionnez un fichier avant envoi.',
-                              },
-                            }))
-                            return
-                          }
-                          void uploadPhotoMutation.mutateAsync({ photoType, file: selectedFile })
-                        }}
-                      />
-                    )
-                  })}
-                </div>
-              </>
-            )}
-          </Card>
+            )
+          })}
+        </div>
+        <div className="mt-4 flex justify-center">
+          <Button className="w-full sm:w-auto" disabled={!canContinue} onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/vehicle-state`)}>
+            Continuer
+          </Button>
+        </div>
+      </Card>
+    </ReturnInspectionLayout>
+  )
+}
 
-          {/* Damage reporting */}
-          <DamageForm
-            inspectionId={inspection.id}
-            uploadedPhotos={allUploadedPhotos}
-            damages={damages}
-            onDamageAdded={(damage) => setDamages((prev) => [...prev, damage])}
-          />
+export function ReturnInspectionVehicleStatePage() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const reservationId = Number(id)
+  const isReservationIdValid = Number.isInteger(reservationId) && reservationId > 0
 
-          {/* Completion form */}
-          <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Cloture de l'etat des lieux de retour</h2>}>
-            <div className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Input
-                  type="number"
-                  min={0}
-                  step={1}
-                  label="Kilometrage"
-                  required
-                  value={mileageInput}
-                  onChange={(event) => setMileageInput(event.target.value)}
-                  error={
-                    mileageInput.length > 0 && !isMileageValid
-                      ? 'Entrez un kilometrage entier superieur ou egal a 0.'
-                      : undefined
-                  }
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={1}
-                  label="Niveau d'energie (%)"
-                  required
-                  value={energyLevelInput}
-                  onChange={(event) => setEnergyLevelInput(event.target.value)}
-                  error={
-                    energyLevelInput.length > 0 && !isEnergyValid
-                      ? 'Entrez une valeur entre 0 et 100.'
-                      : undefined
-                  }
+  const reservationQuery = useQuery({
+    queryKey: ['client-reservation', reservationId],
+    queryFn: () => getReservationById(reservationId),
+    enabled: isReservationIdValid,
+  })
+
+  const inspection = reservationQuery.data?.return_inspection ?? null
+  const [mileageInput, setMileageInput] = useState('')
+  const [energyInput, setEnergyInput] = useState('')
+  const [hasDamage, setHasDamage] = useState<boolean | null>(null)
+  const [damageDescription, setDamageDescription] = useState('')
+  const [damageSeverity, setDamageSeverity] = useState<Severity | ''>('')
+  const [anomalyPhotoState, setAnomalyPhotoState] = useState<Record<AnomalyPhotoSlotKey, AnomalyPhotoSlotState>>(
+    buildInitialAnomalyPhotoState,
+  )
+  const [globalError, setGlobalError] = useState<string | null>(null)
+  const anomalyPhotoInputRefs = useRef<Record<AnomalyPhotoSlotKey, HTMLInputElement | null>>({
+    slot1: null,
+    slot2: null,
+  })
+
+  const mileageValue = parsePositiveInteger(mileageInput)
+  const energyValue = parsePositiveInteger(energyInput)
+  const isMileageValid = mileageValue !== null
+  const isEnergyValid = energyValue !== null && energyValue >= 0 && energyValue <= 100
+
+  const missingFields = useMemo(() => {
+    const missing: string[] = []
+    if (!isMileageValid) missing.push('Kilometrage')
+    if (!isEnergyValid) missing.push('Niveau carburant/batterie')
+    if (hasDamage === null) missing.push('Anomalie constatee')
+    if (hasDamage && damageDescription.trim().length === 0) missing.push('Description anomalie')
+    if (hasDamage && damageSeverity === '') missing.push('Gravite anomalie')
+    return missing
+  }, [damageDescription, damageSeverity, hasDamage, isEnergyValid, isMileageValid])
+
+  const canContinue = Boolean(inspection) && missingFields.length === 0
+
+  const uploadedAnomalyPhotoIds = useMemo(
+    () => Object.values(anomalyPhotoState).map((slot) => slot.photoId).filter((photoId): photoId is number => photoId !== null),
+    [anomalyPhotoState],
+  )
+
+  const uploadAnomalyPhoto = async (slotKey: AnomalyPhotoSlotKey, file: File) => {
+    if (!inspection) {
+      return
+    }
+
+    const slotConfig = ANOMALY_PHOTO_SLOTS.find((slot) => slot.key === slotKey)
+    if (!slotConfig) {
+      return
+    }
+
+    setAnomalyPhotoState((current) => ({
+      ...current,
+      [slotKey]: {
+        ...current[slotKey],
+        isUploading: true,
+        errorMessage: null,
+      },
+    }))
+
+    try {
+      const uploaded = await uploadInspectionPhoto(inspection.id, {
+        file,
+        photo_type: 'DOMMAGE',
+        position: slotConfig.position,
+      })
+
+      setAnomalyPhotoState((current) => ({
+        ...current,
+        [slotKey]: {
+          photoId: uploaded.id,
+          previewUrl: resolveMediaUrl(uploaded.file),
+          isUploading: false,
+          errorMessage: null,
+        },
+      }))
+    } catch (error) {
+      setAnomalyPhotoState((current) => ({
+        ...current,
+        [slotKey]: {
+          ...current[slotKey],
+          isUploading: false,
+          errorMessage: toErrorMessage(error),
+        },
+      }))
+    }
+  }
+
+  const removeAnomalyPhoto = (slotKey: AnomalyPhotoSlotKey) => {
+    setAnomalyPhotoState((current) => {
+      revokePreviewUrl(current[slotKey].previewUrl)
+      return {
+        ...current,
+        [slotKey]: {
+          photoId: null,
+          previewUrl: null,
+          isUploading: false,
+          errorMessage: null,
+        },
+      }
+    })
+  }
+
+  const saveStateMutation = useMutation({
+    mutationFn: (payload: DepartureVehicleStateRequest) => saveDepartureVehicleState(inspection!.id, payload),
+    onSuccess: async (response) => {
+      setGlobalError(null)
+      await reservationQuery.refetch()
+
+      navigate(`/client/reservations/${reservationId}/return-inspection/confirmation`, {
+        state: {
+          inspectionId: inspection?.id,
+          mileage: mileageValue,
+          energyLevelPercent: energyValue,
+          hasDamage: Boolean(response.damage),
+          damageDescription: response.damage?.description ?? '',
+          criticalIssue: response.inspection.has_critical_issue ?? false,
+          criticalIssueDescription: response.inspection.critical_issue_description ?? '',
+        },
+      })
+    },
+    onError: (error) => {
+      setGlobalError(toErrorMessage(error))
+    },
+  })
+
+  const onSaveVehicleState = () => {
+    if (!inspection || !canContinue || mileageValue === null || energyValue === null || hasDamage === null) {
+      return
+    }
+
+    const payload: DepartureVehicleStateRequest = {
+      mileage: mileageValue,
+      energy_level_percent: energyValue,
+      anomaly_present: hasDamage,
+    }
+
+    if (hasDamage) {
+      payload.anomaly_description = damageDescription.trim()
+      payload.anomaly_severity = damageSeverity as Severity
+      payload.photo_ids = uploadedAnomalyPhotoIds
+    } else {
+      payload.photo_ids = []
+    }
+
+    setGlobalError(null)
+    void saveStateMutation.mutateAsync(payload)
+  }
+
+  if (!isReservationIdValid) {
+    return (
+      <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+      </section>
+    )
+  }
+
+  return (
+    <ReturnInspectionLayout
+      stepIndex={3}
+      inspection={inspection}
+      progress={50}
+      useDepartureProgressBanner
+      showInspectionSummary={false}
+    >
+      {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
+      <Card header={<h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">État du véhicule</h2>}>
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label htmlFor="return-mileage" className="block text-sm font-medium text-[#1F2937]">Kilometrage final</label>
+              <input id="return-mileage" type="number" min={0} step={1} value={mileageInput} onChange={(event) => setMileageInput(event.target.value)} className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100" placeholder="Ex: 24510" />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="return-energy" className="block text-sm font-medium text-[#1F2937]">Niveau carburant / batterie final (%)</label>
+              <input id="return-energy" type="number" min={0} max={100} step={1} value={energyInput} onChange={(event) => setEnergyInput(event.target.value)} className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100" placeholder="Ex: 75" />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-[#1F2937]">Anomalie constatée</p>
+            <div className="flex flex-wrap gap-3">
+              <label className="flex items-center gap-2 text-sm text-slate-700"><input type="radio" name="return-damage" checked={hasDamage === true} onChange={() => setHasDamage(true)} />Oui</label>
+              <label className="flex items-center gap-2 text-sm text-slate-700"><input type="radio" name="return-damage" checked={hasDamage === false} onChange={() => {
+                setHasDamage(false)
+                setDamageDescription('')
+                setDamageSeverity('')
+                setAnomalyPhotoState((current) => {
+                  Object.values(current).forEach((slot) => revokePreviewUrl(slot.previewUrl))
+                  return buildInitialAnomalyPhotoState()
+                })
+              }} />Non</label>
+            </div>
+          </div>
+
+          {hasDamage ? (
+            <>
+              <div className="space-y-2">
+                <label htmlFor="return-anomaly-description" className="block text-sm font-medium text-[#1F2937]">Description</label>
+                <textarea
+                  id="return-anomaly-description"
+                  value={damageDescription}
+                  onChange={(event) => setDamageDescription(event.target.value)}
+                  rows={4}
+                  className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
+                  placeholder="Decrivez precisement l'anomalie constatee"
                 />
               </div>
 
               <div className="space-y-2">
-                <label
-                  htmlFor="return-inspection-comments"
-                  className="block text-sm font-medium text-[#1F2937]"
+                <label htmlFor="return-anomaly-severity" className="block text-sm font-medium text-[#1F2937]">Gravite</label>
+                <select
+                  id="return-anomaly-severity"
+                  value={damageSeverity}
+                  onChange={(event) => setDamageSeverity(event.target.value as Severity)}
+                  className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
                 >
-                  Commentaires
-                </label>
-                <textarea
-                  id="return-inspection-comments"
-                  value={commentsInput}
-                  onChange={(event) => setCommentsInput(event.target.value)}
-                  rows={4}
-                  className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                  placeholder="Observations eventuelles"
-                />
+                  <option value="">Selectionner une gravite</option>
+                  {SEVERITY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              {missingRequiredPhotos.length > 0 || localMissingFields.length > 0 ? (
-                <Alert
-                  variant="warning"
-                  title="Cloture impossible pour le moment"
-                  message={
-                    <ul className="list-disc pl-5">
-                      {missingRequiredPhotos.length > 0 ? (
-                        <li>
-                          Photos manquantes:{' '}
-                          {missingRequiredPhotos.map((item) => PHOTO_LABELS[item]).join(', ')}
-                        </li>
-                      ) : null}
-                      {localMissingFields.length > 0 ? (
-                        <li>Champs manquants: {localMissingFields.join(', ')}</li>
-                      ) : null}
-                    </ul>
-                  }
-                />
-              ) : null}
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie (2 maximum)</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {ANOMALY_PHOTO_SLOTS.map((slot) => {
+                    const slotState = anomalyPhotoState[slot.key]
+                    return (
+                      <Card key={slot.key} className="h-full">
+                        <div className="space-y-3">
+                          <p className="text-sm font-semibold text-[#1F2937]">{slot.label}</p>
 
-              <Button
-                className="w-full sm:w-auto"
-                disabled={!canCompleteInspection}
-                onClick={() => {
-                  if (!inspection || mileageValue === null || energyLevelValue === null) return
-                  const payload: CompleteInspectionRequest = {
-                    mileage: mileageValue,
-                    energy_level_percent: energyLevelValue,
-                  }
-                  if (commentsInput.trim().length > 0) {
-                    payload.comments = commentsInput.trim()
-                  }
-                  void completeInspectionMutation.mutateAsync(payload)
-                }}
-              >
-                {completeInspectionMutation.isPending ? (
-                  <span className="flex items-center gap-2">
-                    <LoadingSpinner size="sm" aria-label="Cloture en cours" />
-                    Cloture en cours...
-                  </span>
-                ) : (
-                  "Terminer l'etat des lieux de retour"
-                )}
-              </Button>
-            </div>
-          </Card>
+                          <input
+                            ref={(input) => {
+                              anomalyPhotoInputRefs.current[slot.key] = input
+                            }}
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            disabled={slotState.isUploading}
+                            className="hidden"
+                            onChange={(event) => {
+                              const selectedFile = event.target.files?.[0] ?? null
+                              if (selectedFile) {
+                                void uploadAnomalyPhoto(slot.key, selectedFile)
+                              }
+                            }}
+                          />
 
-          {/* Lock vehicle — shown only after inspection is complete */}
-          {inspection.status === 'TERMINE' ? (
-            <Card>
-              <div className="space-y-4">
-                {lockResult ? (
-                  /* Lock success — final state */
-                  <div className="space-y-4">
-                    <Alert variant="success" title="Vehicule verrouille" message={lockResult.message} />
-                    <div className="rounded-2xl border border-[#D1FAE5] bg-[#ECFDF5] p-4 space-y-2">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <StatusBadge variant="success" label="Acces ferme" />
-                        <p className="text-sm text-[#065F46]">
-                          Etat: <span className="font-semibold">{lockResult.state}</span>
-                        </p>
-                      </div>
-                      {lockResult.timestamp ? (
-                        <p className="text-sm text-[#065F46]">
-                          Horodatage: {new Date(lockResult.timestamp).toLocaleString('fr-FR')}
-                        </p>
-                      ) : null}
-                    </div>
+                          {slotState.previewUrl ? (
+                            <div className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC]">
+                              <img src={slotState.previewUrl} alt={slot.label} className="h-44 w-full object-cover" />
+                            </div>
+                          ) : (
+                            <div className="flex h-44 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-sm text-slate-500">
+                              Emplacement vide
+                            </div>
+                          )}
 
-                    <Alert
-                      variant="info"
-                      title="Retour termine"
-                      message="Votre retour est termine. Le vehicule est maintenant en cours de controle."
-                    />
+                          {slotState.errorMessage ? <Alert variant="danger" message={slotState.errorMessage} /> : null}
 
-                    <Link to={`/client/reservations/${reservationId}`}>
-                      <Button variant="secondary" className="w-full sm:w-auto">
-                        Voir ma reservation
-                      </Button>
-                    </Link>
-                  </div>
-                ) : (
-                  /* Lock pending state */
-                  <div className="space-y-4">
-                    <p className="text-sm text-slate-700">
-                      L'etat des lieux de retour est termine. Verrouillez le vehicule pour finaliser votre retour.
-                    </p>
-                    {lockError ? (
-                      <Alert variant="danger" title="Verrouillage impossible" message={lockError} />
-                    ) : null}
-                    <Button
-                      disabled={!canLockVehicle}
-                      onClick={() => {
-                        if (lockMutation.isPending) return
-                        setLockError(null)
-                        void lockMutation.mutateAsync()
-                      }}
-                    >
-                      {lockMutation.isPending ? (
-                        <span className="flex items-center gap-2">
-                          <LoadingSpinner size="sm" aria-label="Verrouillage en cours" />
-                          Verrouillage en cours...
-                        </span>
-                      ) : (
-                        'Verrouiller le vehicule'
-                      )}
-                    </Button>
-                  </div>
-                )}
+                          <div className="flex flex-col gap-2">
+                            <Button
+                              className="w-full"
+                              disabled={slotState.isUploading}
+                              onClick={() => anomalyPhotoInputRefs.current[slot.key]?.click()}
+                            >
+                              {slotState.isUploading ? (
+                                <span className="flex items-center gap-2">
+                                  <LoadingSpinner size="sm" aria-label="Envoi de photo" />
+                                  Envoi en cours...
+                                </span>
+                              ) : slotState.photoId ? (
+                                'Remplacer la photo'
+                              ) : (
+                                'Ajouter une photo'
+                              )}
+                            </Button>
+
+                            {slotState.photoId ? (
+                              <Button
+                                variant="secondary"
+                                className="w-full"
+                                disabled={slotState.isUploading}
+                                onClick={() => removeAnomalyPhoto(slot.key)}
+                              >
+                                Supprimer la photo
+                              </Button>
+                            ) : null}
+                          </div>
+                        </div>
+                      </Card>
+                    )
+                  })}
+                </div>
               </div>
-            </Card>
+            </>
           ) : null}
+
+          {missingFields.length > 0 ? (
+            <Alert variant="warning" title="Champs requis" message={<ul className="list-disc pl-5">{missingFields.map((item) => <li key={item}>{item}</li>)}</ul>} />
+          ) : null}
+
+          <div className="flex justify-center">
+            <Button className="w-full sm:w-auto" disabled={!canContinue || saveStateMutation.isPending} onClick={onSaveVehicleState}>
+              {saveStateMutation.isPending ? (
+                <span className="flex items-center gap-2">
+                  <LoadingSpinner size="sm" aria-label="Enregistrement en cours" />
+                  Enregistrement...
+                </span>
+              ) : (
+                'Enregistrer l\'etat du vehicule'
+              )}
+            </Button>
+          </div>
         </div>
-      )}
-    </section>
+      </Card>
+    </ReturnInspectionLayout>
+  )
+}
+
+export function ReturnInspectionConfirmationPage() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const reservationId = Number(id)
+  const isReservationIdValid = Number.isInteger(reservationId) && reservationId > 0
+  const reservationQuery = useQuery({
+    queryKey: ['client-reservation', reservationId],
+    queryFn: () => getReservationById(reservationId),
+    enabled: isReservationIdValid,
+  })
+
+  const inspection = reservationQuery.data?.return_inspection ?? null
+  const reservation = reservationQuery.data
+  const [globalError, setGlobalError] = useState<string | null>(null)
+  const [isReturnCompleted, setIsReturnCompleted] = useState(false)
+  const anomalyPhotos = useMemo(
+    () => (inspection?.photos ?? []).filter((photo) => photo.photo_type === 'DOMMAGE' && Boolean(photo.file)),
+    [inspection?.photos],
+  )
+  const vehicleLabel = reservation ? `${reservation.vehicle.brand} ${reservation.vehicle.model_name}` : 'Non disponible'
+
+  const state = location.state as {
+    inspectionId?: number
+    mileage?: number | null
+    energyLevelPercent?: number | null
+    hasDamage?: boolean | null
+    damageDescription?: string
+    damageSeverity?: Severity | null
+    criticalIssue?: boolean | null
+    criticalIssueDescription?: string
+    comments?: string
+  } | undefined
+
+  const effectiveMileage = state?.mileage ?? inspection?.mileage ?? null
+  const effectiveEnergyLevelPercent = state?.energyLevelPercent ?? inspection?.energy_level_percent ?? null
+  const hasAnomalyFromInspection = anomalyPhotos.length > 0 || Boolean(inspection?.has_critical_issue)
+  const hasAnomaly = hasAnomalyFromInspection || Boolean(state?.hasDamage)
+  const anomalyDescription = inspection?.critical_issue_description?.trim() || state?.damageDescription?.trim() || ''
+  const isInspectionCompleted = inspection?.status === 'TERMINE'
+  const shouldShowCompletedState = isReturnCompleted || isInspectionCompleted
+
+  const completeMutation = useMutation({
+    mutationFn: async () => {
+      if (!inspection || effectiveMileage == null || effectiveEnergyLevelPercent == null) {
+        throw new Error('Inspection ou donnees de restitution incompletes.')
+      }
+
+      const payload: CompleteInspectionRequest = {
+        mileage: effectiveMileage,
+        energy_level_percent: effectiveEnergyLevelPercent,
+      }
+
+      if (state?.comments && state.comments.trim().length > 0) {
+        payload.comments = state.comments.trim()
+      }
+      if (state?.criticalIssue !== null && state?.criticalIssue !== undefined) {
+        payload.has_critical_issue = state.criticalIssue
+      }
+      if (state?.criticalIssue) {
+        payload.critical_issue_description = state.criticalIssueDescription?.trim() ?? ''
+      }
+
+      if (inspection.status === 'TERMINE') {
+        return reservationQuery.refetch()
+      }
+
+      await completeInspection(inspection.id, payload)
+      await lockVehicle(reservationId)
+      return reservationQuery.refetch()
+    },
+    onSuccess: () => {
+      setGlobalError(null)
+      setIsReturnCompleted(true)
+    },
+    onError: (error) => {
+      setGlobalError(toErrorMessage(error))
+    },
+  })
+
+  if (!isReservationIdValid) {
+    return (
+      <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+      </section>
+    )
+  }
+
+  return (
+    <ReturnInspectionLayout
+      stepIndex={4}
+      inspection={inspection}
+      progress={100}
+      useDepartureProgressBanner
+      showInspectionSummary={false}
+    >
+      {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
+      {shouldShowCompletedState ? (
+        <Card>
+          <div className="space-y-4">
+            <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">✓ Véhicule restitué</h2>
+            <p className="text-sm text-slate-700 sm:text-base">Votre location est terminée. Merci d’avoir utilisé GetaCar.</p>
+            <ul className="space-y-2 text-sm text-slate-700">
+              <li>Vehicule : {vehicleLabel}</li>
+              <li>Kilométrage final : {effectiveMileage ?? '-'}</li>
+              <li>Niveau carburant / batterie final : {effectiveEnergyLevelPercent ?? '-'}%</li>
+              <li>Anomalie éventuelle : {hasAnomaly ? 'Oui' : 'Non'}</li>
+              {hasAnomaly && anomalyDescription ? <li>Description : {anomalyDescription}</li> : null}
+            </ul>
+
+            {anomalyPhotos.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {anomalyPhotos.map((photo) => {
+                    const photoUrl = resolveMediaUrl(photo.file)
+                    if (!photoUrl) {
+                      return null
+                    }
+
+                    return (
+                      <div key={photo.id} className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC]">
+                        <img src={photoUrl} alt={`Anomalie ${photo.position ?? photo.id}`} className="h-44 w-full object-cover" />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="flex justify-center">
+              <Button className="w-full sm:w-auto" onClick={() => navigate('/client')}>Retour au tableau de bord</Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      {!shouldShowCompletedState ? (
+      <Card header={<h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Confirmation</h2>}>
+        <div className="space-y-4 text-sm text-slate-700">
+          <ul className="space-y-2">
+            <li>Vehicule : {vehicleLabel}</li>
+            <li>Kilométrage final : {effectiveMileage ?? '-'}</li>
+            <li>Niveau carburant / batterie final : {effectiveEnergyLevelPercent ?? '-'}%</li>
+            <li>Anomalie éventuelle : {hasAnomaly ? 'Oui' : 'Non'}</li>
+            {hasAnomaly && anomalyDescription ? <li>Description : {anomalyDescription}</li> : null}
+            {state?.hasDamage ? <li>Gravite : {state.damageSeverity || '—'}</li> : null}
+          </ul>
+
+          {anomalyPhotos.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {anomalyPhotos.map((photo) => {
+                  const photoUrl = resolveMediaUrl(photo.file)
+                  if (!photoUrl) {
+                    return null
+                  }
+
+                  return (
+                    <div key={photo.id} className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC]">
+                      <img src={photoUrl} alt={`Anomalie ${photo.position ?? photo.id}`} className="h-44 w-full object-cover" />
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="flex justify-center pt-2">
+            <Button
+              className="w-full sm:w-auto"
+              disabled={completeMutation.isPending || effectiveMileage == null || effectiveEnergyLevelPercent == null}
+              onClick={() => void completeMutation.mutateAsync()}
+            >
+              {completeMutation.isPending ? (
+                <span className="flex items-center gap-2">
+                  <LoadingSpinner size="sm" aria-label="Confirmation de la restitution" />
+                  Confirmation en cours...
+                </span>
+              ) : (
+                'Confirmer la restitution'
+              )}
+            </Button>
+          </div>
+        </div>
+      </Card>
+      ) : null}
+    </ReturnInspectionLayout>
   )
 }

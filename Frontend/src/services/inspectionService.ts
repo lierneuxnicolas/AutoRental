@@ -1,7 +1,10 @@
+import { AxiosHeaders } from 'axios'
 import api from './api'
 import type {
   CompleteInspectionRequest,
   CreateInspectionResponse,
+  DepartureVehicleStateRequest,
+  DepartureVehicleStateResponse,
   Inspection,
   InspectionDamage,
   InspectionDamageCreateRequest,
@@ -45,7 +48,10 @@ export async function uploadInspectionPhoto(
     formData.append('position', String(payload.position))
   }
 
-  const { data } = await api.post<InspectionPhoto>(`/inspections/${inspectionId}/photos/`, formData)
+  const headers = new AxiosHeaders()
+  headers.delete('Content-Type')
+
+  const { data } = await api.post<InspectionPhoto>(`/inspections/${inspectionId}/photos/`, formData, { headers })
   return data
 }
 
@@ -54,6 +60,14 @@ export async function addInspectionDamage(
   payload: InspectionDamageCreateRequest,
 ): Promise<InspectionDamage> {
   const { data } = await api.post<InspectionDamage>(`/inspections/${inspectionId}/damages/`, payload)
+  return data
+}
+
+export async function saveDepartureVehicleState(
+  inspectionId: number | string,
+  payload: DepartureVehicleStateRequest,
+): Promise<DepartureVehicleStateResponse> {
+  const { data } = await api.post<DepartureVehicleStateResponse>(`/inspections/${inspectionId}/vehicle-state/`, payload)
   return data
 }
 

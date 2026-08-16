@@ -97,3 +97,33 @@ export default function FaqSection() {
     </section>
   )
 }
+
+export function ContactSection() {
+  return (
+    <section className="mt-14 sm:mt-16" aria-labelledby="contact-title">
+      <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-[0_10px_30px_rgba(15,23,42,0.06)] sm:p-8 lg:p-10">
+        <div className="mx-auto max-w-3xl text-center">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#2563EB]">Contact</p>
+          <h3 id="contact-title" className="mt-3 text-2xl font-semibold text-[#1F2937]">Nous sommes là pour vous aider</h3>
+        </div>
+
+        <div className="mt-8 grid gap-5 md:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#2563EB]">Email</p>
+            <p className="mt-3 text-base font-semibold text-[#1F2937]">bonjour@getacar.be</p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#2563EB]">Téléphone</p>
+            <p className="mt-3 text-base font-semibold text-[#1F2937]">+32 2 555 12 34</p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#2563EB]">Adresse</p>
+            <p className="mt-3 text-base font-semibold text-[#1F2937]">Avenue de l’Innovation 12, 1000 Bruxelles</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}

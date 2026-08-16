@@ -124,6 +124,8 @@ class ReservationInspectionDetailSerializer(serializers.ModelSerializer):
             "id",
             "inspection_type",
             "status",
+            "mileage",
+            "energy_level_percent",
             "completed_at",
             "started_at",
             "photos",
