@@ -171,6 +171,85 @@ def _notify_once(*, user, notification_type: str, title: str, message: str, rela
     )
 
 
+def _validate_damage_photo_ids(*, inspection: Inspection, photo_ids: list[int]) -> list[int]:
+    if not photo_ids:
+        return []
+
+    unique_ids = list(dict.fromkeys(photo_ids))
+    photos = list(InspectionPhoto.objects.filter(inspection=inspection, id__in=unique_ids).only("id"))
+    found_ids = {photo.id for photo in photos}
+    missing_ids = [photo_id for photo_id in unique_ids if photo_id not in found_ids]
+    if missing_ids:
+        _raise_return_error(
+            "INVALID_PHOTO_IDS",
+            "Certaines photos ne sont pas liees a cette inspection.",
+            details={"photo_ids": missing_ids},
+        )
+
+    return unique_ids
+
+
+def _assert_return_vehicle_state_inputs(*, inspection: Inspection, mileage: int, energy_level_percent: int) -> Inspection:
+    if inspection.inspection_type != Inspection.Type.FINAL:
+        _raise_return_error(
+            "INVALID_INSPECTION_TYPE",
+            "Seule une inspection FINAL peut etre enregistree via cet endpoint de restitution.",
+            details={"inspection_type": inspection.inspection_type},
+        )
+
+    if inspection.status == Inspection.Status.TERMINE:
+        _raise_return_error(
+            "INSPECTION_ALREADY_COMPLETED",
+            "Cette inspection est deja terminee.",
+        )
+
+    if inspection.reservation.status != Reservation.Status.EN_COURS:
+        _raise_return_error(
+            "INVALID_RESERVATION_STATUS",
+            "La reservation doit etre EN_COURS pour enregistrer l'etat du vehicule de restitution.",
+            details={"current_status": inspection.reservation.status},
+        )
+
+    initial_inspection = Inspection.objects.filter(
+        reservation=inspection.reservation,
+        inspection_type=Inspection.Type.INITIAL,
+    ).first()
+    if initial_inspection is None or initial_inspection.status != Inspection.Status.TERMINE:
+        _raise_return_error(
+            "INITIAL_INSPECTION_NOT_COMPLETED",
+            "L'inspection INITIAL doit etre terminee avant l'enregistrement de l'etat du vehicule de restitution.",
+        )
+
+    if mileage is None:
+        _raise_return_error("MILEAGE_REQUIRED", "Le kilometrage est obligatoire.")
+
+    departure_mileage = initial_inspection.mileage
+    if departure_mileage is None:
+        _raise_return_error(
+            "DEPARTURE_MILEAGE_UNAVAILABLE",
+            "Le kilometrage de depart est indisponible, impossible d'enregistrer le retour.",
+        )
+
+    if mileage < departure_mileage:
+        _raise_return_error(
+            "INVALID_MILEAGE",
+            "Le kilometrage de retour doit etre superieur ou egal au kilometrage de depart.",
+            details={"departure_mileage": departure_mileage, "provided_mileage": mileage},
+        )
+
+    if energy_level_percent is None:
+        _raise_return_error("ENERGY_LEVEL_REQUIRED", "Le niveau d'energie est obligatoire.")
+
+    if not 0 <= energy_level_percent <= 100:
+        _raise_return_error(
+            "INVALID_ENERGY_LEVEL",
+            "Le niveau d'energie doit etre compris entre 0 et 100.",
+            details={"provided_energy_level_percent": energy_level_percent},
+        )
+
+    return initial_inspection
+
+
 def _notify_managers_once(*, message: str, related_object_id: int) -> None:
     managers = User.objects.select_related("role").filter(
         is_active=True,
@@ -336,3 +415,105 @@ def complete_return_inspection(
         inspection.comments = inspection_locked.comments
 
     return inspection
+
+
+def save_return_vehicle_state(
+    *,
+    inspection: Inspection,
+    requested_by,
+    mileage: int,
+    energy_level_percent: int,
+    anomaly_present: bool,
+    anomaly_description: str = "",
+    anomaly_severity: str | None = None,
+    photo_ids: list[int] | None = None,
+) -> tuple[Inspection, object | None, str]:
+    with transaction.atomic():
+        inspection_locked = (
+            Inspection.objects.select_for_update()
+            .select_related(
+                "reservation",
+                "reservation__client",
+                "reservation__client__user",
+                "reservation__vehicle",
+                "reservation__vehicle__brand",
+                "reservation__vehicle__category",
+            )
+            .get(pk=inspection.pk)
+        )
+        reservation_locked = (
+            Reservation.objects.select_for_update()
+            .select_related("client", "client__user", "vehicle", "vehicle__brand", "vehicle__category")
+            .get(pk=inspection_locked.reservation_id)
+        )
+        vehicle_locked = Vehicle.objects.select_for_update().get(pk=reservation_locked.vehicle_id)
+
+        _assert_request_context(reservation=reservation_locked, requested_by=requested_by)
+        _assert_return_vehicle_state_inputs(
+            inspection=inspection_locked,
+            mileage=mileage,
+            energy_level_percent=energy_level_percent,
+        )
+
+        normalized_photo_ids = _validate_damage_photo_ids(
+            inspection=inspection_locked,
+            photo_ids=photo_ids or [],
+        )
+
+        if not anomaly_present and normalized_photo_ids:
+            _raise_return_error(
+                "PHOTOS_WITHOUT_ANOMALY",
+                "Des photos d'anomalie ne peuvent pas etre envoyees sans anomalie.",
+            )
+
+        cleaned_description = (anomaly_description or "").strip()
+        created_damage = None
+        is_critical = False
+        if anomaly_present:
+            if not cleaned_description:
+                _raise_return_error(
+                    "ANOMALY_DESCRIPTION_REQUIRED",
+                    "La description de l'anomalie est obligatoire.",
+                )
+            valid_severities = {choice[0] for choice in inspection_locked.damages.model.Severity.choices}
+            if anomaly_severity not in valid_severities:
+                _raise_return_error(
+                    "ANOMALY_SEVERITY_REQUIRED",
+                    "La gravite de l'anomalie est obligatoire.",
+                )
+
+            created_damage = inspection_locked.damages.model.objects.create(
+                inspection=inspection_locked,
+                vehicle=vehicle_locked,
+                reported_by=requested_by,
+                description=cleaned_description,
+                severity=anomaly_severity,
+                location="Etat du vehicule",
+            )
+            if normalized_photo_ids:
+                created_damage.evidence_photos.set(
+                    InspectionPhoto.objects.filter(inspection=inspection_locked, id__in=normalized_photo_ids)
+                )
+
+            is_critical = anomaly_severity == inspection_locked.damages.model.Severity.CRITIQUE
+
+        inspection_locked.mileage = mileage
+        inspection_locked.energy_level_percent = energy_level_percent
+        inspection_locked.has_critical_issue = is_critical
+        inspection_locked.critical_issue_description = cleaned_description if is_critical else ""
+        inspection_locked.save(
+            update_fields=[
+                "mileage",
+                "energy_level_percent",
+                "has_critical_issue",
+                "critical_issue_description",
+                "updated_at",
+            ]
+        )
+
+        inspection.mileage = inspection_locked.mileage
+        inspection.energy_level_percent = inspection_locked.energy_level_percent
+        inspection.has_critical_issue = inspection_locked.has_critical_issue
+        inspection.critical_issue_description = inspection_locked.critical_issue_description
+
+    return inspection, created_damage, vehicle_locked.status

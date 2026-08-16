@@ -24,7 +24,7 @@ from inspections.services.departure import (
 	create_departure_inspection,
 	save_departure_vehicle_state,
 )
-from inspections.services.return_inspection import complete_return_inspection, create_return_inspection
+from inspections.services.return_inspection import complete_return_inspection, create_return_inspection, save_return_vehicle_state
 from reservations.models import Reservation
 
 
@@ -443,16 +443,28 @@ class DepartureVehicleStateUpsertView(generics.GenericAPIView):
 		serializer.is_valid(raise_exception=True)
 
 		try:
-			updated_inspection, created_damage, vehicle_status = save_departure_vehicle_state(
-				inspection=inspection,
-				requested_by=request.user,
-				mileage=serializer.validated_data["mileage"],
-				energy_level_percent=serializer.validated_data["energy_level_percent"],
-				anomaly_present=serializer.validated_data["anomaly_present"],
-				anomaly_description=serializer.validated_data.get("anomaly_description", ""),
-				anomaly_severity=serializer.validated_data.get("anomaly_severity"),
-				photo_ids=serializer.validated_data.get("photo_ids", []),
-			)
+			if inspection.inspection_type == Inspection.Type.FINAL:
+				updated_inspection, created_damage, vehicle_status = save_return_vehicle_state(
+					inspection=inspection,
+					requested_by=request.user,
+					mileage=serializer.validated_data["mileage"],
+					energy_level_percent=serializer.validated_data["energy_level_percent"],
+					anomaly_present=serializer.validated_data["anomaly_present"],
+					anomaly_description=serializer.validated_data.get("anomaly_description", ""),
+					anomaly_severity=serializer.validated_data.get("anomaly_severity"),
+					photo_ids=serializer.validated_data.get("photo_ids", []),
+				)
+			else:
+				updated_inspection, created_damage, vehicle_status = save_departure_vehicle_state(
+					inspection=inspection,
+					requested_by=request.user,
+					mileage=serializer.validated_data["mileage"],
+					energy_level_percent=serializer.validated_data["energy_level_percent"],
+					anomaly_present=serializer.validated_data["anomaly_present"],
+					anomaly_description=serializer.validated_data.get("anomaly_description", ""),
+					anomaly_severity=serializer.validated_data.get("anomaly_severity"),
+					photo_ids=serializer.validated_data.get("photo_ids", []),
+				)
 		except DepartureInspectionError as exc:
 			detail = {"code": exc.code, "message": exc.message}
 			if exc.details:
