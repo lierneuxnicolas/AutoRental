@@ -1428,6 +1428,9 @@ class ReturnInspectionFlowTests(TestCase):
     def _complete_url(self, inspection_id):
         return reverse("inspections:inspection-complete", kwargs={"pk": inspection_id})
 
+    def _state_url(self, inspection_id):
+        return reverse("inspections:inspection-vehicle-state-upsert", kwargs={"pk": inspection_id})
+
     def _create_required_photos(self, inspection):
         for photo_type in [
             InspectionPhoto.PhotoType.AVANT,
@@ -1514,6 +1517,71 @@ class ReturnInspectionFlowTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "RETURN_INSPECTION_ALREADY_EXISTS")
+
+    def test_saves_return_vehicle_state_without_anomaly(self):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.BROUILLON,
+        )
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._state_url(final_inspection.id),
+            {
+                "mileage": 1200,
+                "energy_level_percent": 72,
+                "anomaly_present": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["damage"])
+        final_inspection.refresh_from_db()
+        self.assertEqual(final_inspection.mileage, 1200)
+        self.assertEqual(final_inspection.energy_level_percent, 72)
+        self.assertFalse(final_inspection.has_critical_issue)
+        self.assertEqual(final_inspection.critical_issue_description, "")
+        self.assertEqual(Damage.objects.filter(inspection=final_inspection).count(), 0)
+
+    def test_saves_return_vehicle_state_with_anomaly(self):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.BROUILLON,
+        )
+        photo = InspectionPhoto.objects.create(
+            inspection=final_inspection,
+            photo_type=InspectionPhoto.PhotoType.DOMMAGE,
+            file=_create_test_image_file("damage.jpg", "JPEG", "image/jpeg"),
+            position=1,
+        )
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._state_url(final_inspection.id),
+            {
+                "mileage": 1210,
+                "energy_level_percent": 65,
+                "anomaly_present": True,
+                "anomaly_description": "Rayure pare-chocs",
+                "anomaly_severity": Damage.Severity.MODERE,
+                "photo_ids": [photo.id],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(response.data["damage"])
+        final_inspection.refresh_from_db()
+        self.assertEqual(final_inspection.mileage, 1210)
+        self.assertEqual(final_inspection.energy_level_percent, 65)
+        self.assertFalse(final_inspection.has_critical_issue)
+        damage = Damage.objects.get(pk=response.data["damage"]["id"])
+        self.assertEqual(damage.severity, Damage.Severity.MODERE)
+        self.assertEqual(damage.description, "Rayure pare-chocs")
+        self.assertEqual(list(damage.evidence_photos.values_list("id", flat=True)), [photo.id])
 
     def test_completes_return_inspection_and_applies_effects(self):
         final_inspection = Inspection.objects.create(
