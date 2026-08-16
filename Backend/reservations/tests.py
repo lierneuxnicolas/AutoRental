@@ -5,6 +5,7 @@ from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import stripe
 from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -29,8 +30,9 @@ from interventions.models import Intervention, LockingLog, VehicleAccess
 from interventions.services.vehicle_access import activate_vehicle_access
 from invoicing.models import Invoice, InvoiceLine
 from notifications.models import Notification
-from payments.models import Deposit, Payment
+from payments.models import Deposit, Payment, Refund
 from reservations.models import Reservation
+from reservations.services.cancellation import calculate_cancellation_financials
 from reservations.services.pricing import PricingError, _quantize_amount, calculate_price_simulation
 from reservations.services.reminders import REMINDER_NOTIFICATION_TYPE, send_reservation_24h_reminders
 from reservations.services.reservation_creation import create_draft_reservation
@@ -1308,11 +1310,27 @@ class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "VEHICLE_NOT_ACTIVE")
 
-	def test_vehicule_non_disponible_refuse(self):
+	def test_vehicule_hors_service_refuse(self):
+		self.vehicle_reserved.status = Vehicle.Status.MAINTENANCE
+		self.vehicle_reserved.save(update_fields=["status"])
 		self.client_api.force_authenticate(self.client_user_1)
 		response = self.client_api.post(self.url, self._payload(vehicle_id=self.vehicle_reserved.id), format="json")
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "VEHICLE_NOT_BOOKABLE")
+
+	def test_vehicule_reserve_hors_conflit_accepte(self):
+		self.client_api.force_authenticate(self.client_user_1)
+		start = (timezone.now() + timedelta(days=3)).replace(minute=0, second=0, microsecond=0)
+		end = start + timedelta(hours=4)
+
+		response = self.client_api.post(
+			self.url,
+			self._payload(vehicle_id=self.vehicle_reserved.id, start_at=start, end_at=end),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		self.assertEqual(response.data["vehicle"]["id"], self.vehicle_reserved.id)
 
 	def test_periode_invalide_refuse(self):
 		self.client_api.force_authenticate(self.client_user_1)
@@ -1501,6 +1519,31 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 	def setUp(self):
 		self.client_api = APIClient()
 
+	def _invoice_descriptions(self, reservation):
+		invoice = Invoice.objects.get(reservation=reservation)
+		descriptions = list(invoice.lines.order_by("id").values_list("description", flat=True))
+		return invoice, descriptions
+
+	def _create_success_payment(self, reservation, amount):
+		return Payment.objects.create(
+			reservation=reservation,
+			provider=Payment.Provider.STRIPE,
+			amount=Decimal(amount),
+			currency="EUR",
+			status=Payment.Status.REUSSI,
+			stripe_payment_intent_id=f"pi_cancel_{reservation.id}_{int(timezone.now().timestamp() * 1000000)}",
+		)
+
+	def _create_deposit_for_cancellation(self, reservation, *, status=Deposit.Status.AUTORISEE, mode=Deposit.Mode.SIMULATED):
+		return Deposit.objects.create(
+			reservation=reservation,
+			mode=mode,
+			amount=Decimal("350.00"),
+			currency="EUR",
+			status=status,
+			authorized_at=timezone.now(),
+		)
+
 	def test_proprietaire_peut_annuler_brouillon(self):
 		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
 		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
@@ -1617,6 +1660,341 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "CANNOT_CANCEL")
+
+	def test_regle_financiere_annulation_plus_de_24h(self):
+		now = timezone.now().replace(microsecond=0)
+		start = now + timedelta(hours=30)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+
+		result = calculate_cancellation_financials(reservation=reservation, now=now)
+
+		self.assertEqual(result.amount_paid, Decimal("120.00"))
+		self.assertEqual(result.cancellation_fee, Decimal("0.00"))
+		self.assertEqual(result.refundable_amount, Decimal("120.00"))
+
+	def test_regle_financiere_annulation_exactement_24h(self):
+		now = timezone.now().replace(microsecond=0)
+		start = now + timedelta(hours=24)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "80.00")
+
+		result = calculate_cancellation_financials(reservation=reservation, now=now)
+
+		self.assertEqual(result.amount_paid, Decimal("80.00"))
+		self.assertEqual(result.cancellation_fee, Decimal("0.00"))
+		self.assertEqual(result.refundable_amount, Decimal("80.00"))
+
+	def test_regle_financiere_annulation_moins_de_24h(self):
+		now = timezone.now().replace(microsecond=0)
+		start = now + timedelta(hours=23, minutes=59)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "30.00")
+
+		result = calculate_cancellation_financials(reservation=reservation, now=now)
+
+		self.assertEqual(result.amount_paid, Decimal("30.00"))
+		self.assertEqual(result.cancellation_fee, Decimal("50.00"))
+		self.assertEqual(result.refundable_amount, Decimal("0.00"))
+
+	def test_regle_financiere_en_cours_refusee(self):
+		start = timezone.now() - timedelta(hours=1)
+		end = timezone.now() + timedelta(hours=2)
+		reservation = self._create_reservation(
+			status=Reservation.Status.EN_COURS,
+			start_at=start,
+			end_at=end,
+		)
+		self._create_success_payment(reservation, "120.00")
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url, {"reason": "Trop tard"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "CANNOT_CANCEL")
+
+	def test_preview_annulation_retourne_montants_backend(self):
+		now = timezone.now().replace(microsecond=0)
+		start = now + timedelta(hours=30)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+		url = reverse("reservations:reservation-cancel-preview", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.get(url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertTrue(response.data["can_cancel"])
+		self.assertEqual(response.data["amount_paid"], "120.00")
+		self.assertEqual(response.data["cancellation_fee"], "0.00")
+		self.assertEqual(response.data["refundable_amount"], "120.00")
+		self.assertEqual(response.data["deposit_release"], "Liberee integralement")
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_reponse_annulation_inclut_financials_backend(self, mocked_refund_create):
+		now = timezone.now().replace(microsecond=0)
+		start = now + timedelta(hours=5)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+		self._create_deposit_for_cancellation(reservation)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+		mocked_refund_create.return_value = SimpleNamespace(id="re_cancel_response_001", status="succeeded")
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+			response = self.client_api.post(url, {"reason": "Annulation tardive"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertIn("cancellation_financials", response.data)
+		self.assertEqual(response.data["cancellation_financials"]["amount_paid"], Decimal("120.00"))
+		self.assertEqual(response.data["cancellation_financials"]["cancellation_fee"], Decimal("50.00"))
+		self.assertEqual(response.data["cancellation_financials"]["refundable_amount"], Decimal("70.00"))
+		self.assertEqual(response.data["cancellation_financials"]["deposit_release"], "Liberee integralement")
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_remboursement_integral_declenche(self, mocked_refund_create):
+		now = timezone.now().replace(microsecond=0)
+		start = now + timedelta(hours=30)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+		self._create_deposit_for_cancellation(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		mocked_refund_create.return_value = SimpleNamespace(id="re_full_001", status="succeeded")
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+			response = self.client_api.post(url, {"reason": "Annulation anticipee"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		refund = Refund.objects.get(reservation=reservation)
+		self.assertEqual(refund.amount, Decimal("120.00"))
+		self.assertEqual(refund.status, Refund.Status.REUSSI)
+		kwargs = mocked_refund_create.call_args.kwargs
+		self.assertEqual(kwargs["amount"], 12000)
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_annulation_sans_frais_cree_document_financier_et_notification(self, mocked_refund_create):
+		now = timezone.now().replace(microsecond=0)
+		start = now + timedelta(hours=30)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+		self._create_deposit_for_cancellation(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		mocked_refund_create.return_value = SimpleNamespace(id="re_cancel_doc_001", status="succeeded")
+
+		with self.captureOnCommitCallbacks(execute=True):
+			with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+				response = self.client_api.post(url, {"reason": "Annulation sans frais"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		invoice, descriptions = self._invoice_descriptions(reservation)
+		self.assertEqual(invoice.status, Invoice.Status.CANCELLED)
+		self.assertTrue(any(text.startswith("Annulation - Reservation: Reservation annulee le ") for text in descriptions))
+		self.assertIn("Annulation - Montant initial paye: 120,00 €", descriptions)
+		self.assertIn("Annulation - Frais: 0,00 €", descriptions)
+		self.assertIn("Annulation - Montant rembourse: 120,00 €", descriptions)
+		self.assertIn("Annulation - Caution: Liberee", descriptions)
+
+		notification = Notification.objects.filter(
+			notification_type="RESERVATION_CANCELLED",
+			related_object_type="reservation",
+			related_object_id=reservation.id,
+		).first()
+		self.assertIsNotNone(notification)
+		self.assertEqual(notification.title, "Reservation annulee")
+		self.assertEqual(
+			notification.message,
+			"Votre reservation a ete annulee. Remboursement : 120,00 €. Frais : 0,00 €. Caution liberee.",
+		)
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_annulation_avec_frais_50_met_a_jour_document_financier(self, mocked_refund_create):
+		now = timezone.now().replace(microsecond=0)
+		start = now + timedelta(hours=5)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+		self._create_deposit_for_cancellation(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		mocked_refund_create.return_value = SimpleNamespace(id="re_cancel_doc_002", status="succeeded")
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+			response = self.client_api.post(url, {"reason": "Annulation tardive"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		invoice, descriptions = self._invoice_descriptions(reservation)
+		self.assertEqual(invoice.status, Invoice.Status.CANCELLED)
+		self.assertIn("Annulation - Montant initial paye: 120,00 €", descriptions)
+		self.assertIn("Annulation - Frais: 50,00 €", descriptions)
+		self.assertIn("Annulation - Montant rembourse: 70,00 €", descriptions)
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_pdf_telechargeable_apres_annulation(self, mocked_refund_create):
+		start = timezone.now() + timedelta(hours=30)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+		self._create_deposit_for_cancellation(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		cancel_url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		mocked_refund_create.return_value = SimpleNamespace(id="re_cancel_pdf_001", status="succeeded")
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+			cancel_response = self.client_api.post(cancel_url, {"reason": "Annulation"}, format="json")
+
+		self.assertEqual(cancel_response.status_code, status.HTTP_200_OK)
+		invoice = Invoice.objects.get(reservation=reservation)
+		download_url = reverse("invoicing:invoice-download", kwargs={"pk": invoice.pk})
+		response = self.client_api.get(download_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response["Content-Type"], "application/pdf")
+		pdf_bytes = b"".join(response.streaming_content)
+		self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_remboursement_partiel_avec_frais_50(self, mocked_refund_create):
+		now = timezone.now().replace(microsecond=0)
+		start = now + timedelta(hours=5)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+		self._create_deposit_for_cancellation(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		mocked_refund_create.return_value = SimpleNamespace(id="re_partial_001", status="succeeded")
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+			response = self.client_api.post(url, {"reason": "Annulation tardive"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		refund = Refund.objects.get(reservation=reservation)
+		self.assertEqual(refund.amount, Decimal("70.00"))
+		self.assertEqual(refund.status, Refund.Status.REUSSI)
+		kwargs = mocked_refund_create.call_args.kwargs
+		self.assertEqual(kwargs["amount"], 7000)
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_caution_est_liberee(self, mocked_refund_create):
+		start = timezone.now() + timedelta(hours=30)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+		deposit = self._create_deposit_for_cancellation(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		mocked_refund_create.return_value = SimpleNamespace(id="re_deposit_001", status="succeeded")
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+			response = self.client_api.post(url, {"reason": "Annulation"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		deposit.refresh_from_db()
+		self.assertEqual(deposit.status, Deposit.Status.LIBEREE)
+		self.assertIsNotNone(deposit.released_at)
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_double_appel_ne_cree_pas_de_double_remboursement(self, mocked_refund_create):
+		start = timezone.now() + timedelta(hours=30)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+		self._create_deposit_for_cancellation(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		mocked_refund_create.return_value = SimpleNamespace(id="re_once_001", status="succeeded")
+
+		with self.captureOnCommitCallbacks(execute=True):
+			with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+				first = self.client_api.post(url, {"reason": "Annulation"}, format="json")
+				second = self.client_api.post(url, {"reason": "Annulation"}, format="json")
+
+		self.assertEqual(first.status_code, status.HTTP_200_OK)
+		self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(second.data["code"], "ALREADY_CANCELLED")
+		self.assertEqual(Refund.objects.filter(reservation=reservation).count(), 1)
+		self.assertEqual(mocked_refund_create.call_count, 1)
+		self.assertEqual(Invoice.objects.filter(reservation=reservation).count(), 1)
+		self.assertEqual(
+			Notification.objects.filter(
+				notification_type="RESERVATION_CANCELLED",
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).count(),
+			1,
+		)
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_erreur_stripe_ne_laisse_pas_de_statuts_incoherents(self, mocked_refund_create):
+		start = timezone.now() + timedelta(hours=30)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+		deposit = self._create_deposit_for_cancellation(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		url = reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id})
+		mocked_refund_create.side_effect = stripe.error.APIConnectionError("network down")
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+			response = self.client_api.post(url, {"reason": "Annulation"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "STRIPE_UNAVAILABLE")
+		reservation.refresh_from_db()
+		deposit.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.CONFIRMEE)
+		self.assertIsNone(reservation.cancelled_at)
+		self.assertEqual(deposit.status, Deposit.Status.AUTORISEE)
+		self.assertEqual(Refund.objects.filter(reservation=reservation).count(), 0)
 
 	def test_aucun_remboursement_cree_a_ce_stade(self):
 		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)

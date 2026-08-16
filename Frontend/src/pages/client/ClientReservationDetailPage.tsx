@@ -1,12 +1,13 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
-import { getReservationById } from '../../services/reservationService'
-import type { ReservationStatus } from '../../types/reservation'
+import { cancelReservation, getReservationById, getReservationCancellationPreview } from '../../services/reservationService'
+import type { ReservationCancellationFinancials, ReservationStatus } from '../../types/reservation'
 
 type UnlockButtonAvailability = {
   isVisible: boolean
@@ -41,6 +42,21 @@ function formatDate(value: string): string {
     month: '2-digit',
     year: 'numeric',
   })
+}
+
+function formatEuro(value: string | number): string {
+  const numericValue = typeof value === 'number' ? value : Number(value)
+
+  if (Number.isNaN(numericValue)) {
+    return `${value} EUR`
+  }
+
+  return new Intl.NumberFormat('fr-FR', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numericValue)
 }
 
 function statusToBadge(status: ReservationStatus | undefined): { label: string; variant: StatusVariant } {
@@ -112,9 +128,29 @@ function getUnlockButtonAvailability(
   }
 }
 
+function isReservationCancellable(status: ReservationStatus | undefined, startAt: string): boolean {
+  if (!status) {
+    return false
+  }
+
+  if (status === 'BROUILLON' || status === 'EN_ATTENTE_CAUTION' || status === 'EN_ATTENTE_PAIEMENT') {
+    return true
+  }
+
+  if (status === 'CONFIRMEE') {
+    const startDate = new Date(startAt)
+    return !Number.isNaN(startDate.getTime()) && startDate.getTime() > Date.now()
+  }
+
+  return false
+}
+
 export default function ClientReservationDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false)
+  const [cancelErrorMessage, setCancelErrorMessage] = useState<string | null>(null)
+  const [cancelSuccessFinancials, setCancelSuccessFinancials] = useState<ReservationCancellationFinancials | null>(null)
 
   const reservationId = Number(id)
   const isValidReservationId = Number.isInteger(reservationId) && reservationId > 0
@@ -123,6 +159,31 @@ export default function ClientReservationDetailPage() {
     queryKey: ['client-reservation', reservationId],
     queryFn: () => getReservationById(reservationId),
     enabled: isValidReservationId,
+  })
+
+  const reservation = reservationQuery.data
+  const normalizedStatus = normalizeReservationStatus(reservation?.status)
+  const canShowCancelButton = reservation
+    ? isReservationCancellable(normalizedStatus, reservation.start_at)
+    : false
+
+  const cancellationPreviewQuery = useQuery({
+    queryKey: ['reservation-cancel-preview', reservationId, reservation?.status],
+    queryFn: () => getReservationCancellationPreview(reservationId),
+    enabled: isValidReservationId && Boolean(reservation) && isCancelModalOpen && canShowCancelButton,
+  })
+
+  const cancelMutation = useMutation({
+    mutationFn: () => cancelReservation(reservationId, { reason: 'Annulation demandee par le client depuis l espace client.' }),
+    onSuccess: async (response) => {
+      setCancelSuccessFinancials(response.cancellation_financials)
+      setCancelErrorMessage(null)
+      setIsCancelModalOpen(false)
+      await reservationQuery.refetch()
+    },
+    onError: () => {
+      setCancelErrorMessage("L'annulation n'a pas pu être finalisée. Veuillez réessayer.")
+    },
   })
 
   if (!isValidReservationId) {
@@ -160,8 +221,6 @@ export default function ClientReservationDetailPage() {
     )
   }
 
-  const reservation = reservationQuery.data
-  const normalizedStatus = normalizeReservationStatus(reservation.status)
   const badge = statusToBadge(normalizedStatus)
   const unlockButtonAvailability = getUnlockButtonAvailability(
     normalizedStatus,
@@ -173,6 +232,30 @@ export default function ClientReservationDetailPage() {
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+      {cancelSuccessFinancials ? (
+        <Alert
+          variant="success"
+          className="mb-4"
+          title="Réservation annulée"
+          message={
+            <div>
+              <p>Montant remboursé: {formatEuro(cancelSuccessFinancials.refundable_amount)}</p>
+              <p>Frais appliqués: {formatEuro(cancelSuccessFinancials.cancellation_fee)}</p>
+              <p>Caution: {cancelSuccessFinancials.deposit_release}</p>
+            </div>
+          }
+        />
+      ) : null}
+
+      {cancelErrorMessage ? (
+        <Alert
+          variant="danger"
+          className="mb-4"
+          title="Annulation impossible"
+          message={cancelErrorMessage}
+        />
+      ) : null}
+
       <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Ma réservation</h1>
@@ -223,9 +306,9 @@ export default function ClientReservationDetailPage() {
       </Card>
 
       {shouldShowUnlockButton ? (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col items-center">
           <Button
-            className="mx-auto h-[52px] w-full max-w-[420px] text-base"
+            className="mx-auto h-13 w-full max-w-105 text-base"
             disabled={!unlockButtonAvailability.isEnabled}
             onClick={() => {
               if (!unlockButtonAvailability.isEnabled) {
@@ -238,7 +321,7 @@ export default function ClientReservationDetailPage() {
             Aller vers le déverrouillage du véhicule
           </Button>
           {!unlockButtonAvailability.isEnabled ? (
-            <p className="text-sm text-slate-600">Disponible 15 min avant le départ</p>
+            <p className="mt-2.5 text-center text-base text-slate-700">Disponible 15 min avant le départ</p>
           ) : null}
         </div>
       ) : null}
@@ -246,11 +329,77 @@ export default function ClientReservationDetailPage() {
       {shouldShowReturnButton ? (
         <div className="flex justify-center">
           <Button
-            className="mx-auto h-[52px] w-full max-w-[420px] bg-[#F97316] text-base text-white hover:bg-[#EA580C]"
+            className="mx-auto h-13 w-full max-w-105 bg-[#F97316] text-base text-white hover:bg-[#EA580C]"
             onClick={() => navigate(`/client/reservations/${reservation.id}/return-inspection`)}
           >
             Restituer le véhicule
           </Button>
+        </div>
+      ) : null}
+
+      {canShowCancelButton ? (
+        <div className="mt-4 flex justify-center">
+          <Button
+            variant="danger"
+            className="mx-auto h-13 w-full max-w-105 text-base"
+            onClick={() => {
+              setCancelErrorMessage(null)
+              setIsCancelModalOpen(true)
+            }}
+          >
+            Annuler ma réservation
+          </Button>
+        </div>
+      ) : null}
+
+      {isCancelModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4">
+          <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
+            <h2 className="text-xl font-semibold text-[#0F172A]">Êtes-vous sûr de vouloir annuler cette réservation ?</h2>
+
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              {cancellationPreviewQuery.isLoading ? (
+                <div className="flex items-center gap-3">
+                  <LoadingSpinner size="sm" aria-label="Chargement des montants d'annulation" />
+                  <span>Calcul des montants en cours...</span>
+                </div>
+              ) : null}
+
+              {cancellationPreviewQuery.isError ? (
+                <Alert variant="danger" message="Les montants d'annulation ne sont pas disponibles pour le moment." />
+              ) : null}
+
+              {cancellationPreviewQuery.data ? (
+                <div className="space-y-1">
+                  <p>Montant payé: {formatEuro(cancellationPreviewQuery.data.amount_paid)}</p>
+                  <p>Frais d'annulation: {formatEuro(cancellationPreviewQuery.data.cancellation_fee)}</p>
+                  <p>Montant remboursé: {formatEuro(cancellationPreviewQuery.data.refundable_amount)}</p>
+                  <p>Caution: libérée intégralement</p>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setIsCancelModalOpen(false)}
+                disabled={cancelMutation.isPending}
+              >
+                Non, conserver ma réservation
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => void cancelMutation.mutateAsync()}
+                disabled={
+                  cancelMutation.isPending
+                  || cancellationPreviewQuery.isLoading
+                  || !cancellationPreviewQuery.data?.can_cancel
+                }
+              >
+                {cancelMutation.isPending ? 'Annulation en cours...' : 'Oui, annuler ma réservation'}
+              </Button>
+            </div>
+          </div>
         </div>
       ) : null}
     </section>

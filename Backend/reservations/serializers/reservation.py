@@ -225,9 +225,30 @@ class ReservationCancelRequestSerializer(serializers.Serializer):
 class ReservationCancelResponseSerializer(serializers.Serializer):
     message = serializers.SerializerMethodField()
     reservation = ReservationListDetailSerializer()
+    cancellation_financials = serializers.SerializerMethodField()
 
     def get_message(self, obj):
         return "Réservation annulée."
+
+    def get_cancellation_financials(self, obj):
+        payload = obj.get("cancellation_financials") if isinstance(obj, dict) else None
+        serializer = ReservationCancellationFinancialsSerializer(instance=payload or {})
+        return serializer.data
+
+
+class ReservationCancellationFinancialsSerializer(serializers.Serializer):
+    amount_paid = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    cancellation_fee = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    refundable_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    deposit_release = serializers.CharField(read_only=True)
+
+
+class ReservationCancellationPreviewSerializer(serializers.Serializer):
+    can_cancel = serializers.BooleanField(read_only=True)
+    amount_paid = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    cancellation_fee = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    refundable_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    deposit_release = serializers.CharField(read_only=True)
 
 
 ALLOWED_DEPOSIT_FIELDS = {"mode"}

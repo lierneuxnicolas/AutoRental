@@ -3,6 +3,7 @@ import type {
   PaginatedReservationListResponse,
   ReservationCancelRequest,
   ReservationCancelResponse,
+  ReservationCancellationPreview,
   ReservationCreateRequest,
   ReservationCreateResponse,
   ReservationDetail,
@@ -29,5 +30,10 @@ export async function cancelReservation(
   payload: ReservationCancelRequest,
 ): Promise<ReservationCancelResponse> {
   const { data } = await api.post<ReservationCancelResponse>(`/reservations/${id}/cancel/`, payload)
+  return data
+}
+
+export async function getReservationCancellationPreview(id: number | string): Promise<ReservationCancellationPreview> {
+  const { data } = await api.get<ReservationCancellationPreview>(`/reservations/${id}/cancel-preview/`)
   return data
 }

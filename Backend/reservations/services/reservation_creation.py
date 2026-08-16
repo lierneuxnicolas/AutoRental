@@ -13,7 +13,7 @@ from notifications.services import create_notification
 from reservations.models import Reservation
 from reservations.services.pricing import PricingError, calculate_price_simulation
 from vehicles.models import Vehicle
-from vehicles.services import AvailabilityValidationError, is_vehicle_available, validate_availability_period
+from vehicles.services import AvailabilityValidationError, BOOKABLE_VEHICLE_STATUSES, is_vehicle_available, validate_availability_period
 
 
 @dataclass(frozen=True)
@@ -114,7 +114,7 @@ def _ensure_vehicle_bookable(*, vehicle: Vehicle) -> None:
             "Le vehicule est inactif.",
         )
 
-    if vehicle.status != Vehicle.Status.DISPONIBLE:
+    if vehicle.status not in BOOKABLE_VEHICLE_STATUSES:
         _raise_reservation_creation_error(
             "VEHICLE_NOT_BOOKABLE",
             "Le vehicule n'est pas reservable dans son statut actuel.",

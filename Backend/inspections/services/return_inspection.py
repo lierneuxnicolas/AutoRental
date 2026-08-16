@@ -11,7 +11,7 @@ from inspections.services.departure import DepartureInspectionError
 from interventions.models import VehicleAccess
 from interventions.services.vehicle_access import VehicleAccessError, lock_and_revoke_after_return
 from notifications.services import create_notification
-from payments.services import mark_authorized_deposit_for_verification
+from payments.services.deposits import mark_authorized_deposit_for_verification
 from reservations.models import Reservation
 from vehicles.models import Vehicle
 

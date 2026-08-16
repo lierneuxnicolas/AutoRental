@@ -4,6 +4,7 @@ from inspections.views import DepartureInspectionCreateView, ReturnInspectionCre
 from reservations.views import (
     PriceSimulationView,
     ReservationClientCancelView,
+    ReservationClientCancelPreviewView,
     ReservationClientDepositAuthorizeView,
     ReservationClientDetailView,
     ReservationClientListCreateView,
@@ -34,6 +35,7 @@ urlpatterns = [
     ),
     path("reservations/<int:pk>/deposit/", ReservationClientDepositAuthorizeView.as_view(), name="reservation-deposit-authorize"),
     path("reservations/<int:pk>/payment-intent/", ReservationClientPaymentIntentView.as_view(), name="reservation-payment-intent"),
+    path("reservations/<int:pk>/cancel-preview/", ReservationClientCancelPreviewView.as_view(), name="reservation-cancel-preview"),
     path("reservations/<int:pk>/cancel/", ReservationClientCancelView.as_view(), name="reservation-cancel"),
     path("reservations/<int:pk>/unlock/", ReservationUnlockView.as_view(), name="reservation-unlock"),
     path("reservations/<int:pk>/lock/", ReservationLockView.as_view(), name="reservation-lock"),

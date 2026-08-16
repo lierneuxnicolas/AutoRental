@@ -17,7 +17,9 @@ import {
   saveDepartureVehicleState,
   uploadInspectionPhoto,
 } from '../../services/inspectionService'
+import { getInvoiceDownload, getInvoices } from '../../services/invoiceService'
 import { getReservationById } from '../../services/reservationService'
+import { getVehicleById } from '../../services/vehicleService'
 import type {
   CompleteInspectionRequest,
   DepartureVehicleStateRequest,
@@ -222,6 +224,22 @@ function parsePositiveInteger(value: string): number | null {
   return parsed
 }
 
+function formatDateTime(value: string): string {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+
+  return parsed.toLocaleString('fr-FR', {
+    dateStyle: 'long',
+    timeStyle: 'short',
+  })
+}
+
+function buildInvoicePdfFilename(invoiceNumber: string): string {
+  return `${invoiceNumber}.pdf`
+}
+
 function ReturnInspectionLayout({
   children,
   stepIndex,
@@ -229,6 +247,7 @@ function ReturnInspectionLayout({
   progress,
   useDepartureProgressBanner = false,
   showInspectionSummary = true,
+  allStepsDone = false,
 }: {
   children: React.ReactNode
   stepIndex: number
@@ -236,6 +255,7 @@ function ReturnInspectionLayout({
   progress: number
   useDepartureProgressBanner?: boolean
   showInspectionSummary?: boolean
+  allStepsDone?: boolean
 }) {
   const steps = [
     { index: 1, label: 'Extérieur', status: 'done' as const },
@@ -244,9 +264,15 @@ function ReturnInspectionLayout({
     { index: 4, label: 'Confirmation', status: 'future' as const },
   ] as Array<{ index: number; label: string; status: 'done' | 'active' | 'future' }>
 
-  steps[stepIndex - 1] = { ...steps[stepIndex - 1], status: 'active' }
-  for (let i = 0; i < stepIndex - 1; i += 1) {
-    steps[i] = { ...steps[i], status: 'done' }
+  if (allStepsDone) {
+    for (let i = 0; i < steps.length; i += 1) {
+      steps[i] = { ...steps[i], status: 'done' }
+    }
+  } else {
+    steps[stepIndex - 1] = { ...steps[stepIndex - 1], status: 'active' }
+    for (let i = 0; i < stepIndex - 1; i += 1) {
+      steps[i] = { ...steps[i], status: 'done' }
+    }
   }
 
   return (
@@ -439,7 +465,13 @@ function ReturnInspectionStepOne() {
     ? `Impossible de charger la reservation pour initialiser l'etat des lieux de retour. ${toErrorMessage(reservationQuery.error)}`
     : null
   const isInitializingInspection = !inspection && !reservationLoadErrorMessage && (reservationQuery.isLoading || reservationQuery.isFetching || startMutation.isPending)
-  const initializationErrorMessage = !inspection && globalError
+  const hasInitializationFailed = !inspection
+    && hasAttemptedInitializationRef.current
+    && !reservationQuery.isLoading
+    && !reservationQuery.isFetching
+    && !startMutation.isPending
+    && startMutation.isError
+  const initializationErrorMessage = hasInitializationFailed && globalError
     ? `Impossible d'initialiser automatiquement l'etat des lieux de retour. ${globalError}`
     : null
 
@@ -458,7 +490,7 @@ function ReturnInspectionStepOne() {
         <Card>
           <div className="flex items-center gap-3 text-sm text-slate-600">
             <LoadingSpinner size="sm" aria-label="Initialisation" />
-            <p>Initialisation automatique de l'etat des lieux de retour...</p>
+            <p>Initialisation de l’état des lieux...</p>
           </div>
         </Card>
       ) : null}
@@ -1010,11 +1042,7 @@ export function ReturnInspectionConfirmationPage() {
   const inspection = reservationQuery.data?.return_inspection ?? null
   const reservation = reservationQuery.data
   const [globalError, setGlobalError] = useState<string | null>(null)
-  const [isReturnCompleted, setIsReturnCompleted] = useState(false)
-  const anomalyPhotos = useMemo(
-    () => (inspection?.photos ?? []).filter((photo) => photo.photo_type === 'DOMMAGE' && Boolean(photo.file)),
-    [inspection?.photos],
-  )
+  const [hasAutoCompletionAttempted, setHasAutoCompletionAttempted] = useState(false)
   const vehicleLabel = reservation ? `${reservation.vehicle.brand} ${reservation.vehicle.model_name}` : 'Non disponible'
 
   const state = location.state as {
@@ -1031,11 +1059,49 @@ export function ReturnInspectionConfirmationPage() {
 
   const effectiveMileage = state?.mileage ?? inspection?.mileage ?? null
   const effectiveEnergyLevelPercent = state?.energyLevelPercent ?? inspection?.energy_level_percent ?? null
-  const hasAnomalyFromInspection = anomalyPhotos.length > 0 || Boolean(inspection?.has_critical_issue)
-  const hasAnomaly = hasAnomalyFromInspection || Boolean(state?.hasDamage)
-  const anomalyDescription = inspection?.critical_issue_description?.trim() || state?.damageDescription?.trim() || ''
   const isInspectionCompleted = inspection?.status === 'TERMINE'
-  const shouldShowCompletedState = isReturnCompleted || isInspectionCompleted
+
+  const currentVehicleQuery = useQuery({
+    queryKey: ['client-return-confirmation-vehicle', reservation?.vehicle.id],
+    queryFn: () => getVehicleById(reservation!.vehicle.id),
+    enabled: Boolean(reservation?.vehicle.id),
+  })
+
+  const invoiceQuery = useQuery({
+    queryKey: ['client-return-confirmation-invoice', reservationId],
+    enabled: isReservationIdValid,
+    queryFn: async () => {
+      let page = 1
+      let hasNextPage = true
+
+      while (hasNextPage) {
+        const pageData = await getInvoices({ page, ordering: '-issue_date' })
+        const matchedInvoice = pageData.results.find((invoice) => invoice.reservation_id === reservationId)
+        if (matchedInvoice) {
+          return matchedInvoice
+        }
+
+        hasNextPage = Boolean(pageData.next)
+        page += 1
+      }
+
+      return null
+    },
+  })
+
+  const downloadInvoiceMutation = useMutation({
+    mutationFn: async () => {
+      if (!invoiceQuery.data) {
+        throw new Error('Facture indisponible pour cette reservation.')
+      }
+
+      const pdfBlob = await getInvoiceDownload(invoiceQuery.data.id)
+      return {
+        invoiceNumber: invoiceQuery.data.number,
+        pdfBlob,
+      }
+    },
+  })
 
   const completeMutation = useMutation({
     mutationFn: async () => {
@@ -1068,12 +1134,50 @@ export function ReturnInspectionConfirmationPage() {
     },
     onSuccess: () => {
       setGlobalError(null)
-      setIsReturnCompleted(true)
+      setHasAutoCompletionAttempted(true)
     },
     onError: (error) => {
       setGlobalError(toErrorMessage(error))
     },
   })
+
+  useEffect(() => {
+    if (!inspection) {
+      return
+    }
+    if (inspection.status === 'TERMINE' || completeMutation.isPending || hasAutoCompletionAttempted) {
+      return
+    }
+    if (effectiveMileage == null || effectiveEnergyLevelPercent == null) {
+      return
+    }
+
+    setHasAutoCompletionAttempted(true)
+    void completeMutation.mutateAsync()
+  }, [
+    completeMutation,
+    completeMutation.isPending,
+    effectiveEnergyLevelPercent,
+    effectiveMileage,
+    hasAutoCompletionAttempted,
+    inspection,
+  ])
+
+  const handleDownloadInvoice = async () => {
+    try {
+      const { invoiceNumber, pdfBlob } = await downloadInvoiceMutation.mutateAsync()
+      const downloadUrl = URL.createObjectURL(pdfBlob)
+      const anchor = document.createElement('a')
+      anchor.href = downloadUrl
+      anchor.download = buildInvoicePdfFilename(invoiceNumber)
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(downloadUrl)
+    } catch (error) {
+      setGlobalError(toErrorMessage(error))
+    }
+  }
 
   if (!isReservationIdValid) {
     return (
@@ -1090,99 +1194,95 @@ export function ReturnInspectionConfirmationPage() {
       progress={100}
       useDepartureProgressBanner
       showInspectionSummary={false}
+      allStepsDone
     >
       {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
-      {shouldShowCompletedState ? (
+      {!isInspectionCompleted ? (
         <Card>
-          <div className="space-y-4">
-            <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">✓ Véhicule restitué</h2>
-            <p className="text-sm text-slate-700 sm:text-base">Votre location est terminée. Merci d’avoir utilisé GetaCar.</p>
-            <ul className="space-y-2 text-sm text-slate-700">
-              <li>Vehicule : {vehicleLabel}</li>
-              <li>Kilométrage final : {effectiveMileage ?? '-'}</li>
-              <li>Niveau carburant / batterie final : {effectiveEnergyLevelPercent ?? '-'}%</li>
-              <li>Anomalie éventuelle : {hasAnomaly ? 'Oui' : 'Non'}</li>
-              {hasAnomaly && anomalyDescription ? <li>Description : {anomalyDescription}</li> : null}
-            </ul>
-
-            {anomalyPhotos.length > 0 ? (
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie</p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {anomalyPhotos.map((photo) => {
-                    const photoUrl = resolveMediaUrl(photo.file)
-                    if (!photoUrl) {
-                      return null
-                    }
-
-                    return (
-                      <div key={photo.id} className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC]">
-                        <img src={photoUrl} alt={`Anomalie ${photo.position ?? photo.id}`} className="h-44 w-full object-cover" />
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="flex justify-center">
-              <Button className="w-full sm:w-auto" onClick={() => navigate('/client')}>Retour au tableau de bord</Button>
-            </div>
+          <div className="flex items-center justify-center gap-3 py-4 text-sm text-slate-600">
+            <LoadingSpinner size="sm" aria-label="Finalisation de la restitution" />
+            <p>Finalisation de la restitution...</p>
           </div>
         </Card>
-      ) : null}
+      ) : (
+        <div className="space-y-6">
+          <Card>
+            <div className="flex flex-col items-center text-center">
+              <div className="mb-5 flex h-28 w-28 items-center justify-center rounded-full bg-[#16A34A] shadow-[0_16px_40px_rgba(22,163,74,0.3)]">
+                <span className="text-5xl font-bold text-white">✓</span>
+              </div>
+              <h2 className="text-3xl font-semibold text-[#0F172A] sm:text-4xl">Location terminée avec succès !</h2>
+              <p className="mt-3 text-base text-slate-700">Merci d'avoir choisi GetaCar.</p>
+              <p className="text-base text-slate-700">Nous espérons vous revoir bientôt.</p>
+            </div>
+          </Card>
 
-      {!shouldShowCompletedState ? (
-      <Card header={<h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Confirmation</h2>}>
-        <div className="space-y-4 text-sm text-slate-700">
-          <ul className="space-y-2">
-            <li>Vehicule : {vehicleLabel}</li>
-            <li>Kilométrage final : {effectiveMileage ?? '-'}</li>
-            <li>Niveau carburant / batterie final : {effectiveEnergyLevelPercent ?? '-'}%</li>
-            <li>Anomalie éventuelle : {hasAnomaly ? 'Oui' : 'Non'}</li>
-            {hasAnomaly && anomalyDescription ? <li>Description : {anomalyDescription}</li> : null}
-            {state?.hasDamage ? <li>Gravite : {state.damageSeverity || '—'}</li> : null}
-          </ul>
-
-          {anomalyPhotos.length > 0 ? (
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie</p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {anomalyPhotos.map((photo) => {
-                  const photoUrl = resolveMediaUrl(photo.file)
-                  if (!photoUrl) {
-                    return null
-                  }
-
-                  return (
-                    <div key={photo.id} className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC]">
-                      <img src={photoUrl} alt={`Anomalie ${photo.position ?? photo.id}`} className="h-44 w-full object-cover" />
+          <Card>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-4">
+                <div className="h-24 w-36 overflow-hidden rounded-2xl bg-[#F1F5F9]">
+                  {currentVehicleQuery.isLoading ? (
+                    <div className="flex h-full items-center justify-center">
+                      <LoadingSpinner size="sm" aria-label="Chargement de la photo du véhicule" />
                     </div>
-                  )
-                })}
+                  ) : resolveMediaUrl(currentVehicleQuery.data?.main_photo?.file) ? (
+                    <img
+                      src={resolveMediaUrl(currentVehicleQuery.data?.main_photo?.file) ?? ''}
+                      alt={vehicleLabel}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center px-3 text-center text-xs text-slate-500">
+                      Photo indisponible
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-xl font-semibold text-[#0F172A]">{vehicleLabel}</p>
+                  <p className="mt-1 text-sm text-slate-600">Référence {reservation?.reference ?? '-'}</p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-[#F8FAFC] px-4 py-3 text-left lg:text-right">
+                <p className="text-sm font-medium text-slate-600">Location terminée le</p>
+                <p className="mt-1 text-base font-semibold text-[#0F172A]">{reservation ? formatDateTime(reservation.end_at) : '-'}</p>
               </div>
             </div>
+          </Card>
+
+          {downloadInvoiceMutation.isError ? (
+            <Alert className="mb-2" variant="danger" title="Telechargement impossible" message={toErrorMessage(downloadInvoiceMutation.error)} />
           ) : null}
 
-          <div className="flex justify-center pt-2">
+          {invoiceQuery.isError ? (
+            <Alert className="mb-2" variant="warning" title="Facture indisponible" message="La facture n'a pas pu etre chargee pour le moment. Vous pouvez reessayer plus tard depuis la section Mes factures." />
+          ) : null}
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
             <Button
               className="w-full sm:w-auto"
-              disabled={completeMutation.isPending || effectiveMileage == null || effectiveEnergyLevelPercent == null}
-              onClick={() => void completeMutation.mutateAsync()}
+              disabled={downloadInvoiceMutation.isPending || invoiceQuery.isLoading || !invoiceQuery.data}
+              onClick={() => {
+                void handleDownloadInvoice()
+              }}
             >
-              {completeMutation.isPending ? (
+              {downloadInvoiceMutation.isPending ? (
                 <span className="flex items-center gap-2">
-                  <LoadingSpinner size="sm" aria-label="Confirmation de la restitution" />
-                  Confirmation en cours...
+                  <LoadingSpinner size="sm" aria-label="Telechargement de la facture" />
+                  Telechargement...
                 </span>
               ) : (
-                'Confirmer la restitution'
+                'Telecharger ma facture'
               )}
+            </Button>
+
+            <Button variant="secondary" className="w-full sm:w-auto" onClick={() => navigate('/client/reservations')}>
+              Retour a mes reservations
             </Button>
           </div>
         </div>
-      </Card>
-      ) : null}
+      )}
     </ReturnInspectionLayout>
   )
 }

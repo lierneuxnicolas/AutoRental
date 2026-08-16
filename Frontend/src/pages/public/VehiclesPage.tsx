@@ -72,8 +72,16 @@ function isValidDateTimeValue(value: string) {
   return !Number.isNaN(new Date(value).getTime())
 }
 
-function isStatusAvailable(status: string) {
-  return status.toUpperCase() === 'DISPONIBLE'
+const HARD_UNAVAILABLE_PUBLIC_STATUSES = new Set([
+  'A_CONTROLER',
+  'MAINTENANCE',
+  'NETTOYAGE',
+  'ACCIDENTE',
+  'INDISPONIBLE',
+])
+
+function isVehicleConsultableWithoutDateRange(status: string) {
+  return !HARD_UNAVAILABLE_PUBLIC_STATUSES.has(status.toUpperCase())
 }
 
 function toVehicleList(payload: Awaited<ReturnType<typeof getVehicles>>): PublicVehicle[] {
@@ -328,7 +336,7 @@ export default function VehiclesPage() {
     const mappedVehicles = filteredVehicles.map((vehicle) => {
       const isAvailable = isAvailabilityFilterActive
         ? (availableVehicleIds ? availableVehicleIds.has(vehicle.id) : false)
-        : isStatusAvailable(vehicle.public_status)
+        : isVehicleConsultableWithoutDateRange(vehicle.public_status)
 
       return {
         id: vehicle.id,

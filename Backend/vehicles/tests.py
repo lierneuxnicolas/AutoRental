@@ -1168,6 +1168,74 @@ class AvailabilityIntegrationDeferredTests(VehicleTestDataMixin, TestCase):
 		queryset = get_available_vehicles(start=start, end=end)
 		return set(queryset.values_list("id", flat=True))
 
+	def test_reserved_vehicle_is_available_when_requested_period_does_not_conflict(self):
+		start, end = self._period()
+		reserved_vehicle = Vehicle.objects.create(
+			brand=self.brand_active,
+			category=self.category_active,
+			parking_space=ParkingSpace.objects.create(parking=self.parking_active, number="A7", is_active=True),
+			registration_number="GG-777-GG",
+			model_name="Reserved Future",
+			year=2024,
+			color="Blue",
+			energy_type="Hybrid",
+			transmission="Auto",
+			seats=5,
+			doors=5,
+			mileage=8000,
+			status=Vehicle.Status.RESERVE,
+			description="Vehicule reserve hors conflit",
+			is_active=True,
+		)
+
+		Reservation.objects.create(
+			client=self.client_profile,
+			vehicle=reserved_vehicle,
+			start_at=start - timedelta(days=2),
+			end_at=start - timedelta(days=1),
+			status=Reservation.Status.CONFIRMEE,
+			rental_amount="100.00",
+			deposit_amount="200.00",
+			confirmed_at=start - timedelta(days=2),
+		)
+
+		self.assertTrue(is_vehicle_available(vehicle=reserved_vehicle, start=start, end=end))
+		self.assertIn(reserved_vehicle.id, self._available_vehicle_ids_with_real_reservations(start, end))
+
+	def test_reserved_vehicle_is_unavailable_when_requested_period_conflicts(self):
+		start, end = self._period()
+		reserved_vehicle = Vehicle.objects.create(
+			brand=self.brand_active,
+			category=self.category_active,
+			parking_space=ParkingSpace.objects.create(parking=self.parking_active, number="A8", is_active=True),
+			registration_number="HH-888-HH",
+			model_name="Reserved Conflict",
+			year=2024,
+			color="Red",
+			energy_type="Diesel",
+			transmission="Manual",
+			seats=5,
+			doors=5,
+			mileage=9000,
+			status=Vehicle.Status.RESERVE,
+			description="Vehicule reserve en conflit",
+			is_active=True,
+		)
+
+		Reservation.objects.create(
+			client=self.client_profile,
+			vehicle=reserved_vehicle,
+			start_at=start + timedelta(minutes=10),
+			end_at=end - timedelta(minutes=10),
+			status=Reservation.Status.CONFIRMEE,
+			rental_amount="100.00",
+			deposit_amount="200.00",
+			confirmed_at=start + timedelta(minutes=10),
+		)
+
+		self.assertFalse(is_vehicle_available(vehicle=reserved_vehicle, start=start, end=end))
+		self.assertNotIn(reserved_vehicle.id, self._available_vehicle_ids_with_real_reservations(start, end))
+
 	def test_real_reservation_model_integration(self):
 		start, end = self._period()
 
