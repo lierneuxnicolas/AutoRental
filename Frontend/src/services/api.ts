@@ -3,8 +3,13 @@ import type { AuthTokens } from '../types/auth'
 
 export const AUTH_LOGOUT_EVENT = 'auth:logout'
 
+const LOCAL_BACKEND_URL = 'http://127.0.0.1:8000'
+const backendBaseUrl = import.meta.env.PROD
+  ? (import.meta.env.VITE_API_URL || LOCAL_BACKEND_URL)
+  : LOCAL_BACKEND_URL
+
 const api = axios.create({
-  baseURL: 'http://127.0.0.1:8000/api/v1',
+  baseURL: `${backendBaseUrl}/api/v1`,
   headers: {
     'Content-Type': 'application/json',
   },

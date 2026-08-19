@@ -30,11 +30,6 @@ const reservationStatusesToDisplay = new Set<ReservationStatus>([
   'A_CONTROLER',
 ])
 
-const currentReservationStatuses = new Set<ReservationStatus>([
-  'CONFIRMEE',
-  'EN_COURS',
-])
-
 const nextReservationStatuses = new Set<ReservationStatus>([
   'BROUILLON',
   'EN_ATTENTE_CAUTION',
@@ -417,17 +412,31 @@ export default function ClientDashboardPage() {
   )
   const currentReservation = dashboardReservations.current
   const nextReservation = dashboardReservations.next
+  const currentVehicleId = currentReservation?.vehicle.id
+  const nextVehicleId = nextReservation?.vehicle.id
 
   const currentVehicleQuery = useQuery({
-    queryKey: ['client-dashboard-current-vehicle', currentReservation?.vehicle.id],
-    queryFn: () => getVehicleById(currentReservation!.vehicle.id),
-    enabled: Boolean(currentReservation),
+    queryKey: ['client-dashboard-current-vehicle', currentVehicleId],
+    queryFn: () => {
+      if (currentVehicleId == null) {
+        throw new Error('Current vehicle id is required')
+      }
+
+      return getVehicleById(currentVehicleId)
+    },
+    enabled: currentVehicleId != null,
   })
 
   const nextVehicleQuery = useQuery({
-    queryKey: ['client-dashboard-next-vehicle', nextReservation?.vehicle.id],
-    queryFn: () => getVehicleById(nextReservation!.vehicle.id),
-    enabled: Boolean(nextReservation),
+    queryKey: ['client-dashboard-next-vehicle', nextVehicleId],
+    queryFn: () => {
+      if (nextVehicleId == null) {
+        throw new Error('Next vehicle id is required')
+      }
+
+      return getVehicleById(nextVehicleId)
+    },
+    enabled: nextVehicleId != null,
   })
 
   const isLoading = profileQuery.isLoading || progressQuery.isLoading || reservationsQuery.isLoading
