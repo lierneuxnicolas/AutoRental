@@ -61,6 +61,8 @@ const INTERIOR_PHOTO_SLOTS: InspectionStepPhotoSlot[] = [
   { key: 'interior_trunk', label: 'Coffre', photoType: 'AUTRE', position: 1 },
 ]
 
+const MAX_CONCURRENT_INSPECTION_UPLOADS = 2
+
 function toErrorMessage(error: unknown): string {
   const fallback = 'Une erreur est survenue. Veuillez reessayer.'
 
@@ -89,6 +91,17 @@ function toErrorMessage(error: unknown): string {
   }
 
   return fallback
+}
+
+function isRequestTimeoutError(error: unknown): boolean {
+  const axiosError = error as AxiosError<ApiErrorPayload>
+  const errorCode = axiosError.code?.toUpperCase()
+  if (errorCode === 'ECONNABORTED' || errorCode === 'ETIMEDOUT') {
+    return true
+  }
+
+  const message = axiosError.message?.toLowerCase() ?? ''
+  return message.includes('timeout')
 }
 
 function toErrorCode(error: unknown): string | null {
@@ -297,6 +310,8 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
   const [criticalIssueDescription, setCriticalIssueDescription] = useState('')
   const [isReturnConfirmationSubmitting, setIsReturnConfirmationSubmitting] = useState(false)
   const uploadingSlotKeysRef = useRef<Set<string>>(new Set())
+  const activeUploadsCountRef = useRef(0)
+  const pendingUploadResolversRef = useRef<Array<() => void>>([])
   const hasAttemptedAutoInitRef = useRef(false)
 
   useEffect(() => {
@@ -381,6 +396,29 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
 
     uploadingSlotKeysRef.current.add(slotConfig.key)
 
+    const waitForAvailableUploadSlot = async (): Promise<() => void> => new Promise((resolve) => {
+      const tryAcquire = () => {
+        if (activeUploadsCountRef.current < MAX_CONCURRENT_INSPECTION_UPLOADS) {
+          activeUploadsCountRef.current += 1
+
+          resolve(() => {
+            activeUploadsCountRef.current = Math.max(0, activeUploadsCountRef.current - 1)
+            const next = pendingUploadResolversRef.current.shift()
+            if (next) {
+              next()
+            }
+          })
+          return
+        }
+
+        pendingUploadResolversRef.current.push(tryAcquire)
+      }
+
+      tryAcquire()
+    })
+
+    let releaseUploadSlot: (() => void) | null = null
+
     setPhotoState((currentState) => {
       const existingPreviewUrl = currentState[slotConfig.key].previewUrl
       revokePreviewUrl(existingPreviewUrl)
@@ -399,6 +437,8 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
     setGlobalError(null)
 
     try {
+      releaseUploadSlot = await waitForAvailableUploadSlot()
+
       const uploadedPhoto = await uploadInspectionPhoto(inspection.id, {
         file,
         photo_type: slotConfig.photoType,
@@ -418,14 +458,21 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
 
       await reservationQuery.refetch()
     } catch (error) {
+      const errorMessage = isRequestTimeoutError(error)
+        ? "L'envoi de la photo a pris trop de temps. Veuillez reessayer."
+        : toErrorMessage(error)
+
       setPhotoState((currentState) => ({
         ...currentState,
         [slotConfig.key]: {
           ...currentState[slotConfig.key],
-          errorMessage: toErrorMessage(error),
+          errorMessage,
         },
       }))
     } finally {
+      if (releaseUploadSlot) {
+        releaseUploadSlot()
+      }
       uploadingSlotKeysRef.current.delete(slotConfig.key)
     }
   }
