@@ -1,7 +1,10 @@
-const API_BASE_URL = 'http://127.0.0.1:8000/api/v1'
+const LOCAL_BACKEND_URL = 'http://127.0.0.1:8000'
+const backendBaseUrl = import.meta.env.PROD
+  ? (import.meta.env.VITE_API_URL || LOCAL_BACKEND_URL)
+  : LOCAL_BACKEND_URL
 
 function getBackendOrigin(): string {
-  return new URL(API_BASE_URL).origin
+  return new URL(backendBaseUrl).origin
 }
 
 export function resolveMediaUrl(url: string | null | undefined): string | null {

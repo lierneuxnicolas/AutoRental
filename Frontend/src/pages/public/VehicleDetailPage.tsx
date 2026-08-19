@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js'
 import { loadStripe } from '@stripe/stripe-js'
@@ -19,7 +19,7 @@ import { resolveMediaUrl } from '../../utils/media'
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
 const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null
-const RESERVATION_CONFIRMATION_POLL_COUNT = 5
+const RESERVATION_CONFIRMATION_TIMEOUT_MS = 15000
 const RESERVATION_CONFIRMATION_POLL_DELAY_MS = 3000
 
 function statusToBadge(status: string): { label: string; variant: StatusVariant } {
@@ -150,10 +150,8 @@ function formatDurationFromHours(hours: string | number | null | undefined, fall
   return `${formatNumberFr(parsedHours)} heure${parsedHours > 1 ? 's' : ''}`
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms)
-  })
+function isReservationConfirmed(status: string | null | undefined): boolean {
+  return status === 'CONFIRMEE' || status === 'PAYEE'
 }
 
 function mapInsuranceToBackend(insurance: InsuranceOptionKey | null): 'STANDARD' | 'DUO' | 'OMNIUM' | null {
@@ -191,27 +189,56 @@ function mapInsuranceToUi(insuranceType: string | null | undefined): InsuranceOp
 }
 
 type StripePaymentFormProps = {
+  clientSecret: string
   isSubmitting: boolean
   onBack: () => void
   returnUrl: string
   onSubmit: (paymentStatus?: string) => Promise<void>
 }
 
-function StripePaymentForm({ isSubmitting, onBack, returnUrl, onSubmit }: StripePaymentFormProps) {
+function StripePaymentForm({ clientSecret, isSubmitting, onBack, returnUrl, onSubmit }: StripePaymentFormProps) {
   const stripe = useStripe()
   const elements = useElements()
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [isConfirming, setIsConfirming] = useState(false)
+  const confirmationLockRef = useRef(false)
+
+  const handleResolvedPaymentIntent = useCallback(async (status: string | undefined) => {
+    if (status === 'succeeded' || status === 'processing') {
+      await onSubmit(status)
+      return true
+    }
+
+    if (status === 'requires_payment_method') {
+      setPaymentError("Le paiement n'a pas pu être effectué. Vérifiez votre moyen de paiement ou essayez-en un autre.")
+      return true
+    }
+
+    if (status === 'requires_action') {
+      return true
+    }
+
+    return false
+  }, [onSubmit])
 
   const handleSubmit = async () => {
-    if (!stripe || !elements || isSubmitting || isConfirming) {
+    if (!stripe || !elements || isSubmitting || isConfirming || confirmationLockRef.current) {
       return
     }
 
+    confirmationLockRef.current = true
     setIsConfirming(true)
     setPaymentError(null)
 
     try {
+      const existingPaymentIntentResult = await stripe.retrievePaymentIntent(clientSecret)
+      const existingPaymentIntentStatus = existingPaymentIntentResult.paymentIntent?.status
+
+      if (existingPaymentIntentStatus === 'succeeded' || existingPaymentIntentStatus === 'processing') {
+        await onSubmit(existingPaymentIntentStatus)
+        return
+      }
+
       const result = await stripe.confirmPayment({
         elements,
         confirmParams: {
@@ -221,15 +248,31 @@ function StripePaymentForm({ isSubmitting, onBack, returnUrl, onSubmit }: Stripe
       })
 
       if (result.error) {
+        if (result.error.code === 'payment_intent_unexpected_state') {
+          const latestPaymentIntentResult = await stripe.retrievePaymentIntent(clientSecret)
+          const latestPaymentIntentStatus = latestPaymentIntentResult.paymentIntent?.status
+
+          if (latestPaymentIntentStatus === 'succeeded' || latestPaymentIntentStatus === 'processing') {
+            await onSubmit(latestPaymentIntentStatus)
+            return
+          }
+        }
+
         setPaymentError(result.error.message ?? 'Le paiement a ete refuse. Verifiez votre moyen de paiement et reessayez.')
         return
       }
 
-      await onSubmit(result.paymentIntent?.status)
+      const confirmedPaymentIntent = result.paymentIntent ?? (await stripe.retrievePaymentIntent(clientSecret)).paymentIntent
+      const wasHandled = await handleResolvedPaymentIntent(confirmedPaymentIntent?.status)
+
+      if (!wasHandled) {
+        setPaymentError('Le statut du paiement Stripe est en attente. Veuillez patienter quelques instants avant de réessayer.')
+      }
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
       setPaymentError(axiosError.response?.data?.detail || 'Le paiement n\'a pas pu etre confirme. Veuillez reessayer.')
     } finally {
+      confirmationLockRef.current = false
       setIsConfirming(false)
     }
   }
@@ -347,6 +390,12 @@ export default function VehicleDetailPage() {
   const [paymentWorkflowError, setPaymentWorkflowError] = useState<string | null>(null)
   const [isPreparingPayment, setIsPreparingPayment] = useState(false)
   const [isConfirmingPayment, setIsConfirmingPayment] = useState(false)
+  const [confirmedPaymentIntentStatus, setConfirmedPaymentIntentStatus] = useState<string | null>(null)
+  const [hasConfirmationTimedOut, setHasConfirmationTimedOut] = useState(false)
+  const [isRefreshingReservationStatus, setIsRefreshingReservationStatus] = useState(false)
+  const finalizedPaymentClientSecretRef = useRef<string | null>(null)
+  const confirmationPollTimerRef = useRef<number | null>(null)
+  const confirmationPollDeadlineRef = useRef<number | null>(null)
 
   const profileQuery = useQuery({
     queryKey: ['client-profile-me', isAuthenticated],
@@ -658,49 +707,155 @@ export default function VehicleDetailPage() {
     }
   }, [paymentIntentMutation])
 
-  const pollReservationConfirmation = async (reservationId: number): Promise<ReservationCreateResponse | null> => {
-    for (let attempt = 0; attempt < RESERVATION_CONFIRMATION_POLL_COUNT; attempt += 1) {
-      await delay(RESERVATION_CONFIRMATION_POLL_DELAY_MS)
-      const refreshedReservation = await getReservationById(reservationId)
-
-      if (refreshedReservation.status === 'CONFIRMEE') {
-        return refreshedReservation
-      }
+  const clearConfirmationPollTimer = useCallback(() => {
+    if (confirmationPollTimerRef.current !== null) {
+      window.clearTimeout(confirmationPollTimerRef.current)
+      confirmationPollTimerRef.current = null
     }
+  }, [])
 
-    return null
-  }
+  const refreshReservationStatus = useCallback(async (reservationId: number): Promise<ReservationCreateResponse> => {
+    const refreshedReservation = await getReservationById(reservationId)
+    setCreatedReservation(refreshedReservation)
+    return refreshedReservation
+  }, [])
 
   const handlePaymentSuccess = async (paymentStatus?: string) => {
-    if (!createdReservation) {
+    if (!createdReservation || !paymentClientSecret) {
       return
     }
 
+    if (finalizedPaymentClientSecretRef.current === paymentClientSecret) {
+      return
+    }
+
+    finalizedPaymentClientSecretRef.current = paymentClientSecret
+
     setIsConfirmingPayment(true)
+    setConfirmedPaymentIntentStatus(paymentStatus ?? null)
+    setHasConfirmationTimedOut(false)
     setPaymentWorkflowError(null)
+    setCurrentStep(5)
+    confirmationPollDeadlineRef.current = Date.now() + RESERVATION_CONFIRMATION_TIMEOUT_MS
+
     if (paymentStatus === 'processing') {
       setPaymentSetupMessage('Votre paiement est en cours de traitement. Veuillez patienter.')
     } else {
       setPaymentSetupMessage('Paiement en cours de confirmation...')
     }
+  }
+
+  const handleRefreshReservationStatus = useCallback(async () => {
+    const reservationId = createdReservation?.id
+
+    if (!reservationId) {
+      return
+    }
+
+    setIsRefreshingReservationStatus(true)
+    setPaymentWorkflowError(null)
 
     try {
-      const refreshedReservation = await pollReservationConfirmation(createdReservation.id)
+      const refreshedReservation = await refreshReservationStatus(reservationId)
 
-      if (refreshedReservation) {
-        setCreatedReservation(refreshedReservation)
-        setCurrentStep(5)
+      if (isReservationConfirmed(refreshedReservation.status)) {
+        setHasConfirmationTimedOut(false)
+        setIsConfirmingPayment(false)
+        setPaymentSetupMessage(null)
         return
       }
 
-      setPaymentWorkflowError('Paiement soumis, mais confirmation backend encore en attente. Veuillez rafraichir dans quelques instants.')
+      setHasConfirmationTimedOut(true)
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
-      setPaymentWorkflowError(axiosError.response?.data?.detail || 'Impossible de confirmer le paiement pour le moment.')
+      setPaymentWorkflowError(axiosError.response?.data?.detail || 'Impossible de récupérer le statut de la réservation pour le moment.')
     } finally {
-      setIsConfirmingPayment(false)
+      setIsRefreshingReservationStatus(false)
     }
-  }
+  }, [createdReservation?.id, refreshReservationStatus])
+
+  useEffect(() => {
+    if (currentStep < 5 || !isConfirmingPayment || hasConfirmationTimedOut) {
+      clearConfirmationPollTimer()
+      return
+    }
+
+    const reservationId = createdReservation?.id
+
+    if (!reservationId || isReservationConfirmed(createdReservation.status)) {
+      setIsConfirmingPayment(false)
+      clearConfirmationPollTimer()
+      return
+    }
+
+    let isCancelled = false
+
+    const pollOnce = async () => {
+      try {
+        const refreshedReservation = await refreshReservationStatus(reservationId)
+
+        if (isCancelled) {
+          return
+        }
+
+        if (isReservationConfirmed(refreshedReservation.status)) {
+          setHasConfirmationTimedOut(false)
+          setIsConfirmingPayment(false)
+          setPaymentSetupMessage(null)
+          clearConfirmationPollTimer()
+          return
+        }
+
+        if ((confirmationPollDeadlineRef.current ?? 0) <= Date.now()) {
+          setHasConfirmationTimedOut(true)
+          setIsConfirmingPayment(false)
+          setPaymentSetupMessage(null)
+          clearConfirmationPollTimer()
+          return
+        }
+
+        confirmationPollTimerRef.current = window.setTimeout(() => {
+          void pollOnce()
+        }, RESERVATION_CONFIRMATION_POLL_DELAY_MS)
+      } catch (error) {
+        if (isCancelled) {
+          return
+        }
+
+        if ((confirmationPollDeadlineRef.current ?? 0) <= Date.now()) {
+          const axiosError = error as AxiosError<{ detail?: string }>
+          setPaymentWorkflowError(axiosError.response?.data?.detail || 'Impossible de récupérer la confirmation de la réservation pour le moment.')
+          setHasConfirmationTimedOut(true)
+          setIsConfirmingPayment(false)
+          setPaymentSetupMessage(null)
+          clearConfirmationPollTimer()
+          return
+        }
+
+        confirmationPollTimerRef.current = window.setTimeout(() => {
+          void pollOnce()
+        }, RESERVATION_CONFIRMATION_POLL_DELAY_MS)
+      }
+    }
+
+    void pollOnce()
+
+    return () => {
+      isCancelled = true
+      clearConfirmationPollTimer()
+    }
+  }, [
+    clearConfirmationPollTimer,
+    createdReservation,
+    currentStep,
+    hasConfirmationTimedOut,
+    isConfirmingPayment,
+    refreshReservationStatus,
+  ])
+
+  useEffect(() => () => {
+    clearConfirmationPollTimer()
+  }, [clearConfirmationPollTimer])
 
   useEffect(() => {
     if (!createdReservation) {
@@ -1574,6 +1729,7 @@ export default function VehicleDetailPage() {
                                   }}
                                 >
                                   <StripePaymentForm
+                                    clientSecret={paymentClientSecret}
                                     isSubmitting={isConfirmingPayment}
                                     onBack={() => setCurrentStep(3)}
                                     returnUrl={stripeReturnUrl}
@@ -1709,14 +1865,46 @@ export default function VehicleDetailPage() {
                       </Button>
                     </div>
                   </div>
-                ) : (
+                ) : currentStep >= 5 && hasConfirmationTimedOut ? (
+                  <div className="space-y-5">
+                    <Alert
+                      variant="warning"
+                      title="La confirmation prend plus de temps que prévu."
+                      message="Votre paiement a bien été transmis. Vérifiez à nouveau le statut de la réservation sans relancer le paiement."
+                    />
+
+                    <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+                      <Button
+                        className="bg-[#7C3AED] text-white hover:bg-[#6D28D9]"
+                        disabled={isRefreshingReservationStatus}
+                        onClick={() => {
+                          void handleRefreshReservationStatus()
+                        }}
+                      >
+                        {isRefreshingReservationStatus ? 'Actualisation...' : 'Actualiser le statut'}
+                      </Button>
+                      <Button variant="secondary" onClick={() => navigate('/client/reservations')}>
+                        Retour à mes réservations
+                      </Button>
+                    </div>
+                  </div>
+                ) : currentStep >= 5 && isConfirmingPayment ? (
                   <div className="flex min-h-[32vh] flex-col items-center justify-center px-4 py-10 text-center sm:min-h-[36vh] sm:px-6 sm:py-12">
                     <LoadingSpinner size="lg" aria-label="Confirmation du paiement en cours" />
                     <h3 className="mt-5 text-2xl font-semibold tracking-tight text-[#1F2937] sm:text-3xl">Veuillez patienter</h3>
                     <p className="mt-3 max-w-xl text-sm leading-6 text-slate-600 sm:text-base">
-                      Nous procédons à la confirmation de votre paiement.
+                      {confirmedPaymentIntentStatus === 'processing'
+                        ? 'Votre paiement est en cours de traitement par Stripe. La confirmation de votre réservation arrivera dès validation du backend.'
+                        : 'Nous procédons à la confirmation de votre paiement.'}
                     </p>
                     <p className="mt-3 text-sm font-semibold text-slate-500 sm:text-base">Ne fermez pas cette page.</p>
+                  </div>
+                ) : (
+                  <div className="flex min-h-[32vh] flex-col items-center justify-center px-4 py-10 text-center sm:min-h-[36vh] sm:px-6 sm:py-12">
+                    <h3 className="text-2xl font-semibold tracking-tight text-[#1F2937] sm:text-3xl">Confirmation</h3>
+                    <p className="mt-3 max-w-xl text-sm leading-6 text-slate-600 sm:text-base">
+                      La confirmation finale de votre réservation s&apos;affichera ici après validation du paiement.
+                    </p>
                   </div>
                 )}
               </Card>

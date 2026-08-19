@@ -205,7 +205,7 @@ export default function ClientReservationDetailPage() {
     )
   }
 
-  if (reservationQuery.isError || !reservationQuery.data) {
+  if (reservationQuery.isError || !reservation) {
     return (
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
         <Alert variant="danger" title="Chargement impossible" message="La réservation est introuvable ou inaccessible." className="mb-4" />
