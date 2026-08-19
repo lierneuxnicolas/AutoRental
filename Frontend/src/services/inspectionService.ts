@@ -51,7 +51,10 @@ export async function uploadInspectionPhoto(
   const headers = new AxiosHeaders()
   headers.delete('Content-Type')
 
-  const { data } = await api.post<InspectionPhoto>(`/inspections/${inspectionId}/photos/`, formData, { headers })
+  const { data } = await api.post<InspectionPhoto>(`/inspections/${inspectionId}/photos/`, formData, {
+    headers,
+    timeout: 120000,
+  })
   return data
 }
 
