@@ -11,7 +11,12 @@ from reservations.serializers import PriceSimulationRequestSerializer, PriceSimu
 from reservations.serializers.pricing import pricing_error_to_serializer_error
 from reservations.services import PricingError, calculate_price_simulation
 from vehicles.models import Vehicle
-from vehicles.services import AvailabilityValidationError, get_blocking_reservation_statuses, is_vehicle_available
+from vehicles.services import (
+    AvailabilityValidationError,
+    BOOKABLE_VEHICLE_STATUSES,
+    get_blocking_reservation_statuses,
+    is_vehicle_available,
+)
 
 
 ErrorDetailResponseSerializer = inline_serializer(
@@ -142,7 +147,7 @@ class PriceSimulationView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if reservation_context is None and vehicle.status not in (Vehicle.Status.DISPONIBLE,):
+        if reservation_context is None and vehicle.status not in BOOKABLE_VEHICLE_STATUSES:
             return Response(
                 {"detail": "Le vehicule n'est pas reservable dans son statut actuel."},
                 status=status.HTTP_400_BAD_REQUEST,

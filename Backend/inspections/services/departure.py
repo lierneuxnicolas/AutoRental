@@ -92,13 +92,21 @@ def _assert_reservation_is_ready(reservation: Reservation) -> None:
         )
 
 
-def _assert_departure_window(reservation: Reservation) -> None:
-    now = timezone.now()
+def get_departure_window_bounds(*, reservation: Reservation) -> tuple:
     early_tolerance = timedelta(minutes=getattr(settings, "DEPARTURE_INSPECTION_EARLY_TOLERANCE_MINUTES", 30))
     late_tolerance = timedelta(minutes=getattr(settings, "DEPARTURE_INSPECTION_LATE_TOLERANCE_MINUTES", 120))
+    return reservation.start_at - early_tolerance, reservation.start_at + late_tolerance
 
-    earliest_allowed = reservation.start_at - early_tolerance
-    latest_allowed = reservation.start_at + late_tolerance
+
+def is_departure_window_expired(*, reservation: Reservation, reference_time=None) -> bool:
+    now = reference_time or timezone.now()
+    _, latest_allowed = get_departure_window_bounds(reservation=reservation)
+    return now > latest_allowed
+
+
+def _assert_departure_window(reservation: Reservation) -> None:
+    now = timezone.now()
+    earliest_allowed, latest_allowed = get_departure_window_bounds(reservation=reservation)
 
     if now < earliest_allowed:
         _raise_departure_error(
