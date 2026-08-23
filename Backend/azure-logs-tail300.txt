@@ -1,0 +1,8 @@
+﻿{"TimeStamp": "2026-08-19T23:45:04.44292", "Log": "Connecting to the container 'getacar-backend'..."}
+{"TimeStamp": "2026-08-19T23:45:04.46185", "Log": "Successfully Connected to container: 'getacar-backend' [Revision: 'getacar-backend--0000004', Replica: 'getacar-backend--0000004-df647c5b8-qcfj2']"}
+{"TimeStamp": "2026-08-19T23:43:57.5318136+00:00", "Log": "F [2026-08-19 23:43:57 +0000] [7] [INFO] Starting gunicorn 26.0.0"}
+{"TimeStamp": "2026-08-19T23:43:57.5326865+00:00", "Log": "F [2026-08-19 23:43:57 +0000] [7] [INFO] Listening at: http://0.0.0.0:8000 (7)"}
+{"TimeStamp": "2026-08-19T23:43:57.5327588+00:00", "Log": "F [2026-08-19 23:43:57 +0000] [7] [INFO] Using worker: sync"}
+{"TimeStamp": "2026-08-19T23:43:57.5347802+00:00", "Log": "F [2026-08-19 23:43:57 +0000] [8] [INFO] Booting worker with pid: 8"}
+{"TimeStamp": "2026-08-19T23:43:57.5792568+00:00", "Log": "F [2026-08-19 23:43:57 +0000] [9] [INFO] Booting worker with pid: 9"}
+{"TimeStamp": "2026-08-19T23:43:57.764833+00:00", "Log": "F [2026-08-19 23:43:57 +0000] [7] [INFO] Control socket listening at /root/.gunicorn/gunicorn.ctl"}

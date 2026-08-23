@@ -531,8 +531,45 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-	def test_unavailable_vehicle_status_returns_400(self):
+	def test_reserved_vehicle_without_overlap_returns_200(self):
 		self.vehicle_hybrid.status = Vehicle.Status.RESERVE
+		self.vehicle_hybrid.save(update_fields=["status"])
+
+		response = self.client_api.post(
+			self.url,
+			self._payload(vehicle_id=self.vehicle_hybrid.id),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+	def test_reserved_vehicle_with_overlap_returns_400(self):
+		start_at, end_at = self._future_period(duration_hours=2)
+		Reservation.objects.create(
+			client=self.client_profile,
+			vehicle=self.vehicle_hybrid,
+			start_at=start_at + timedelta(minutes=15),
+			end_at=end_at - timedelta(minutes=15),
+			status=Reservation.Status.CONFIRMEE,
+			rental_amount=Decimal("24.00"),
+			insurance_type=Reservation.InsuranceType.STANDARD,
+			deposit_amount=Decimal("500.00"),
+			confirmed_at=timezone.now(),
+		)
+		self.vehicle_hybrid.status = Vehicle.Status.RESERVE
+		self.vehicle_hybrid.save(update_fields=["status"])
+
+		response = self.client_api.post(
+			self.url,
+			self._payload(vehicle_id=self.vehicle_hybrid.id, start_at=start_at, end_at=end_at),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("indisponible", response.data["detail"].lower())
+
+	def test_non_bookable_operational_status_returns_400(self):
+		self.vehicle_hybrid.status = Vehicle.Status.MAINTENANCE
 		self.vehicle_hybrid.save(update_fields=["status"])
 
 		response = self.client_api.post(
