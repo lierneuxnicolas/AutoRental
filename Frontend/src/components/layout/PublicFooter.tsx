@@ -9,7 +9,7 @@ export default function PublicFooter() {
             <h3 className="text-base font-semibold text-white">À propos</h3>
             <div className="mt-4 flex flex-col gap-3 text-sm text-slate-200">
               <Link to="/about" className="transition hover:text-white">Qui sommes-nous ?</Link>
-              <Link to="/terms" className="transition hover:text-white">Conditions de location</Link>
+              <Link to="/terms" className="transition hover:text-white">Conditions de location et assurances</Link>
               <Link to="/legal-notice" className="transition hover:text-white">Mentions légales</Link>
             </div>
           </div>
@@ -17,8 +17,9 @@ export default function PublicFooter() {
           <div>
             <h3 className="text-base font-semibold text-white">Confidentialité</h3>
             <div className="mt-4 flex flex-col gap-3 text-sm text-slate-200">
-              <Link to="/privacy" className="transition hover:text-white">Données personnelles</Link>
-              <Link to="/cookies" className="transition hover:text-white">Paramètres des cookies</Link>
+              <Link to="/privacy" className="transition hover:text-white">Politique de confidentialité</Link>
+              <Link to="/cookies" className="transition hover:text-white">Cookies</Link>
+              <Link to="/rgpd" className="transition hover:text-white">Vos droits RGPD</Link>
             </div>
           </div>
 

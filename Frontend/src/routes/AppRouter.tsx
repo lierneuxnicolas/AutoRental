@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
 import {
   CarFront,
   CircleGauge,
@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import PublicLayout from '../components/layout/PublicLayout'
 import ProtectedRoute from './ProtectedRoute'
+import ScrollToTop from './ScrollToTop'
 import FeaturePlaceholderPage from '../pages/private/FeaturePlaceholderPage'
 import PrivateAreaPage from '../pages/private/PrivateAreaPage'
 import FaqSection, { ContactSection } from '../components/home/FaqSection'
@@ -24,7 +25,6 @@ import RegisterPage from '../pages/public/RegisterPage'
 import ForgotPasswordPage from '../pages/public/ForgotPasswordPage'
 import VerifyEmailPage from '../pages/public/VerifyEmailPage'
 import ResetPasswordPage from '../pages/public/ResetPasswordPage'
-import TermsPage from '../pages/public/TermsPage'
 import ReservationPage from '../pages/public/ReservationPage'
 import StaticInfoPage from '../pages/public/StaticInfoPage'
 import ClientDashboardPage from '../pages/client/ClientDashboardPage'
@@ -70,6 +70,7 @@ function NotFoundPage() {
 export default function AppRouter() {
   return (
     <BrowserRouter>
+      <ScrollToTop />
       <Routes>
         <Route element={<PublicLayout />}>
           <Route path="/" element={<HomePage />} />
@@ -84,22 +85,152 @@ export default function AppRouter() {
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
-          <Route path="/terms" element={<TermsPage />} />
+          <Route
+            path="/terms"
+            element={(
+              <StaticInfoPage
+                title="Conditions de location et assurances"
+                sections={[
+                  {
+                    heading: 'Conditions pour louer',
+                    paragraphs: [
+                      "Pour louer un véhicule GetaCar, le client doit avoir **au moins 21 ans** et disposer d'une carte d'identité ainsi que d'un permis de conduire valides. Ces documents doivent être validés avant la réservation.",
+                    ],
+                  },
+                  {
+                    heading: 'Réservation et paiement',
+                    paragraphs: [
+                      "La réservation est confirmée uniquement si le véhicule est disponible, que la **caution est autorisée** et que le paiement est effectué avec succès. Le prix total est affiché avant la confirmation.",
+                    ],
+                  },
+                  {
+                    heading: 'Assurance',
+                    paragraphs: [
+                      'Une assurance **Standard** est comprise dans le prix de base. Des formules complémentaires peuvent être proposées afin d\'adapter les garanties et la franchise.',
+                    ],
+                  },
+                  {
+                    heading: 'Caution et dommages',
+                    paragraphs: [
+                      'La caution est réalisée sous forme de **préautorisation bancaire**. En cas de dommage ou de frais liés à la location, le client est informé des montants réclamés et des justificatifs correspondants.',
+                    ],
+                  },
+                  {
+                    heading: 'État du véhicule',
+                    paragraphs: [
+                      "Un **état des lieux avec photos** est réalisé avant le départ et au retour afin de vérifier l'état du véhicule et de signaler d'éventuelles anomalies.",
+                    ],
+                  },
+                  {
+                    heading: 'Tarifs',
+                    paragraphs: [
+                      'Le tarif dépend du véhicule, de la durée de location et des options choisies. Le **montant total** est communiqué avant la validation de la réservation.',
+                    ],
+                  },
+                ]}
+              />
+            )}
+          />
           <Route
             path="/about"
-            element={<StaticInfoPage title="Qui sommes-nous ?" description="GetACar simplifie la location de véhicules avec une expérience digitale claire, rapide et accessible." />}
+            element={(
+              <StaticInfoPage
+                title="Qui sommes-nous ?"
+                description="GetaCar est un service de location de véhicules en libre-service conçu pour rendre la location plus simple, autonome et numérique."
+                paragraphs={[
+                  'La plateforme permet de rechercher un véhicule, réserver, payer, gérer la caution, réaliser les états des lieux et restituer le véhicule depuis une même interface.',
+                ]}
+                sections={[
+                  {
+                    heading: 'Notre objectif',
+                    paragraphs: [
+                      'Proposer une expérience de location claire et pratique, tout en assurant la **sécurité**, la disponibilité des véhicules et le suivi de chaque étape de la location.',
+                    ],
+                  },
+                  {
+                    heading: 'Nos valeurs',
+                    valueBlocks: [
+                      {
+                        title: 'Simplicité',
+                        description: "Une interface claire et un parcours de location facile à comprendre, de la réservation jusqu'à la restitution.",
+                      },
+                      {
+                        title: 'Autonomie',
+                        description: "Le client peut gérer les principales étapes de sa location directement depuis l'application, sans devoir passer systématiquement par une agence.",
+                      },
+                      {
+                        title: 'Sécurité',
+                        description: 'Les documents, paiements, cautions et accès aux véhicules sont encadrés par des contrôles et des règles métier.',
+                      },
+                      {
+                        title: 'Traçabilité',
+                        description: "Les principales actions liées à la réservation, aux paiements, aux états des lieux et aux interventions sont suivies dans l'application.",
+                      },
+                    ],
+                  },
+                ]}
+              />
+            )}
           />
           <Route
             path="/legal-notice"
-            element={<StaticInfoPage title="Mentions légales" description="Cette page regroupe les informations légales de GetACar. Le contenu détaillé sera publié prochainement." />}
+            element={(
+              <StaticInfoPage
+                title="Mentions légales"
+                sections={[
+                  {
+                    heading: 'Éditeur du site',
+                    addressLines: [
+                      'GetaCar SRL — société fictive dans le cadre du TFE',
+                      'Responsable du projet : Nicolas Lierneux',
+                      'Siège social fictif : Bruxelles, Belgique',
+                      "N° d'entreprise fictif : BE 1111.111.111",
+                      'N° de TVA fictif : BE 1111.111.111',
+                    ],
+                    note: 'Ces coordonnées administratives sont fictives et utilisées uniquement dans le cadre de la démonstration académique GetaCar.',
+                  },
+                  {
+                    heading: 'Contact',
+                    content: (
+                      <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
+                        Pour toute question concernant GetaCar, veuillez utiliser la rubrique{' '}
+                        <Link to="/contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> du site.
+                      </p>
+                    ),
+                  },
+                  {
+                    heading: 'Hébergement',
+                    paragraphs: [
+                      "L'application GetaCar est conçue pour être hébergée sur **Microsoft Azure**, notamment pour le frontend, le backend, la base de données et le stockage des fichiers.",
+                    ],
+                  },
+                  {
+                    heading: 'Propriété intellectuelle',
+                    paragraphs: [
+                      "Les contenus, l'interface et les éléments développés spécifiquement pour GetaCar sont utilisés dans le cadre de ce projet académique. Les marques, logos et services tiers restent la propriété de leurs détenteurs respectifs.",
+                    ],
+                  },
+                  {
+                    heading: 'Responsabilité',
+                    paragraphs: [
+                      "Les informations présentées sur cette version de GetaCar sont fournies dans le cadre d'un **projet académique et démonstratif**. Le service ne constitue pas actuellement une activité commerciale réelle.",
+                    ],
+                  },
+                ]}
+              />
+            )}
           />
           <Route
             path="/privacy"
-            element={<StaticInfoPage title="Données personnelles" description="GetACar prépare cette page pour détailler le traitement des données personnelles et vos droits." />}
+            element={<StaticInfoPage title="Politique de confidentialité" description="GetACar prépare cette page pour détailler le traitement des données personnelles et le respect de votre vie privée." />}
           />
           <Route
             path="/cookies"
-            element={<StaticInfoPage title="Paramètres des cookies" description="La gestion des cookies GetACar sera détaillée ici prochainement." />}
+            element={<StaticInfoPage title="Cookies" description="La gestion des cookies GetACar sera détaillée ici prochainement." />}
+          />
+          <Route
+            path="/rgpd"
+            element={<StaticInfoPage title="Vos droits RGPD" description="Retrouvez ici comment exercer vos droits RGPD (accès, rectification, suppression) aupres de GetACar. Le detail complet sera publie prochainement." />}
           />
           <Route
             path="/sitemap"
