@@ -19,6 +19,8 @@ import type { ClientProfileMe, ClientProfileProgress } from '../../types/auth'
 type ApiErrorPayload = {
   detail?: string
   non_field_errors?: string[]
+  code?: string
+  message?: string
   [key: string]: unknown
 }
 
@@ -230,6 +232,10 @@ function toErrorMessage(error: unknown): string {
 
   if (Array.isArray(payload.non_field_errors) && payload.non_field_errors.length > 0) {
     return payload.non_field_errors.join(' ')
+  }
+
+  if (typeof payload.message === 'string' && payload.message.trim().length > 0) {
+    return payload.message
   }
 
   const fieldEntries = Object.entries(payload).filter(([key, value]) => key !== 'detail' && key !== 'non_field_errors' && Array.isArray(value) && value.length > 0)

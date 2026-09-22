@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import axios from 'axios'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import EmptyState from '../../components/feedback/EmptyState'
@@ -67,6 +67,35 @@ function toErrorMessage(error: unknown): string {
   return 'Une erreur est survenue. Veuillez reessayer.'
 }
 
+async function toInvoiceDownloadErrorMessage(error: unknown): Promise<string> {
+  const fallback = 'Une erreur est survenue. Veuillez reessayer.'
+
+  if (!axios.isAxiosError(error)) {
+    return fallback
+  }
+
+  const data = error.response?.data
+
+  // With responseType: 'blob', axios stores JSON error bodies as an opaque Blob instead of parsing them.
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text()
+      const parsed = JSON.parse(text) as { detail?: string, message?: string, code?: string }
+      if (typeof parsed.detail === 'string' && parsed.detail.trim().length > 0) {
+        return parsed.detail
+      }
+      if (typeof parsed.message === 'string' && parsed.message.trim().length > 0) {
+        return parsed.message
+      }
+    } catch {
+      // Not a JSON body (e.g. empty or HTML error page): fall through to the generic message below.
+    }
+    return fallback
+  }
+
+  return toErrorMessage(error)
+}
+
 function statusPresentation(status: InvoiceStatus): { label: string; variant: StatusVariant } {
   switch (status) {
     case 'DRAFT':
@@ -83,33 +112,29 @@ function statusPresentation(status: InvoiceStatus): { label: string; variant: St
 }
 
 function buildPdfFilename(invoiceNumber: string): string {
-  return `${invoiceNumber}.pdf`
+  return `GetaCar_Facture_${invoiceNumber}.pdf`
 }
 
 export default function ClientInvoicesPage() {
   const [page, setPage] = useState(1)
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<number | null>(null)
+  const [invoiceDownloadError, setInvoiceDownloadError] = useState<string | null>(null)
 
   const invoicesQuery = useQuery({
     queryKey: ['client-invoices', page],
     queryFn: () => getInvoices({ page, ordering: '-issue_date' }),
   })
 
-  const downloadMutation = useMutation({
-    mutationFn: async (invoiceId: number) => {
+  const pageInvoices = invoicesQuery.data?.results ?? []
+
+  const handleDownload = async (invoiceId: number) => {
+    setInvoiceDownloadError(null)
+    setDownloadingInvoiceId(invoiceId)
+    try {
       const [invoice, pdfBlob] = await Promise.all([
         getInvoiceById(invoiceId),
         getInvoiceDownload(invoiceId),
       ])
-
-      return { invoice, pdfBlob }
-    },
-  })
-
-  const pageInvoices = invoicesQuery.data?.results ?? []
-
-  const handleDownload = async (invoiceId: number) => {
-    try {
-      const { invoice, pdfBlob } = await downloadMutation.mutateAsync(invoiceId)
       const objectUrl = URL.createObjectURL(pdfBlob)
       const anchor = document.createElement('a')
       anchor.href = objectUrl
@@ -118,8 +143,11 @@ export default function ClientInvoicesPage() {
       anchor.click()
       anchor.remove()
       URL.revokeObjectURL(objectUrl)
-    } catch {
-      // Error is surfaced via mutation state and rendered below.
+      setInvoiceDownloadError(null)
+    } catch (error) {
+      setInvoiceDownloadError(await toInvoiceDownloadErrorMessage(error))
+    } finally {
+      setDownloadingInvoiceId(null)
     }
   }
 
@@ -144,11 +172,11 @@ export default function ClientInvoicesPage() {
         />
       ) : null}
 
-      {downloadMutation.isError ? (
+      {invoiceDownloadError ? (
         <Alert
           variant="danger"
           title="Telechargement impossible"
-          message={toErrorMessage(downloadMutation.error)}
+          message={invoiceDownloadError}
           className="mb-6"
         />
       ) : null}
@@ -164,7 +192,7 @@ export default function ClientInvoicesPage() {
         <div className="space-y-4">
           {pageInvoices.map((invoice) => {
             const status = statusPresentation(invoice.status)
-            const isDownloadingThisInvoice = downloadMutation.isPending && downloadMutation.variables === invoice.id
+            const isDownloadingThisInvoice = downloadingInvoiceId === invoice.id
 
             return (
               <Card
