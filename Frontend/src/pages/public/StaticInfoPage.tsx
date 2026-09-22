@@ -87,7 +87,7 @@ export default function StaticInfoPage({ title, description, paragraphs, section
   return (
     <section className="py-8 sm:py-12" aria-labelledby="static-page-title">
       <div className="mx-auto max-w-6xl rounded-[32px] border border-slate-200 bg-white px-5 py-8 shadow-[0_10px_30px_rgba(15,23,42,0.06)] sm:px-10 sm:py-12 lg:px-12">
-        <h1 id="static-page-title" className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
+        <h1 id="static-page-title" className="text-center text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
           {title}
         </h1>
 

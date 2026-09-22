@@ -27,6 +27,7 @@ import VerifyEmailPage from '../pages/public/VerifyEmailPage'
 import ResetPasswordPage from '../pages/public/ResetPasswordPage'
 import ReservationPage from '../pages/public/ReservationPage'
 import StaticInfoPage from '../pages/public/StaticInfoPage'
+import RentalProcessPage from '../pages/public/RentalProcessPage'
 import ClientDashboardPage from '../pages/client/ClientDashboardPage'
 import PaymentPage from '../pages/client/PaymentPage'
 import ClientProfilePage from '../pages/client/ClientProfilePage'
@@ -176,7 +177,7 @@ export default function AppRouter() {
                         </p>
                         <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
                           Pour toute question concernant GetaCar, veuillez utiliser la rubrique{' '}
-                          <Link to="/contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> du site.
+                          <Link to="/contact#contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> du site.
                         </p>
                       </div>
                     ),
@@ -315,7 +316,7 @@ export default function AppRouter() {
                     content: (
                       <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
                         Pour toute demande concernant vos données personnelles, utilisez la rubrique{' '}
-                        <Link to="/contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> de GetaCar.
+                        <Link to="/contact#contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> de GetaCar.
                       </p>
                     ),
                   },
@@ -327,10 +328,11 @@ export default function AppRouter() {
             path="/sitemap"
             element={<StaticInfoPage title="Plan du site" description="Retrouvez ici la structure des pages publiques et privées de GetACar." />}
           />
+          <Route path="/rental-process" element={<RentalProcessPage />} />
           <Route
             path="/contact"
             element={
-              <div className="mx-auto max-w-6xl px-4 pb-10">
+              <div className="mx-auto flex max-w-6xl flex-col gap-8 px-4 pb-10">
                 <HowItWorks />
                 <FaqSection />
                 <ContactSection />

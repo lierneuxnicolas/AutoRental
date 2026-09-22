@@ -13,7 +13,6 @@ import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge
 import {
   completeInspection,
   createReturnInspection,
-  lockVehicle,
   saveDepartureVehicleState,
   uploadInspectionPhoto,
 } from '../../services/inspectionService'
@@ -34,6 +33,8 @@ import { resolveMediaUrl } from '../../utils/media'
 type ApiErrorPayload = {
   detail?: string
   non_field_errors?: string[]
+  code?: string
+  message?: string
   [key: string]: unknown
 }
 
@@ -79,6 +80,10 @@ const ANOMALY_PHOTO_SLOTS = [
 
 type AnomalyPhotoSlotKey = (typeof ANOMALY_PHOTO_SLOTS)[number]['key']
 
+// Real backend/DB constraint: `Inspection.mileage` is a Django PositiveIntegerField, stored as
+// an unsigned INT column in MySQL, whose maximum representable value is 4294967295.
+const MAX_VEHICLE_MILEAGE = 4294967295
+
 type AnomalyPhotoSlotState = {
   photoId: number | null
   previewUrl: string | null
@@ -120,7 +125,61 @@ function toErrorMessage(error: unknown): string {
     return payload.non_field_errors.join(' ')
   }
 
+  if (typeof payload.message === 'string' && payload.message.trim().length > 0) {
+    return payload.message
+  }
+
   return fallback
+}
+
+function toErrorCode(error: unknown): string | null {
+  const axiosError = error as AxiosError<ApiErrorPayload>
+  const rawCode = axiosError.response?.data?.code
+  return typeof rawCode === 'string' && rawCode.trim().length > 0 ? rawCode.trim() : null
+}
+
+const VEHICLE_STATE_ERROR_MESSAGES: Record<string, string> = {
+  MILEAGE_REQUIRED: 'Le kilometrage final est obligatoire.',
+  DEPARTURE_MILEAGE_UNAVAILABLE: "Le kilometrage de depart est indisponible, impossible d'enregistrer le retour.",
+  INVALID_MILEAGE: 'Le kilometrage final ne peut pas etre inferieur au kilometrage de depart.',
+  ENERGY_LEVEL_REQUIRED: 'Le niveau de carburant/batterie final est obligatoire.',
+  INVALID_ENERGY_LEVEL: 'Le niveau de carburant/batterie doit etre compris entre 0 et 100.',
+  INSPECTION_ALREADY_COMPLETED: 'Cette etape a deja ete enregistree.',
+  INVALID_RESERVATION_STATUS: "La reservation n'est plus en cours.",
+  INITIAL_INSPECTION_NOT_COMPLETED: "L'etat des lieux de depart doit etre termine avant celui de retour.",
+}
+
+function toVehicleStateErrorMessage(error: unknown): string {
+  const code = toErrorCode(error)
+  if (code && VEHICLE_STATE_ERROR_MESSAGES[code]) {
+    return VEHICLE_STATE_ERROR_MESSAGES[code]
+  }
+  return toErrorMessage(error)
+}
+
+async function toInvoiceErrorMessage(error: unknown): Promise<string> {
+  const fallback = 'Une erreur est survenue. Veuillez reessayer.'
+  const axiosError = error as AxiosError<ApiErrorPayload | Blob>
+  const payload = axiosError.response?.data
+
+  // With responseType: 'blob', axios stores JSON error bodies as an opaque Blob instead of parsing them.
+  if (payload instanceof Blob) {
+    try {
+      const text = await payload.text()
+      const parsed = JSON.parse(text) as ApiErrorPayload
+      if (typeof parsed.detail === 'string' && parsed.detail.trim().length > 0) {
+        return parsed.detail
+      }
+      if (typeof parsed.message === 'string' && parsed.message.trim().length > 0) {
+        return parsed.message
+      }
+    } catch {
+      // Not a JSON body (e.g. empty or HTML error page): fall through to the generic message below.
+    }
+    return fallback
+  }
+
+  return toErrorMessage(error)
 }
 
 function inspectionStatusToBadge(status?: string): { variant: StatusVariant; label: string } {
@@ -236,8 +295,11 @@ function formatDateTime(value: string): string {
   })
 }
 
-function buildInvoicePdfFilename(invoiceNumber: string): string {
-  return `${invoiceNumber}.pdf`
+function buildInvoicePdfFilename(reservationReference: string | undefined, reservationId: number): string {
+  if (reservationReference && reservationReference.trim().length > 0) {
+    return `GetaCar_Facture_${reservationReference.trim()}.pdf`
+  }
+  return `GetaCar_Facture_Reservation_${reservationId}.pdf`
 }
 
 function ReturnInspectionLayout({
@@ -339,7 +401,7 @@ function ReturnInspectionStepOne() {
   const [photoState, setPhotoState] = useState<Record<string, PhotoSlotState>>(buildInitialPhotoState)
   const [globalError, setGlobalError] = useState<string | null>(null)
   const uploadingSlotKeysRef = useRef<Set<string>>(new Set())
-  const hasAttemptedInitializationRef = useRef(false)
+  const initializationAttemptRef = useRef<{ reservationId: number | null, attempted: boolean }>({ reservationId: null, attempted: false })
 
   const startMutation = useMutation({
     mutationFn: () => createReturnInspection(reservationId),
@@ -352,25 +414,36 @@ function ReturnInspectionStepOne() {
       setGlobalError(null)
     },
     onError: (error) => {
+      const axiosError = error as AxiosError<ApiErrorPayload>
+      if (axiosError.response?.data?.code === 'RETURN_INSPECTION_ALREADY_EXISTS') {
+        // Duplicate initialization attempt (e.g. dev-mode double effect run): the inspection
+        // already exists, so reload it silently instead of surfacing a false error.
+        setGlobalError(null)
+        void reservationQuery.refetch()
+        return
+      }
       setGlobalError(toErrorMessage(error))
     },
   })
 
   useEffect(() => {
-    hasAttemptedInitializationRef.current = false
-  }, [reservationId])
-
-  useEffect(() => {
     if (!isReservationIdValid || reservationQuery.isLoading || reservationQuery.isFetching || reservationQuery.isError) {
       return
     }
-    if (inspection || startMutation.isPending || hasAttemptedInitializationRef.current) {
+    if (inspection || startMutation.isPending) {
       return
     }
 
-    hasAttemptedInitializationRef.current = true
+    if (initializationAttemptRef.current.reservationId !== reservationId) {
+      initializationAttemptRef.current = { reservationId, attempted: false }
+    }
+    if (initializationAttemptRef.current.attempted) {
+      return
+    }
+
+    initializationAttemptRef.current.attempted = true
     void startMutation.mutate()
-  }, [inspection, isReservationIdValid, reservationQuery.isFetching, reservationQuery.isLoading, startMutation, startMutation.isPending])
+  }, [inspection, isReservationIdValid, reservationId, reservationQuery.isFetching, reservationQuery.isLoading, startMutation, startMutation.isPending])
 
   useEffect(() => {
     if (!reservationQuery.data?.return_inspection) {
@@ -466,7 +539,7 @@ function ReturnInspectionStepOne() {
     : null
   const isInitializingInspection = !inspection && !reservationLoadErrorMessage && (reservationQuery.isLoading || reservationQuery.isFetching || startMutation.isPending)
   const hasInitializationFailed = !inspection
-    && hasAttemptedInitializationRef.current
+    && initializationAttemptRef.current.attempted
     && !reservationQuery.isLoading
     && !reservationQuery.isFetching
     && !startMutation.isPending
@@ -707,6 +780,7 @@ export function ReturnInspectionVehicleStatePage() {
   })
 
   const inspection = reservationQuery.data?.return_inspection ?? null
+  const departureMileage = reservationQuery.data?.departure_inspection?.mileage ?? null
   const [mileageInput, setMileageInput] = useState('')
   const [energyInput, setEnergyInput] = useState('')
   const [hasDamage, setHasDamage] = useState<boolean | null>(null)
@@ -723,8 +797,35 @@ export function ReturnInspectionVehicleStatePage() {
 
   const mileageValue = parsePositiveInteger(mileageInput)
   const energyValue = parsePositiveInteger(energyInput)
-  const isMileageValid = mileageValue !== null
-  const isEnergyValid = energyValue !== null && energyValue >= 0 && energyValue <= 100
+
+  const mileageFieldError = useMemo(() => {
+    if (mileageInput.trim().length === 0) {
+      return null
+    }
+    if (mileageValue === null) {
+      return 'Le kilometrage final doit etre un nombre valide.'
+    }
+    if (mileageValue > MAX_VEHICLE_MILEAGE) {
+      return 'Le kilometrage saisi est trop eleve.'
+    }
+    if (departureMileage !== null && mileageValue < departureMileage) {
+      return 'Le kilometrage final ne peut pas etre inferieur au kilometrage de depart.'
+    }
+    return null
+  }, [departureMileage, mileageInput, mileageValue])
+
+  const energyFieldError = useMemo(() => {
+    if (energyInput.trim().length === 0) {
+      return null
+    }
+    if (energyValue === null || energyValue < 0 || energyValue > 100) {
+      return 'Le niveau de carburant/batterie doit etre compris entre 0 et 100.'
+    }
+    return null
+  }, [energyInput, energyValue])
+
+  const isMileageValid = mileageValue !== null && mileageFieldError === null
+  const isEnergyValid = energyValue !== null && energyFieldError === null
 
   const missingFields = useMemo(() => {
     const missing: string[] = []
@@ -824,7 +925,7 @@ export function ReturnInspectionVehicleStatePage() {
       })
     },
     onError: (error) => {
-      setGlobalError(toErrorMessage(error))
+      setGlobalError(toVehicleStateErrorMessage(error))
     },
   })
 
@@ -873,11 +974,35 @@ export function ReturnInspectionVehicleStatePage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <label htmlFor="return-mileage" className="block text-sm font-medium text-[#1F2937]">Kilometrage final</label>
-              <input id="return-mileage" type="number" min={0} step={1} value={mileageInput} onChange={(event) => setMileageInput(event.target.value)} className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100" placeholder="Ex: 24510" />
+              <input
+                id="return-mileage"
+                type="number"
+                min={0}
+                max={MAX_VEHICLE_MILEAGE}
+                step={1}
+                value={mileageInput}
+                onChange={(event) => setMileageInput(event.target.value)}
+                aria-invalid={mileageFieldError !== null}
+                className={`block w-full rounded-2xl border bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:ring-2 ${mileageFieldError ? 'border-[#DC2626] focus:border-[#DC2626] focus:ring-red-100' : 'border-[#E5E7EB] focus:border-[#2563EB] focus:ring-blue-100'}`}
+                placeholder="Ex: 24510"
+              />
+              {mileageFieldError ? <p className="text-sm text-[#DC2626]">{mileageFieldError}</p> : null}
             </div>
             <div className="space-y-2">
               <label htmlFor="return-energy" className="block text-sm font-medium text-[#1F2937]">Niveau carburant / batterie final (%)</label>
-              <input id="return-energy" type="number" min={0} max={100} step={1} value={energyInput} onChange={(event) => setEnergyInput(event.target.value)} className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100" placeholder="Ex: 75" />
+              <input
+                id="return-energy"
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={energyInput}
+                onChange={(event) => setEnergyInput(event.target.value)}
+                aria-invalid={energyFieldError !== null}
+                className={`block w-full rounded-2xl border bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:ring-2 ${energyFieldError ? 'border-[#DC2626] focus:border-[#DC2626] focus:ring-red-100' : 'border-[#E5E7EB] focus:border-[#2563EB] focus:ring-blue-100'}`}
+                placeholder="Ex: 75"
+              />
+              {energyFieldError ? <p className="text-sm text-[#DC2626]">{energyFieldError}</p> : null}
             </div>
           </div>
 
@@ -1042,7 +1167,9 @@ export function ReturnInspectionConfirmationPage() {
   const inspection = reservationQuery.data?.return_inspection ?? null
   const reservation = reservationQuery.data
   const [globalError, setGlobalError] = useState<string | null>(null)
-  const [hasAutoCompletionAttempted, setHasAutoCompletionAttempted] = useState(false)
+  const [invoiceDownloadError, setInvoiceDownloadError] = useState<string | null>(null)
+  const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false)
+  const finalizationAttemptRef = useRef<{ reservationId: number | null, attempted: boolean }>({ reservationId: null, attempted: false })
   const vehicleLabel = reservation ? `${reservation.vehicle.brand} ${reservation.vehicle.model_name}` : 'Non disponible'
 
   const state = location.state as {
@@ -1069,7 +1196,7 @@ export function ReturnInspectionConfirmationPage() {
 
   const invoiceQuery = useQuery({
     queryKey: ['client-return-confirmation-invoice', reservationId],
-    enabled: isReservationIdValid,
+    enabled: isReservationIdValid && isInspectionCompleted,
     queryFn: async () => {
       let page = 1
       let hasNextPage = true
@@ -1128,15 +1255,24 @@ export function ReturnInspectionConfirmationPage() {
         return reservationQuery.refetch()
       }
 
+      // The backend already locks the vehicle as part of completing the return inspection,
+      // so no separate lock call is needed here (it previously caused a spurious "already locked" error).
       await completeInspection(inspection.id, payload)
-      await lockVehicle(reservationId)
       return reservationQuery.refetch()
     },
     onSuccess: () => {
       setGlobalError(null)
-      setHasAutoCompletionAttempted(true)
     },
     onError: (error) => {
+      const axiosError = error as AxiosError<ApiErrorPayload>
+      const errorCode = axiosError.response?.data?.code
+      if (errorCode === 'INSPECTION_ALREADY_COMPLETED' || errorCode === 'ALREADY_LOCKED') {
+        // The restitution already succeeded (e.g. a duplicate finalization attempt): reload
+        // the reservation silently instead of surfacing a false error.
+        setGlobalError(null)
+        void reservationQuery.refetch()
+        return
+      }
       setGlobalError(toErrorMessage(error))
     },
   })
@@ -1145,37 +1281,52 @@ export function ReturnInspectionConfirmationPage() {
     if (!inspection) {
       return
     }
-    if (inspection.status === 'TERMINE' || completeMutation.isPending || hasAutoCompletionAttempted) {
+    if (inspection.status === 'TERMINE' || completeMutation.isPending) {
       return
     }
     if (effectiveMileage == null || effectiveEnergyLevelPercent == null) {
       return
     }
 
-    setHasAutoCompletionAttempted(true)
+    if (finalizationAttemptRef.current.reservationId !== reservationId) {
+      finalizationAttemptRef.current = { reservationId, attempted: false }
+    }
+    if (finalizationAttemptRef.current.attempted) {
+      return
+    }
+
+    finalizationAttemptRef.current.attempted = true
     void completeMutation.mutateAsync()
   }, [
     completeMutation,
-    completeMutation.isPending,
     effectiveEnergyLevelPercent,
     effectiveMileage,
-    hasAutoCompletionAttempted,
     inspection,
+    reservationId,
   ])
 
+  const isFinalizing = !isInspectionCompleted
+    && (reservationQuery.isLoading || reservationQuery.isFetching || completeMutation.isPending)
+  const showFinalizationError = Boolean(globalError) && !isFinalizing && !isInspectionCompleted
+
   const handleDownloadInvoice = async () => {
+    setInvoiceDownloadError(null)
+    setIsDownloadingInvoice(true)
     try {
       const { invoiceNumber, pdfBlob } = await downloadInvoiceMutation.mutateAsync()
       const downloadUrl = URL.createObjectURL(pdfBlob)
       const anchor = document.createElement('a')
       anchor.href = downloadUrl
-      anchor.download = buildInvoicePdfFilename(invoiceNumber)
+      anchor.download = buildInvoicePdfFilename(reservation?.reference ?? invoiceNumber, reservationId)
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
       URL.revokeObjectURL(downloadUrl)
+      setInvoiceDownloadError(null)
     } catch (error) {
-      setGlobalError(toErrorMessage(error))
+      setInvoiceDownloadError(await toInvoiceErrorMessage(error))
+    } finally {
+      setIsDownloadingInvoice(false)
     }
   }
 
@@ -1196,12 +1347,16 @@ export function ReturnInspectionConfirmationPage() {
       showInspectionSummary={false}
       allStepsDone
     >
-      {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
+      {showFinalizationError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError ?? ''} /> : null}
       {!isInspectionCompleted ? (
         <Card>
           <div className="flex items-center justify-center gap-3 py-4 text-sm text-slate-600">
-            <LoadingSpinner size="sm" aria-label="Finalisation de la restitution" />
-            <p>Finalisation de la restitution...</p>
+            {isFinalizing ? (
+              <>
+                <LoadingSpinner size="sm" aria-label="Finalisation de la restitution" />
+                <p>Finalisation de la restitution...</p>
+              </>
+            ) : null}
           </div>
         </Card>
       ) : (
@@ -1251,8 +1406,8 @@ export function ReturnInspectionConfirmationPage() {
             </div>
           </Card>
 
-          {downloadInvoiceMutation.isError ? (
-            <Alert className="mb-2" variant="danger" title="Telechargement impossible" message={toErrorMessage(downloadInvoiceMutation.error)} />
+          {invoiceDownloadError ? (
+            <Alert className="mb-2" variant="danger" title="Telechargement impossible" message={invoiceDownloadError} />
           ) : null}
 
           {invoiceQuery.isError ? (
@@ -1262,16 +1417,18 @@ export function ReturnInspectionConfirmationPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
             <Button
               className="w-full sm:w-auto"
-              disabled={downloadInvoiceMutation.isPending || invoiceQuery.isLoading || !invoiceQuery.data}
+              disabled={isDownloadingInvoice || invoiceQuery.isLoading || !invoiceQuery.data}
               onClick={() => {
                 void handleDownloadInvoice()
               }}
             >
-              {downloadInvoiceMutation.isPending ? (
+              {isDownloadingInvoice ? (
                 <span className="flex items-center gap-2">
                   <LoadingSpinner size="sm" aria-label="Telechargement de la facture" />
                   Telechargement...
                 </span>
+              ) : invoiceQuery.isLoading && !invoiceQuery.data ? (
+                'Preparation de la facture...'
               ) : (
                 'Telecharger ma facture'
               )}
