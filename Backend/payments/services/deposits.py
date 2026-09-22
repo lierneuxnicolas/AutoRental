@@ -343,13 +343,31 @@ def _authorize_stripe_test(*, reservation: Reservation, deposit: Deposit) -> str
         "purpose": "deposit",
     }
 
-    payment_intent = stripe.PaymentIntent.create(
-        amount=_to_minor_units(deposit.amount),
-        currency="eur",
-        capture_method="manual",
-        metadata=metadata,
-        idempotency_key=_build_idempotency_key(deposit=deposit),
-    )
+    try:
+        payment_intent = stripe.PaymentIntent.create(
+            amount=_to_minor_units(deposit.amount),
+            currency="eur",
+            capture_method="manual",
+            metadata=metadata,
+            idempotency_key=_build_idempotency_key(deposit=deposit),
+        )
+    except stripe.error.APIConnectionError:
+        _raise_deposit_error(
+            "STRIPE_UNAVAILABLE",
+            "Stripe est temporairement indisponible.",
+        )
+    except stripe.error.CardError as exc:
+        _raise_deposit_error(
+            "STRIPE_CARD_DECLINED",
+            "La preautorisation de caution a ete refusee par Stripe.",
+            details={"stripe_error": str(exc)},
+        )
+    except stripe.error.StripeError as exc:
+        _raise_deposit_error(
+            "STRIPE_ERROR",
+            "Erreur Stripe lors de la preautorisation de la caution.",
+            details={"stripe_error": str(exc)},
+        )
 
     deposit.status = Deposit.Status.AUTORISEE
     deposit.authorized_at = timezone.now()

@@ -1,7 +1,8 @@
 from django.http import FileResponse, Http404
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from rest_framework import generics
+from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from accounts.permissions import IsClient, IsManagerOrAdministrator
 from invoicing.models import Invoice
@@ -84,6 +85,7 @@ class InvoiceClientDownloadView(generics.GenericAPIView):
 			200: OpenApiResponse(description="PDF binaire (application/pdf)."),
 			401: ErrorDetailResponseSerializer,
 			404: ErrorDetailResponseSerializer,
+			503: ErrorDetailResponseSerializer,
 		},
 	)
 	def get(self, request, *args, **kwargs):
@@ -93,14 +95,24 @@ class InvoiceClientDownloadView(generics.GenericAPIView):
 		if invoice is None:
 			raise Http404
 
-		invoice = ensure_invoice_pdf(invoice)
+		try:
+			invoice = ensure_invoice_pdf(invoice)
+		except Exception:
+			return Response(
+				{
+					"code": "PDF_GENERATION_FAILED",
+					"message": "Le PDF de la facture n'a pas pu etre genere. Veuillez reessayer plus tard.",
+				},
+				status=status.HTTP_503_SERVICE_UNAVAILABLE,
+			)
+
 		if not invoice.pdf_file:
 			raise Http404
 
 		return FileResponse(
 			invoice.pdf_file.open("rb"),
 			as_attachment=True,
-			filename=f"{invoice.number}.pdf",
+			filename=f"GetaCar_Facture_{invoice.number}.pdf",
 			content_type="application/pdf",
 		)
 
