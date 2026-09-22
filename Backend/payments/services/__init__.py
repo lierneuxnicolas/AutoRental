@@ -6,7 +6,7 @@ from .deposits import (
 	release_authorized_deposit,
 )
 from .payment_intents import PaymentIntentError, create_or_reuse_payment_intent
-from .webhooks import StripeWebhookProcessingError, process_stripe_event
+from .webhooks import StripeWebhookProcessingError, process_stripe_event, sync_reservation_payment_from_stripe
 
 __all__ = [
 	"DepositAuthorizationError",
@@ -18,4 +18,5 @@ __all__ = [
 	"create_or_reuse_payment_intent",
 	"StripeWebhookProcessingError",
 	"process_stripe_event",
+	"sync_reservation_payment_from_stripe",
 ]

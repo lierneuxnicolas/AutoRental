@@ -18,6 +18,7 @@ from payments.services import (
     PaymentIntentError,
     authorize_deposit,
     create_or_reuse_payment_intent,
+    sync_reservation_payment_from_stripe,
 )
 from reservations.models import Reservation
 from reservations.serializers.reservation import (
@@ -231,7 +232,15 @@ class ReservationClientDetailView(generics.RetrieveAPIView):
         },
     )
     def get(self, request, *args, **kwargs):
-        return super().get(request, *args, **kwargs)
+        instance = self.get_object()
+        if instance.status == Reservation.Status.EN_ATTENTE_PAIEMENT:
+            # No local Stripe webhook in dev: reconcile the PaymentIntent status directly instead of waiting forever.
+            try:
+                instance = sync_reservation_payment_from_stripe(instance)
+            except Exception:
+                pass
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
 
 # ==============================================================================
