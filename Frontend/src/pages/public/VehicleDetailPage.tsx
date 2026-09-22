@@ -876,7 +876,15 @@ export default function VehicleDetailPage() {
       return
     }
 
-    if (createReservationMutation.isPending || depositAuthorizationMutation.isPending || paymentIntentMutation.isPending || isPreparingPayment || paymentClientSecret) {
+    if (
+      createReservationMutation.isPending
+      || depositAuthorizationMutation.isPending
+      || paymentIntentMutation.isPending
+      || isPreparingPayment
+      || paymentClientSecret
+      || paymentWorkflowError
+    ) {
+      // Stop auto-retrying once an attempt has failed: avoids an infinite loop of deposit/PaymentIntent calls.
       return
     }
 
@@ -922,6 +930,7 @@ export default function VehicleDetailPage() {
     loadExistingPaymentClientSecret,
     paymentClientSecret,
     paymentIntentMutation.isPending,
+    paymentWorkflowError,
     preparePayment,
     reservationPayload,
     simulationQuery.data,
@@ -1701,7 +1710,17 @@ export default function VehicleDetailPage() {
                                 message="Création de la réservation, préautorisation de la caution et préparation du PaymentIntent en cours..."
                               />
                             ) : paymentWorkflowError ? (
-                              <Alert variant="danger" title="Paiement impossible" message={paymentWorkflowError} />
+                              <div className="space-y-3">
+                                <Alert variant="danger" title="Paiement impossible" message={paymentWorkflowError} />
+                                <Button
+                                  variant="secondary"
+                                  onClick={() => {
+                                    setPaymentWorkflowError(null)
+                                  }}
+                                >
+                                  Réessayer
+                                </Button>
+                              </div>
                             ) : !activeReservation || !paymentClientSecret ? (
                               <Alert
                                 variant="info"

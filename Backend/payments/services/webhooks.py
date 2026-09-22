@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import stripe
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
@@ -748,3 +749,55 @@ def process_stripe_event(event: Any) -> StripeEvent:
             stripe_event.processed_at = None
             stripe_event.save(update_fields=["processing_error", "processed", "processed_at"])
         raise
+
+
+_SYNC_EVENT_TYPE_BY_STRIPE_STATUS = {
+    "succeeded": "payment_intent.succeeded",
+    "canceled": "payment_intent.canceled",
+}
+
+
+def sync_reservation_payment_from_stripe(reservation: Reservation) -> Reservation:
+    """Reconcile the pending PaymentIntent directly with Stripe (no webhook reachable in local dev)."""
+    stripe_secret_key = getattr(settings, "STRIPE_SECRET_KEY", "")
+    if not stripe_secret_key:
+        return reservation
+
+    payment = (
+        Payment.objects.filter(
+            reservation=reservation,
+            provider=Payment.Provider.STRIPE,
+            status__in=[Payment.Status.EN_ATTENTE, Payment.Status.ACTION_REQUISE, Payment.Status.TRAITEMENT],
+        )
+        .exclude(stripe_payment_intent_id__isnull=True)
+        .order_by("-created_at")
+        .first()
+    )
+    if payment is None:
+        return reservation
+
+    stripe.api_key = stripe_secret_key
+    try:
+        payment_intent = stripe.PaymentIntent.retrieve(payment.stripe_payment_intent_id)
+    except Exception:
+        return reservation
+
+    event_type = _SYNC_EVENT_TYPE_BY_STRIPE_STATUS.get(payment_intent.status)
+    if event_type is None:
+        return reservation
+
+    payment_intent_payload = _sanitize_payload(payment_intent.to_dict())
+
+    post_commit_actions: list = []
+    with transaction.atomic():
+        Payment.objects.select_for_update().get(pk=payment.pk)
+        _apply_payment_intent_event(
+            event_type=event_type,
+            payment_intent=payment_intent_payload,
+            post_commit_actions=post_commit_actions,
+        )
+    for action in post_commit_actions:
+        action()
+
+    reservation.refresh_from_db()
+    return reservation
