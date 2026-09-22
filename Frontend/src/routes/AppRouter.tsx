@@ -94,37 +94,19 @@ export default function AppRouter() {
                   {
                     heading: 'Conditions pour louer',
                     paragraphs: [
-                      "Pour louer un véhicule GetaCar, le client doit avoir **au moins 21 ans** et disposer d'une carte d'identité ainsi que d'un permis de conduire valides. Ces documents doivent être validés avant la réservation.",
+                      "Pour louer un véhicule GetaCar, le client doit avoir **au moins 21 ans**, disposer d'une carte d'identité et d'un permis de conduire valides. Ces documents doivent être validés avant la réservation.",
                     ],
                   },
                   {
-                    heading: 'Réservation et paiement',
+                    heading: 'Réservation, paiement et assurance',
                     paragraphs: [
-                      "La réservation est confirmée uniquement si le véhicule est disponible, que la **caution est autorisée** et que le paiement est effectué avec succès. Le prix total est affiché avant la confirmation.",
+                      "La réservation est confirmée uniquement si le véhicule est disponible, que la **caution est autorisée** et que le paiement est effectué avec succès. Une assurance **Standard** est comprise dans le prix de base et des formules complémentaires peuvent être proposées. Le montant total est affiché avant la confirmation.",
                     ],
                   },
                   {
-                    heading: 'Assurance',
+                    heading: 'Caution, état du véhicule et dommages',
                     paragraphs: [
-                      'Une assurance **Standard** est comprise dans le prix de base. Des formules complémentaires peuvent être proposées afin d\'adapter les garanties et la franchise.',
-                    ],
-                  },
-                  {
-                    heading: 'Caution et dommages',
-                    paragraphs: [
-                      'La caution est réalisée sous forme de **préautorisation bancaire**. En cas de dommage ou de frais liés à la location, le client est informé des montants réclamés et des justificatifs correspondants.',
-                    ],
-                  },
-                  {
-                    heading: 'État du véhicule',
-                    paragraphs: [
-                      "Un **état des lieux avec photos** est réalisé avant le départ et au retour afin de vérifier l'état du véhicule et de signaler d'éventuelles anomalies.",
-                    ],
-                  },
-                  {
-                    heading: 'Tarifs',
-                    paragraphs: [
-                      'Le tarif dépend du véhicule, de la durée de location et des options choisies. Le **montant total** est communiqué avant la validation de la réservation.',
+                      "La caution est réalisée sous forme de **préautorisation bancaire**. Un **état des lieux avec photos** est effectué avant le départ et au retour. En cas de dommage ou de frais liés à la location, le client est informé des montants réclamés et des justificatifs correspondants.",
                     ],
                   },
                 ]}
@@ -179,34 +161,30 @@ export default function AppRouter() {
                 title="Mentions légales"
                 sections={[
                   {
-                    heading: 'Éditeur du site',
-                    addressLines: [
-                      'GetaCar SRL — société fictive dans le cadre du TFE',
-                      'Responsable du projet : Nicolas Lierneux',
-                      'Siège social fictif : Bruxelles, Belgique',
-                      "N° d'entreprise fictif : BE 1111.111.111",
-                      'N° de TVA fictif : BE 1111.111.111',
-                    ],
-                    note: 'Ces coordonnées administratives sont fictives et utilisées uniquement dans le cadre de la démonstration académique GetaCar.',
-                  },
-                  {
-                    heading: 'Contact',
+                    heading: 'Éditeur du site et contact',
                     content: (
-                      <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
-                        Pour toute question concernant GetaCar, veuillez utiliser la rubrique{' '}
-                        <Link to="/contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> du site.
-                      </p>
+                      <div className="space-y-3">
+                        <div className="space-y-1 text-base leading-7 text-slate-600 sm:text-lg">
+                          <p>GetaCar SRL — société fictive dans le cadre du TFE</p>
+                          <p>Responsable du projet : Nicolas Lierneux</p>
+                          <p>Siège social fictif : Bruxelles, Belgique</p>
+                          <p>N° d'entreprise fictif : BE 1111.111.111</p>
+                          <p>N° de TVA fictif : BE 1111.111.111</p>
+                        </div>
+                        <p className="text-sm italic text-slate-500">
+                          Ces coordonnées administratives sont fictives et utilisées uniquement dans le cadre de la démonstration académique GetaCar.
+                        </p>
+                        <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
+                          Pour toute question concernant GetaCar, veuillez utiliser la rubrique{' '}
+                          <Link to="/contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> du site.
+                        </p>
+                      </div>
                     ),
                   },
                   {
-                    heading: 'Hébergement',
+                    heading: 'Hébergement et propriété intellectuelle',
                     paragraphs: [
                       "L'application GetaCar est conçue pour être hébergée sur **Microsoft Azure**, notamment pour le frontend, le backend, la base de données et le stockage des fichiers.",
-                    ],
-                  },
-                  {
-                    heading: 'Propriété intellectuelle',
-                    paragraphs: [
                       "Les contenus, l'interface et les éléments développés spécifiquement pour GetaCar sont utilisés dans le cadre de ce projet académique. Les marques, logos et services tiers restent la propriété de leurs détenteurs respectifs.",
                     ],
                   },
@@ -222,15 +200,128 @@ export default function AppRouter() {
           />
           <Route
             path="/privacy"
-            element={<StaticInfoPage title="Politique de confidentialité" description="GetACar prépare cette page pour détailler le traitement des données personnelles et le respect de votre vie privée." />}
+            element={(
+              <StaticInfoPage
+                title="Politique de confidentialité"
+                sections={[
+                  {
+                    heading: 'Données collectées et utilisation',
+                    content: (
+                      <div className="space-y-3">
+                        <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
+                          Pour créer et utiliser un compte GetaCar, nous traitons notamment votre nom, prénom, coordonnées, date de naissance, carte d'identité et permis de conduire. Les réservations, notifications et informations liées aux états des lieux font également partie des données utilisées par le service.
+                        </p>
+                        <ul className="list-disc space-y-1 pl-5 text-base leading-7 text-slate-600 sm:text-lg">
+                          <li>créer et gérer votre compte ;</li>
+                          <li>vérifier votre identité et votre droit à conduire ;</li>
+                          <li>traiter vos réservations ;</li>
+                          <li>suivre vos locations, paiements, cautions et factures ;</li>
+                          <li>gérer les états des lieux et les éventuels incidents.</li>
+                        </ul>
+                        <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
+                          L'accès à ces informations est limité aux personnes autorisées dans le cadre de leur fonction.
+                        </p>
+                      </div>
+                    ),
+                  },
+                  {
+                    heading: 'Services, stockage et sécurité',
+                    content: (
+                      <div className="space-y-3">
+                        <ul className="list-disc space-y-1 pl-5 text-base leading-7 text-slate-600 sm:text-lg">
+                          <li>Microsoft Azure pour l'hébergement et le stockage ;</li>
+                          <li>Stripe pour les paiements et cautions ;</li>
+                          <li>Brevo pour les e-mails transactionnels.</li>
+                        </ul>
+                        <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
+                          Ces prestataires ne doivent recevoir que les données nécessaires à leur mission.
+                        </p>
+                        <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
+                          Les documents d'identité et les photos d'états des lieux sont stockés dans des espaces privés. Les échanges avec l'application sont sécurisés et les accès sont contrôlés selon le rôle de l'utilisateur.
+                        </p>
+                      </div>
+                    ),
+                  },
+                  {
+                    heading: 'Conservation des données',
+                    paragraphs: [
+                      "Les documents d'identité peuvent être conservés tant que votre compte reste actif. Les photos d'état des lieux sont conservées pendant le temps nécessaire au suivi de la location ou d'un éventuel litige. Les données comptables et factures sont conservées pendant la durée légale applicable.",
+                    ],
+                  },
+                ]}
+              />
+            )}
           />
           <Route
             path="/cookies"
-            element={<StaticInfoPage title="Cookies" description="La gestion des cookies GetACar sera détaillée ici prochainement." />}
+            element={(
+              <StaticInfoPage
+                title="Cookies"
+                sections={[
+                  {
+                    heading: 'Comprendre les cookies',
+                    paragraphs: [
+                      "Un cookie est un petit fichier enregistré par votre navigateur lors de la visite d'un site. Dans GetaCar, les cookies et mécanismes similaires servent principalement à maintenir votre connexion, mémoriser certaines préférences et assurer le bon fonctionnement du service.",
+                    ],
+                  },
+                  {
+                    heading: 'Cookies nécessaires',
+                    content: (
+                      <div className="space-y-3">
+                        <ul className="list-disc space-y-1 pl-5 text-base leading-7 text-slate-600 sm:text-lg">
+                          <li>maintenir votre connexion ;</li>
+                          <li>assurer la sécurité de votre session ;</li>
+                          <li>permettre le fonctionnement normal de certaines fonctionnalités.</li>
+                        </ul>
+                        <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
+                          Ces cookies ne sont pas utilisés à des fins publicitaires.
+                        </p>
+                      </div>
+                    ),
+                  },
+                  {
+                    heading: 'Cookies facultatifs et préférences',
+                    paragraphs: [
+                      "GetaCar peut prévoir ultérieurement des cookies facultatifs, par exemple pour des statistiques ou certains services tiers. Lorsqu'un consentement est requis, ils ne sont déposés qu'après votre accord. Vous pouvez ensuite accepter, refuser ou modifier votre choix depuis les paramètres prévus à cet effet.",
+                    ],
+                  },
+                ]}
+              />
+            )}
           />
           <Route
             path="/rgpd"
-            element={<StaticInfoPage title="Vos droits RGPD" description="Retrouvez ici comment exercer vos droits RGPD (accès, rectification, suppression) aupres de GetACar. Le detail complet sera publie prochainement." />}
+            element={(
+              <StaticInfoPage
+                title="Vos droits RGPD"
+                sections={[
+                  {
+                    heading: 'Comprendre vos droits',
+                    paragraphs: [
+                      "Le RGPD est le règlement européen qui encadre l'utilisation des données personnelles et vous donne des droits sur les informations vous concernant.",
+                      "Vous pouvez demander l'accès à vos données personnelles et faire corriger les informations inexactes ou incomplètes.",
+                      'Selon votre situation, vous pouvez également bénéficier des droits de limitation, opposition et portabilité prévus par le RGPD.',
+                    ],
+                  },
+                  {
+                    heading: 'Suppression et conservation des données',
+                    paragraphs: [
+                      "Vous pouvez demander la suppression de votre compte GetaCar. Celui-ci est d'abord désactivé, puis les données qui ne doivent plus être conservées peuvent être supprimées ou anonymisées.",
+                      "Certaines informations peuvent toutefois rester archivées lorsqu'elles sont nécessaires pour respecter une obligation légale, comptable ou pour le traitement d'un litige.",
+                    ],
+                  },
+                  {
+                    heading: 'Exercer vos droits',
+                    content: (
+                      <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
+                        Pour toute demande concernant vos données personnelles, utilisez la rubrique{' '}
+                        <Link to="/contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> de GetaCar.
+                      </p>
+                    ),
+                  },
+                ]}
+              />
+            )}
           />
           <Route
             path="/sitemap"
