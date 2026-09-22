@@ -30,6 +30,8 @@ import { resolveMediaUrl } from '../../utils/media'
 type ApiErrorPayload = {
   detail?: string
   non_field_errors?: string[]
+  code?: string
+  message?: string
   [key: string]: unknown
 }
 
@@ -114,6 +116,32 @@ function toErrorCode(error: unknown): string | null {
   }
 
   return null
+}
+
+const DEPARTURE_INITIALIZATION_ERROR_MESSAGES: Record<string, string> = {
+  TOO_EARLY: "Votre reservation n'est pas encore active. Revenez a l'heure prevue de depart.",
+  TOO_LATE: "Le delai pour demarrer l'etat des lieux de depart est depasse. Contactez l'assistance.",
+  INVALID_RESERVATION_STATUS: "Votre reservation n'est pas encore active.",
+  PAYMENT_NOT_SUCCESSFUL: "Le paiement de votre reservation n'a pas encore ete valide.",
+  DEPOSIT_NOT_AUTHORIZED: "La caution de votre reservation n'a pas encore ete validee.",
+  INSPECTION_ALREADY_EXISTS: "Un etat des lieux de depart existe deja pour cette reservation.",
+  FORBIDDEN: "Cette reservation ne vous appartient pas.",
+  AUTH_REQUIRED: "Vous devez etre connecte pour continuer.",
+}
+
+function toDepartureInitializationErrorMessage(error: unknown): string {
+  const code = toErrorCode(error)
+  if (code && DEPARTURE_INITIALIZATION_ERROR_MESSAGES[code]) {
+    return DEPARTURE_INITIALIZATION_ERROR_MESSAGES[code]
+  }
+
+  const axiosError = error as AxiosError<ApiErrorPayload>
+  const backendMessage = axiosError.response?.data?.message
+  if (typeof backendMessage === 'string' && backendMessage.trim().length > 0) {
+    return backendMessage
+  }
+
+  return toErrorMessage(error)
 }
 
 function inspectionStatusToBadge(status?: string): { variant: StatusVariant; label: string } {
@@ -312,7 +340,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
   const uploadingSlotKeysRef = useRef<Set<string>>(new Set())
   const activeUploadsCountRef = useRef(0)
   const pendingUploadResolversRef = useRef<Array<() => void>>([])
-  const hasAttemptedAutoInitRef = useRef(false)
+  const autoInitAttemptRef = useRef<{ reservationId: number | null, attempted: boolean }>({ reservationId: null, attempted: false })
 
   useEffect(() => {
     if (!reservationInspection) {
@@ -324,10 +352,6 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
     setGlobalError(null)
     setBackendMissingFields([])
   }, [reservationInspection])
-
-  useEffect(() => {
-    hasAttemptedAutoInitRef.current = false
-  }, [reservationId, isReturnMode])
 
   useEffect(() => {
     return () => {
@@ -353,8 +377,17 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
       setGlobalSuccess(isReturnMode ? 'Etat des lieux de retour initialise. Completez les etapes Exterieur puis Interieur.' : null)
     },
     onError: (error) => {
+      const errorCode = toErrorCode(error)
+      if (errorCode === 'INSPECTION_ALREADY_EXISTS') {
+        // Duplicate initialization attempt (e.g. dev-mode double effect run): the inspection
+        // already exists, so reload it silently instead of surfacing a false error.
+        setGlobalSuccess(null)
+        setGlobalError(null)
+        void reservationQuery.refetch()
+        return
+      }
       setGlobalSuccess(null)
-      setGlobalError(toErrorMessage(error))
+      setGlobalError(toDepartureInitializationErrorMessage(error))
     },
   })
 
@@ -367,11 +400,14 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
       return
     }
 
-    if (hasAttemptedAutoInitRef.current) {
+    if (autoInitAttemptRef.current.reservationId !== reservationId) {
+      autoInitAttemptRef.current = { reservationId, attempted: false }
+    }
+    if (autoInitAttemptRef.current.attempted) {
       return
     }
 
-    hasAttemptedAutoInitRef.current = true
+    autoInitAttemptRef.current.attempted = true
     setGlobalSuccess(null)
     setGlobalError(null)
     startInspectionMutation.mutate()
@@ -379,6 +415,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
     inspection,
     isReservationIdValid,
     isReturnMode,
+    reservationId,
     reservationInspection,
     reservationQuery.isFetching,
     reservationQuery.isLoading,
@@ -817,6 +854,11 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
     )
   }
 
+  const isAutoInitializing = !isReturnMode && !inspection
+    && (reservationQuery.isLoading || reservationQuery.isFetching || startInspectionMutation.isPending)
+  const hasAutoInitFailed = !isReturnMode && !inspection && !isAutoInitializing && startInspectionMutation.isError
+  const showGlobalError = Boolean(globalError) && !isAutoInitializing && !inspection
+
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="relative left-1/2 mb-6 w-[min(100vw-2rem,72rem)] -translate-x-1/2 sm:w-[min(100vw-3rem,72rem)] lg:w-[min(100vw-4rem,72rem)]">
@@ -835,7 +877,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
       </div>
 
       {globalSuccess ? <Alert className="mb-4" variant="success" title="Succes" message={globalSuccess} /> : null}
-      {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
+      {showGlobalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError ?? ''} /> : null}
 
       {!inspection ? (
         isReturnMode ? (
@@ -859,19 +901,21 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
         ) : (
           <Card>
             <div className="space-y-4">
-              <div className="flex items-center gap-3 text-sm text-slate-600">
-                <LoadingSpinner size="sm" aria-label="Initialisation automatique" />
-                <p>Initialisation automatique de l'etat des lieux...</p>
-              </div>
+              {isAutoInitializing ? (
+                <div className="flex items-center gap-3 text-sm text-slate-600">
+                  <LoadingSpinner size="sm" aria-label="Initialisation automatique" />
+                  <p>Initialisation automatique de l'etat des lieux...</p>
+                </div>
+              ) : null}
 
-              {startInspectionMutation.isError ? (
+              {hasAutoInitFailed ? (
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-slate-700">
                     L'etat des lieux n'a pas pu etre initialise automatiquement. Verifiez votre connexion puis reessayez.
                   </p>
                   <Button
                     onClick={() => {
-                      hasAttemptedAutoInitRef.current = true
+                      autoInitAttemptRef.current = { reservationId, attempted: true }
                       setGlobalError(null)
                       void startInspectionMutation.mutate()
                     }}
