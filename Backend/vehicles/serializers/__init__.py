@@ -1,7 +1,10 @@
 from .public import (
+	BrandPublicSerializer,
 	ParkingPublicSerializer,
+	ParkingSpacePublicSerializer,
 	VehicleAvailabilityQuerySerializer,
 	VehicleCategoryPublicSerializer,
+	VehicleEquipmentCatalogPublicSerializer,
 	VehiclePublicDetailSerializer,
 	VehiclePublicSerializer,
 )
@@ -14,6 +17,9 @@ __all__ = [
 	"VehicleAvailabilityQuerySerializer",
 	"VehicleCategoryPublicSerializer",
 	"ParkingPublicSerializer",
+	"BrandPublicSerializer",
+	"ParkingSpacePublicSerializer",
+	"VehicleEquipmentCatalogPublicSerializer",
 	"VehicleManagementWriteSerializer",
 	"VehicleStatusUpdateSerializer",
 	"VehiclePhotoCreateSerializer",

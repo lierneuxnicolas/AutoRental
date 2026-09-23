@@ -4,11 +4,14 @@ from rest_framework import generics
 from rest_framework.permissions import AllowAny
 
 from vehicles.filters import VehiclePublicFilter
-from vehicles.models import Parking, Vehicle, VehicleCategory, VehicleEquipment
+from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment
 from vehicles.serializers import (
+	BrandPublicSerializer,
 	ParkingPublicSerializer,
+	ParkingSpacePublicSerializer,
 	VehicleAvailabilityQuerySerializer,
 	VehicleCategoryPublicSerializer,
+	VehicleEquipmentCatalogPublicSerializer,
 	VehiclePublicDetailSerializer,
 	VehiclePublicSerializer,
 )
@@ -208,6 +211,67 @@ class ParkingPublicListView(generics.ListAPIView):
 		tags=["Parkings"],
 		auth=[],
 		responses={200: ParkingPublicSerializer(many=True)},
+	)
+	def get(self, request, *args, **kwargs):
+		return super().get(request, *args, **kwargs)
+
+
+class BrandPublicListView(generics.ListAPIView):
+	permission_classes = [AllowAny]
+	serializer_class = BrandPublicSerializer
+	pagination_class = None
+
+	def get_queryset(self):
+		if getattr(self, "swagger_fake_view", False):
+			return Brand.objects.none()
+		return Brand.objects.filter(is_active=True)
+
+	@extend_schema(
+		tags=["Vehicle Brands"],
+		auth=[],
+		responses={200: BrandPublicSerializer(many=True)},
+	)
+	def get(self, request, *args, **kwargs):
+		return super().get(request, *args, **kwargs)
+
+
+class ParkingSpacePublicListView(generics.ListAPIView):
+	permission_classes = [AllowAny]
+	serializer_class = ParkingSpacePublicSerializer
+	pagination_class = None
+
+	def get_queryset(self):
+		if getattr(self, "swagger_fake_view", False):
+			return ParkingSpace.objects.none()
+		return (
+			ParkingSpace.objects.filter(is_active=True, parking__is_active=True)
+			.select_related("parking")
+			.select_related("vehicle")
+		)
+
+	@extend_schema(
+		tags=["Parkings"],
+		auth=[],
+		responses={200: ParkingSpacePublicSerializer(many=True)},
+	)
+	def get(self, request, *args, **kwargs):
+		return super().get(request, *args, **kwargs)
+
+
+class VehicleEquipmentCatalogPublicListView(generics.ListAPIView):
+	permission_classes = [AllowAny]
+	serializer_class = VehicleEquipmentCatalogPublicSerializer
+	pagination_class = None
+
+	def get_queryset(self):
+		if getattr(self, "swagger_fake_view", False):
+			return VehicleEquipment.objects.none()
+		return VehicleEquipment.objects.filter(is_active=True)
+
+	@extend_schema(
+		tags=["Vehicle Equipment"],
+		auth=[],
+		responses={200: VehicleEquipmentCatalogPublicSerializer(many=True)},
 	)
 	def get(self, request, *args, **kwargs):
 		return super().get(request, *args, **kwargs)

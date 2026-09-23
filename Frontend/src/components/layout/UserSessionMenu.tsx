@@ -34,11 +34,11 @@ const roleConfigs: Record<string, RoleConfig> = {
     sessionLabel: 'gestionnaire',
     menuItems: [
       { label: 'Tableau de bord', to: '/manager' },
-      { label: 'Gestion des véhicules', to: '/manager/vehicles' },
-      { label: 'Réservations', to: '/manager/reservations' },
       { label: 'Documents à valider', to: '/manager/documents' },
+      { label: 'Réservations', to: '/manager/reservations' },
+      { label: 'Gestion des véhicules', to: '/manager/vehicles' },
       { label: 'Interventions', to: '/manager/interventions' },
-      { label: 'Paiements', to: '/manager/payments' },
+      { label: 'Paiements & factures', to: '/manager/payments' },
     ],
   },
   ADMINISTRATEUR: {
@@ -106,7 +106,6 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
     () => [
       { label: 'Tableau de bord', to: '/client' },
       { label: 'Mes réservations', to: '/client/reservations' },
-      { label: 'Notifications', to: '/client/notifications' },
       { label: 'Mon profil', to: '/client/profile' },
       { label: 'Mes factures', to: '/client/invoices' },
     ],

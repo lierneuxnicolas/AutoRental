@@ -1014,13 +1014,7 @@ export default function VehicleDetailPage() {
       return []
     }
 
-    return [
-      buildTabEntry('Climatisation', getVehicleField(vehicle, ['climatisation', 'air_conditioning'])),
-      buildTabEntry('GPS', getVehicleField(vehicle, ['gps', 'navigation'])),
-      buildTabEntry('Bluetooth / CarPlay', getVehicleField(vehicle, ['bluetooth', 'carplay', 'bluetooth_carplay'])),
-      buildTabEntry('ISOFIX', getVehicleField(vehicle, ['isofix'])),
-      buildTabEntry('USB', getVehicleField(vehicle, ['usb'])),
-    ]
+    return (vehicle.equipment ?? []).map((item) => buildTabEntry(item.label, 'Inclus'))
   }, [vehicle])
 
   const conditionRows = useMemo(() => {
@@ -1385,6 +1379,7 @@ export default function VehicleDetailPage() {
                     <div className="rounded-2xl border border-[#DBEAFE] bg-[#EFF6FF] p-4">
                       <p className="text-sm font-medium text-slate-500">Tarif journalier</p>
                       <p className="mt-2 text-3xl font-semibold text-[#1F2937]">{formatRate(vehicle.category_daily_rate)}</p>
+                      <p className="mt-1 text-xs text-slate-500">TVA 21 % comprise</p>
                     </div>
                   </div>
                 </Card>

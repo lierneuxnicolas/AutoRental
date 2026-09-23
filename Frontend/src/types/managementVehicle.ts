@@ -22,8 +22,19 @@ export interface VehicleManagementCreateRequest {
   doors: number
   status: VehicleManagementStatus
   mileage?: number
+  category_daily_rate?: number
   description?: string
   is_active?: boolean
+  power_hp?: number
+  consumption?: number
+  trunk_volume?: number
+  euro_standard?: string
+  included_km_per_day?: number
+  extra_km_price?: number
+  minimum_age?: number
+  required_license?: string
+  recommended_use?: string
+  equipment?: number[]
 }
 
 export interface VehicleManagementUpdateRequest {
@@ -39,9 +50,20 @@ export interface VehicleManagementUpdateRequest {
   seats?: number
   doors?: number
   mileage?: number
+  category_daily_rate?: number
   description?: string
   status?: VehicleManagementStatus
   is_active?: boolean
+  power_hp?: number | null
+  consumption?: number | null
+  trunk_volume?: number | null
+  euro_standard?: string
+  included_km_per_day?: number | null
+  extra_km_price?: number | null
+  minimum_age?: number | null
+  required_license?: string
+  recommended_use?: string
+  equipment?: number[]
 }
 
 export interface ManagementVehicleDetailResponse {
@@ -59,8 +81,19 @@ export interface ManagementVehicleDetailResponse {
   doors: number
   status: VehicleManagementStatus
   mileage?: number
+  category_daily_rate?: string
   description?: string
   is_active?: boolean
+  power_hp?: number | null
+  consumption?: string | null
+  trunk_volume?: number | null
+  euro_standard?: string | null
+  included_km_per_day?: number | null
+  extra_km_price?: string | null
+  minimum_age?: number | null
+  required_license?: string | null
+  recommended_use?: string | null
+  equipment?: number[]
 }
 
 export interface VehicleManagementStatusUpdateRequest {
@@ -111,4 +144,31 @@ export interface ManagementVehicleResponse {
   parking_address: string | null
   parking_space_number: string | null
   description?: string
+}
+
+export interface BrandOption {
+  id: number
+  name: string
+}
+
+export interface VehicleCategoryOption {
+  id: number
+  name: string
+  description: string
+  daily_rate: string
+  minimum_deposit: string
+}
+
+export interface ParkingSpaceOption {
+  id: number
+  number: string
+  parking_id: number
+  parking_name: string
+  occupied_by_vehicle_id: number | null
+}
+
+export interface VehicleEquipmentOption {
+  id: number
+  code: string
+  label: string
 }

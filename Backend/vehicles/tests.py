@@ -1,6 +1,7 @@
 from io import BytesIO
 import unittest
 from datetime import datetime, timedelta
+from decimal import Decimal
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -514,6 +515,15 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.vehicle_active.refresh_from_db()
 		self.assertEqual(self.vehicle_active.color, "Green")
+
+	def test_partial_update_vehicle_category_daily_rate(self):
+		self.client_api.force_authenticate(self.manager_user)
+		url = f"/api/v1/management/vehicles/{self.vehicle_active.id}/"
+		response = self.client_api.patch(url, {"category_daily_rate": "91.00"}, format="json")
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.category_active.refresh_from_db()
+		self.assertEqual(self.category_active.daily_rate, Decimal("91.00"))
+		self.assertEqual(response.data["category_daily_rate"], "91.00")
 
 	def test_status_update_success(self):
 		self.client_api.force_authenticate(self.manager_user)
