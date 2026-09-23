@@ -2,17 +2,26 @@ from django.urls import path
 
 from interventions.views import (
     CleaningInterventionCompleteView,
+    CleaningInterventionCheckInView,
+    CleaningInterventionCheckOutView,
+    CleaningInterventionInterruptView,
     CleaningInterventionDetailView,
     CleaningInterventionListView,
     CleaningInterventionPhotoCreateView,
     CleaningInterventionStartView,
+    CleaningInterventionWorkView,
     InterventionManagementAssignView,
+    InterventionAssignableUserListView,
     InterventionManagementCreateListView,
     MechanicInterventionCompleteView,
+    MechanicInterventionCheckInView,
+    MechanicInterventionCheckOutView,
+    MechanicInterventionInterruptView,
     MechanicInterventionDetailView,
     MechanicInterventionListView,
     MechanicInterventionPhotoCreateView,
     MechanicInterventionStartView,
+    MechanicInterventionWorkView,
 )
 
 app_name = "interventions"
@@ -22,6 +31,11 @@ urlpatterns = [
         "management/interventions/",
         InterventionManagementCreateListView.as_view(),
         name="management-interventions-list-create",
+    ),
+    path(
+        "management/interventions/assignees/",
+        InterventionAssignableUserListView.as_view(),
+        name="management-interventions-assignees",
     ),
     path(
         "management/interventions/<int:id>/assign/",
@@ -44,9 +58,25 @@ urlpatterns = [
         name="mechanic-interventions-start",
     ),
     path(
+        "mechanic/interventions/<int:id>/check-in/",
+        MechanicInterventionCheckInView.as_view(),
+        name="mechanic-interventions-check-in",
+    ),
+    path("mechanic/interventions/<int:id>/interrupt/", MechanicInterventionInterruptView.as_view(), name="mechanic-interventions-interrupt"),
+    path(
         "mechanic/interventions/<int:id>/photos/",
         MechanicInterventionPhotoCreateView.as_view(),
         name="mechanic-interventions-photos",
+    ),
+    path(
+        "mechanic/interventions/<int:id>/work/",
+        MechanicInterventionWorkView.as_view(),
+        name="mechanic-interventions-work",
+    ),
+    path(
+        "mechanic/interventions/<int:id>/check-out/",
+        MechanicInterventionCheckOutView.as_view(),
+        name="mechanic-interventions-check-out",
     ),
     path(
         "mechanic/interventions/<int:id>/complete/",
@@ -69,9 +99,25 @@ urlpatterns = [
         name="cleaning-interventions-start",
     ),
     path(
+        "cleaning/interventions/<int:id>/check-in/",
+        CleaningInterventionCheckInView.as_view(),
+        name="cleaning-interventions-check-in",
+    ),
+    path("cleaning/interventions/<int:id>/interrupt/", CleaningInterventionInterruptView.as_view(), name="cleaning-interventions-interrupt"),
+    path(
         "cleaning/interventions/<int:id>/photos/",
         CleaningInterventionPhotoCreateView.as_view(),
         name="cleaning-interventions-photos",
+    ),
+    path(
+        "cleaning/interventions/<int:id>/work/",
+        CleaningInterventionWorkView.as_view(),
+        name="cleaning-interventions-work",
+    ),
+    path(
+        "cleaning/interventions/<int:id>/check-out/",
+        CleaningInterventionCheckOutView.as_view(),
+        name="cleaning-interventions-check-out",
     ),
     path(
         "cleaning/interventions/<int:id>/complete/",

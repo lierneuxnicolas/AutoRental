@@ -1,5 +1,6 @@
 import api from './api'
 import type {
+  InterventionAssignableUser,
   ManagementInterventionAssignRequest,
   ManagementInterventionCreateRequest,
   ManagementInterventionListQueryParams,
@@ -34,6 +35,11 @@ export async function getManagementInterventions(
   })
 
   return normalizeInterventionListResponse(data)
+}
+
+export async function getManagementInterventionAssignees(): Promise<InterventionAssignableUser[]> {
+  const { data } = await api.get<InterventionAssignableUser[]>('/management/interventions/assignees/')
+  return data
 }
 
 export async function createManagementIntervention(

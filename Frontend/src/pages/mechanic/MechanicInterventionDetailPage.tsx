@@ -4,13 +4,15 @@ import axios from 'axios'
 import { Link, useParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
-import InterventionCompleteForm, { type InterventionCompleteFormValues } from '../../components/interventions/InterventionCompleteForm'
-import InterventionPhotoUpload from '../../components/interventions/InterventionPhotoUpload'
-import Button from '../../components/ui/Button'
+import InterventionCheckInForm from '../../components/interventions/InterventionCheckInForm'
+import InterventionCheckOutForm from '../../components/interventions/InterventionCheckOutForm'
+import InterventionWorkForm from '../../components/interventions/InterventionWorkForm'
 import Card from '../../components/ui/Card'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
-import { completeMechanicIntervention, getMechanicInterventionById, startMechanicIntervention } from '../../services/mechanicInterventionService'
+import { checkInMechanicIntervention, checkOutMechanicIntervention, getMechanicInterventionById, saveMechanicInterventionWork } from '../../services/mechanicInterventionService'
 import type { MechanicInterventionResponse, MechanicInterventionStatus } from '../../types/mechanicIntervention'
+import type { WorkerInterventionCheckInPhoto } from '../../types/workerIntervention'
+import { resolveMediaUrl } from '../../utils/media'
 
 function mapStatusToBadge(status: MechanicInterventionStatus): { label: string; variant: StatusVariant } {
   switch (status) {
@@ -29,23 +31,159 @@ function mapStatusToBadge(status: MechanicInterventionStatus): { label: string; 
   }
 }
 
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value))
+function formatVehicleName(brand: string, modelName: string): string {
+  return modelName.toLocaleLowerCase('fr-FR').startsWith(brand.toLocaleLowerCase('fr-FR'))
+    ? modelName
+    : `${brand} ${modelName}`
 }
 
-function getPersonLabel(person: MechanicInterventionResponse['assigned_to'] | MechanicInterventionResponse['created_by'] | null): string | null {
-  if (!person) {
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function asText(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim()
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value)
+  }
+  return null
+}
+
+function formatDateTime(value: unknown): string | null {
+  const text = asText(value)
+  if (!text) {
     return null
   }
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+  return new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(date)
+}
 
-  const fullName = `${person.first_name} ${person.last_name}`.trim()
-  return fullName.length > 0 ? fullName : person.email
+function formatCurrency(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) {
+    return null
+  }
+  return new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(amount)
+}
+
+function formatAnomalyType(value: unknown): string | null {
+  const key = asText(value)
+  if (!key) {
+    return null
+  }
+  const labels: Record<string, string> = {
+    autre: 'Autre',
+    dommage: 'Dommage',
+    nettoyage: 'Besoin de nettoyage',
+    securite: 'Problème de sécurité',
+  }
+  return labels[key] ?? key
+}
+
+function yesNo(value: unknown): string | null {
+  return typeof value === 'boolean' ? (value ? 'Oui' : 'Non') : null
+}
+
+function SummaryField({ label, value }: { label: string; value: unknown }) {
+  const text = asText(value)
+  if (!text) {
+    return null
+  }
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs font-medium text-slate-500">{label}</dt>
+      <dd className="mt-1 whitespace-pre-line text-sm font-medium text-[#1F2937]">{text}</dd>
+    </div>
+  )
+}
+
+function PhotoGroup({ title, photos }: { title: string; photos: WorkerInterventionCheckInPhoto[] }) {
+  const visiblePhotos = photos.filter((photo) => Boolean(resolveMediaUrl(photo.file)))
+  return (
+    <div>
+      <h4 className="text-xs font-medium text-slate-600">{title}</h4>
+      {visiblePhotos.length > 0 ? (
+        <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {visiblePhotos.map((photo) => (
+            <img
+              key={photo.id}
+              src={resolveMediaUrl(photo.file) ?? undefined}
+              alt={photo.caption || title}
+              className="aspect-[4/3] w-full rounded-lg border border-slate-200 object-cover"
+              loading="lazy"
+            />
+          ))}
+        </div>
+      ) : <p className="mt-2 text-xs text-slate-500">Aucune photo</p>}
+    </div>
+  )
+}
+
+function CompletedInterventionSummary({ intervention }: { intervention: MechanicInterventionResponse }) {
+  const finalReport = asRecord(intervention.final_report)
+  const reportCheckIn = asRecord(finalReport.check_in)
+  const work = asRecord(finalReport.work)
+  const checkOut = asRecord(finalReport.check_out)
+  const checkInPhotos = intervention.check_in?.photos ?? []
+  const checkOutPhotos = intervention.check_out?.photos ?? []
+  const beforePhotos = checkInPhotos.filter((photo) => (photo.caption || '').toLocaleLowerCase('fr-FR').includes('avant intervention'))
+  const duringPhotos = checkInPhotos.filter((photo) => !(photo.caption || '').toLocaleLowerCase('fr-FR').includes('avant intervention'))
+  const anomalyType = formatAnomalyType(work.anomaly_type)
+  const hasPhotos = beforePhotos.length > 0 || duringPhotos.length > 0 || checkOutPhotos.length > 0
+  const finalObservation = asText(checkOut.final_comment) ?? asText(checkOut.conclusions) ?? asText(checkOut.final_vehicle_state)
+
+  return (
+    <div className="divide-y divide-slate-200">
+      <section className="pb-5">
+        <h2 className="text-sm font-semibold text-[#2563EB]">Consigne du gestionnaire</h2>
+        <p className="mt-2 text-sm leading-6 text-[#1F2937]">{intervention.description?.trim() || 'Aucune consigne fournie.'}</p>
+      </section>
+
+      <section className="py-5">
+        <h2 className="text-sm font-semibold text-[#2563EB]">Intervention</h2>
+        <dl className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <SummaryField label="Début" value={formatDateTime(finalReport.started_at)} />
+          <SummaryField label="Fin" value={formatDateTime(finalReport.completed_at)} />
+          <SummaryField label="Kilométrage initial" value={reportCheckIn.mileage ?? intervention.check_in?.mileage} />
+          <SummaryField label="Kilométrage final" value={checkOut.mileage ?? intervention.check_out?.mileage} />
+        </dl>
+        <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+          <SummaryField label="Travail effectué" value={work.diagnostic ?? work.repairs_done} />
+          {anomalyType ? <SummaryField label="Anomalie constatée" value={anomalyType} /> : null}
+          {anomalyType ? <SummaryField label="Commentaire anomalie" value={work.anomaly_comment} /> : null}
+          <SummaryField label="Coût éventuel" value={formatCurrency(finalReport.estimated_cost ?? intervention.estimated_cost)} />
+        </dl>
+      </section>
+
+      <section className="py-5">
+        <h2 className="text-sm font-semibold text-[#2563EB]">Check-out</h2>
+        <dl className="mt-3 grid gap-4 sm:grid-cols-3">
+          <SummaryField label="Observation finale" value={finalObservation} />
+          <SummaryField label="Véhicule opérationnel" value={yesNo(checkOut.vehicle_operational)} />
+          <SummaryField label="Nouvelle intervention nécessaire" value={yesNo(checkOut.new_intervention_needed)} />
+        </dl>
+      </section>
+
+      {hasPhotos ? (
+        <section className="pt-5">
+          <h2 className="text-sm font-semibold text-[#2563EB]">Photos</h2>
+          <div className="mt-3 grid gap-5 lg:grid-cols-3">
+            <PhotoGroup title="Avant intervention" photos={beforePhotos} />
+            <PhotoGroup title="Pendant intervention" photos={duringPhotos} />
+            <PhotoGroup title="Après intervention" photos={checkOutPhotos} />
+          </div>
+        </section>
+      ) : null}
+    </div>
+  )
 }
 
 function extractStartErrorMessage(error: unknown): string {
@@ -145,10 +283,10 @@ function extractCompleteErrorMessage(error: unknown): string {
 export default function MechanicInterventionDetailPage() {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
-  const [startError, setStartError] = useState<string | null>(null)
-  const [startSuccessMessage, setStartSuccessMessage] = useState<string | null>(null)
+  const [checkInError, setCheckInError] = useState<string | null>(null)
   const [completeError, setCompleteError] = useState<string | null>(null)
   const [completeSuccessMessage, setCompleteSuccessMessage] = useState<string | null>(null)
+  const [workError, setWorkError] = useState<string | null>(null)
 
   const interventionId = useMemo(() => {
     if (!id) {
@@ -166,23 +304,21 @@ export default function MechanicInterventionDetailPage() {
     retry: false,
   })
 
-  const startMutation = useMutation({
-    mutationFn: () => startMechanicIntervention(interventionId as number),
+  const checkInMutation = useMutation({
+    mutationFn: (payload: Parameters<typeof checkInMechanicIntervention>[1]) => checkInMechanicIntervention(interventionId as number, payload),
     onSuccess: async () => {
-      setStartError(null)
-      setStartSuccessMessage('Intervention démarrée')
+      setCheckInError(null)
       await queryClient.invalidateQueries({ queryKey: ['mechanic-intervention', interventionId] })
       await queryClient.invalidateQueries({ queryKey: ['mechanic-interventions'] })
       await queryClient.refetchQueries({ queryKey: ['mechanic-intervention', interventionId] })
     },
     onError: (error) => {
-      setStartSuccessMessage(null)
-      setStartError(extractStartErrorMessage(error))
+      setCheckInError(extractStartErrorMessage(error))
     },
   })
 
   const completeMutation = useMutation({
-    mutationFn: (payload: InterventionCompleteFormValues) => completeMechanicIntervention(interventionId as number, payload),
+    mutationFn: (payload: Parameters<typeof checkOutMechanicIntervention>[1]) => checkOutMechanicIntervention(interventionId as number, payload),
     onSuccess: async () => {
       setCompleteError(null)
       setCompleteSuccessMessage('Intervention terminée')
@@ -193,6 +329,19 @@ export default function MechanicInterventionDetailPage() {
     onError: (error) => {
       setCompleteSuccessMessage(null)
       setCompleteError(extractCompleteErrorMessage(error))
+    },
+  })
+
+  const workMutation = useMutation({
+    mutationFn: (payload: Parameters<typeof saveMechanicInterventionWork>[1]) => saveMechanicInterventionWork(interventionId as number, payload),
+    onSuccess: async () => {
+      setWorkError(null)
+      await queryClient.invalidateQueries({ queryKey: ['mechanic-intervention', interventionId] })
+      await queryClient.invalidateQueries({ queryKey: ['mechanic-interventions'] })
+      await queryClient.refetchQueries({ queryKey: ['mechanic-intervention', interventionId] })
+    },
+    onError: (error) => {
+      setWorkError(extractCompleteErrorMessage(error))
     },
   })
 
@@ -246,9 +395,18 @@ export default function MechanicInterventionDetailPage() {
   }
 
   const statusBadge = mapStatusToBadge(intervention.status)
-  const showStartAction = intervention.status === 'ATTRIBUEE'
-  const showPhotoUploadSection = intervention.status === 'EN_COURS'
-  const showCompleteForm = intervention.status === 'EN_COURS'
+  const activeStep = intervention.status === 'TERMINEE'
+    ? 'done'
+    : !intervention.check_in
+      ? 'checkin'
+      : !intervention.work_data
+        ? 'work'
+        : 'checkout'
+  const stepItems = [
+    { id: 'checkin', label: 'Check-in', done: Boolean(intervention.check_in) || intervention.status === 'TERMINEE' },
+    { id: 'work', label: 'Intervention', done: Boolean(intervention.work_data) || intervention.status === 'TERMINEE' },
+    { id: 'checkout', label: 'Check-out', done: Boolean(intervention.check_out) || intervention.status === 'TERMINEE' },
+  ]
 
   const handlePhotoUploadSuccess = async () => {
     const includesPhotos =
@@ -264,11 +422,19 @@ export default function MechanicInterventionDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-[#1F2937]">Détail de l'intervention</h1>
-          <p className="text-sm text-slate-600">{intervention.reference || `#${intervention.id}`}</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-semibold text-[#1F2937]">
+              {formatVehicleName(intervention.vehicle.brand, intervention.vehicle.model_name)}
+            </h1>
+            {activeStep === 'done' ? <StatusBadge label={statusBadge.label} variant={statusBadge.variant} /> : null}
+          </div>
+          <p className="mt-1 text-sm font-medium text-slate-700">{intervention.vehicle.registration_number}</p>
+          <p className="text-sm text-slate-600">
+            {intervention.vehicle.parking_name ?? 'Parking non renseigné'} / {intervention.vehicle.parking_space_number ?? '—'}
+          </p>
         </div>
         <Link
           to="/mechanic/interventions"
@@ -278,98 +444,82 @@ export default function MechanicInterventionDetailPage() {
         </Link>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <Card
-          className="border-slate-200"
-          header={
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <Card className="border-slate-200">
+        <div className="space-y-6">
+          {activeStep !== 'done' ? (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-sm font-semibold text-[#2563EB]">Intervention</p>
-                <p className="text-sm text-slate-600">Détails de la tâche assignée</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Mot / consigne du gestionnaire</p>
+                <p className="mt-2 text-lg font-semibold leading-7 text-[#1F2937]">
+                  {intervention.description?.trim() ? intervention.description : 'Aucune consigne fournie.'}
+                </p>
               </div>
               <StatusBadge label={statusBadge.label} variant={statusBadge.variant} />
             </div>
-          }
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Référence</p>
-              <p className="mt-1 text-sm text-[#1F2937]">{intervention.reference || `#${intervention.id}`}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Type</p>
-              <p className="mt-1 text-sm text-[#1F2937]">{intervention.intervention_type}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Statut</p>
-              <p className="mt-1 text-sm text-[#1F2937]">{statusBadge.label}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Créée le</p>
-              <p className="mt-1 text-sm text-[#1F2937]">{formatDateTime(intervention.created_at)}</p>
-            </div>
+          ) : null}
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {stepItems.map((step, index) => (
+              <div key={step.id} className="flex items-center gap-2">
+                <span className={[
+                  'inline-flex h-9 items-center rounded-full px-4 text-sm font-semibold',
+                  step.done ? 'bg-emerald-50 text-emerald-700' : activeStep === step.id ? 'bg-[#2563EB] text-white' : 'bg-slate-100 text-slate-500',
+                ].join(' ')}>
+                  {step.done ? '✓' : index + 1} {step.label}
+                </span>
+                {index < stepItems.length - 1 ? <span className="hidden h-px w-8 bg-slate-200 sm:block" /> : null}
+              </div>
+            ))}
           </div>
 
-          <div className="mt-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Description</p>
-            <p className="mt-1 text-sm leading-6 text-slate-700">
-              {intervention.description?.trim() ? intervention.description : 'Aucune description fournie.'}
-            </p>
-          </div>
+          {activeStep !== 'done' && checkInError ? <Alert variant="danger" title="Check-in impossible" message={checkInError} className="mt-5" /> : null}
+          {activeStep !== 'done' && completeError ? <Alert variant="danger" title="Clôture impossible" message={completeError} className="mt-5" /> : null}
+          {activeStep !== 'checkout' && activeStep !== 'done' && completeSuccessMessage ? <Alert variant="success" title="Succès" message={completeSuccessMessage} className="mt-5" /> : null}
+          {activeStep !== 'done' && workError ? <Alert variant="danger" title="Enregistrement impossible" message={workError} className="mt-5" /> : null}
 
-          <div className="mt-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Dernière mise à jour</p>
-            <p className="mt-1 text-sm text-[#1F2937]">{formatDateTime(intervention.updated_at)}</p>
-          </div>
-
-          {startError ? <Alert variant="danger" title="Démarrage impossible" message={startError} className="mt-5" /> : null}
-          {startSuccessMessage ? <Alert variant="success" title="Succès" message={startSuccessMessage} className="mt-5" /> : null}
-          {completeError ? <Alert variant="danger" title="Clôture impossible" message={completeError} className="mt-5" /> : null}
-          {completeSuccessMessage ? <Alert variant="success" title="Succès" message={completeSuccessMessage} className="mt-5" /> : null}
-
-          {showStartAction ? (
-            <div className="mt-6">
-              <Button
-                variant="primary"
-                className="w-full sm:w-auto"
-                disabled={startMutation.isPending}
-                onClick={() => {
-                  if (startMutation.isPending) {
-                    return
-                  }
-
-                  setStartError(null)
-                  setStartSuccessMessage(null)
-                  void startMutation.mutateAsync()
+          {activeStep === 'checkin' ? (
+            <div>
+              <InterventionCheckInForm
+                embedded
+                role="mechanic"
+                initialMileage={intervention.check_in?.mileage ?? null}
+                disabled={checkInMutation.isPending}
+                isSubmitting={checkInMutation.isPending}
+                onSubmit={(values) => {
+                  setCheckInError(null)
+                  void checkInMutation.mutateAsync(values)
                 }}
-              >
-                {startMutation.isPending ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <LoadingSpinner size="sm" aria-label="Démarrage de l'intervention" />
-                    Démarrage...
-                  </span>
-                ) : (
-                  'Démarrer l’intervention'
-                )}
-              </Button>
+              />
             </div>
           ) : null}
 
-          {showPhotoUploadSection ? (
-            <div className="mt-6 space-y-3">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Photos de l’intervention</h2>
-              <InterventionPhotoUpload
+          {activeStep === 'work' ? (
+            <div>
+              <InterventionWorkForm
+                embedded
                 interventionId={intervention.id}
-                onUploadSuccess={() => {
+                role="mechanic"
+                initialWorkData={intervention.work_data}
+                initialEstimatedCost={intervention.estimated_cost}
+                disabled={workMutation.isPending}
+                isSubmitting={workMutation.isPending}
+                onSubmit={(values) => {
+                  setWorkError(null)
+                  return workMutation.mutateAsync(values).then(() => undefined)
+                }}
+                onPhotoUploadSuccess={() => {
                   void handlePhotoUploadSuccess()
                 }}
               />
             </div>
           ) : null}
 
-          {showCompleteForm ? (
-            <div className="mt-6">
-              <InterventionCompleteForm
+          {activeStep === 'checkout' ? (
+            <div>
+              <InterventionCheckOutForm
+                embedded
+                role="mechanic"
+                initialMileage={intervention.check_in?.mileage ?? null}
                 disabled={completeMutation.isPending}
                 isSubmitting={completeMutation.isPending}
                 onSubmit={(values) => {
@@ -384,46 +534,12 @@ export default function MechanicInterventionDetailPage() {
               />
             </div>
           ) : null}
-        </Card>
 
-        <div className="space-y-6">
-          <Card className="border-slate-200" header={<p className="text-sm font-semibold text-[#2563EB]">Véhicule</p>}>
-            <div className="space-y-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Marque</p>
-                <p className="mt-1 text-sm text-[#1F2937]">{intervention.vehicle.brand}</p>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Modèle</p>
-                <p className="mt-1 text-sm text-[#1F2937]">{intervention.vehicle.model_name}</p>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Immatriculation</p>
-                <p className="mt-1 text-sm text-[#1F2937]">{intervention.vehicle.registration_number}</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="border-slate-200" header={<p className="text-sm font-semibold text-[#2563EB]">Réservation et assignation</p>}>
-            <div className="space-y-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Réservation</p>
-                <p className="mt-1 text-sm text-[#1F2937]">
-                  {intervention.reservation ? intervention.reservation.reference : 'Aucune réservation liée'}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Assigné à</p>
-                <p className="mt-1 text-sm text-[#1F2937]">{getPersonLabel(intervention.assigned_to) ?? 'Non renseigné'}</p>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Créé par</p>
-                <p className="mt-1 text-sm text-[#1F2937]">{getPersonLabel(intervention.created_by) ?? 'Non renseigné'}</p>
-              </div>
-            </div>
-          </Card>
+          {activeStep === 'done' ? (
+            <CompletedInterventionSummary intervention={intervention} />
+          ) : null}
         </div>
-      </div>
+      </Card>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import Button from '../ui/Button'
 import Card from '../ui/Card'
 import Input from '../ui/Input'
 import Select from '../ui/Select'
+import type { InterventionAssignableUser } from '../../types/managementIntervention'
 import type { VehicleManagementStatus, VehicleManagementStatusUpdateRequest } from '../../types/managementVehicle'
 
 const statusOptions: Array<{ value: VehicleManagementStatus; label: string }> = [
@@ -20,15 +21,28 @@ const statusOptions: Array<{ value: VehicleManagementStatus; label: string }> = 
 export interface VehicleStatusFormProps {
   currentStatus: VehicleManagementStatus
   vehicleLabel: string
-  onSubmit: (payload: VehicleManagementStatusUpdateRequest) => Promise<void> | void
+  assignees?: InterventionAssignableUser[]
+  isLoadingAssignees?: boolean
+  onSubmit: (payload: VehicleManagementStatusUpdateRequest & { assigned_user_id?: number }) => Promise<void> | void
   onCancel: () => void
   isSubmitting?: boolean
   apiError?: string | null
 }
 
+function getPersonLabel(person: InterventionAssignableUser): string {
+  const fullName = `${person.first_name} ${person.last_name}`.trim()
+  return fullName.length > 0 ? fullName : person.email
+}
+
+function getStatusLabel(status: VehicleManagementStatus): string {
+  return statusOptions.find((option) => option.value === status)?.label ?? status
+}
+
 export default function VehicleStatusForm({
   currentStatus,
   vehicleLabel,
+  assignees = [],
+  isLoadingAssignees = false,
   onSubmit,
   onCancel,
   isSubmitting = false,
@@ -36,6 +50,25 @@ export default function VehicleStatusForm({
 }: VehicleStatusFormProps) {
   const [status, setStatus] = useState<VehicleManagementStatus>(currentStatus)
   const [reason, setReason] = useState('')
+  const [assignedUserId, setAssignedUserId] = useState('')
+
+  const requiredRole = status === 'MAINTENANCE'
+    ? 'MECANICIEN'
+    : status === 'NETTOYAGE'
+      ? 'NETTOYEUR'
+      : null
+  const assignmentLabel = status === 'MAINTENANCE'
+    ? 'Technicien / mécano affecté'
+    : status === 'NETTOYAGE'
+      ? 'Agent de nettoyage affecté'
+      : null
+  const filteredAssignees = requiredRole
+    ? assignees.filter((assignee) => assignee.role === requiredRole)
+    : []
+  const assigneeOptions = [
+    { value: '', label: isLoadingAssignees ? 'Chargement...' : 'Sélectionner une personne' },
+    ...filteredAssignees.map((assignee) => ({ value: String(assignee.id), label: getPersonLabel(assignee) })),
+  ]
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -43,33 +76,54 @@ export default function VehicleStatusForm({
     await onSubmit({
       status,
       reason: reason.trim() || undefined,
+      assigned_user_id: assignedUserId ? Number(assignedUserId) : undefined,
     })
   }
 
   return (
-    <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Changer le statut</h2>}>
-      <div className="space-y-4">
-        <div>
-          <p className="text-sm font-medium text-[#1F2937]">{vehicleLabel}</p>
-          <p className="mt-1 text-sm text-slate-600">Choisissez un nouveau statut. Le motif est optionnel.</p>
+    <Card className="border-[#DBEAFE] bg-[#F8FAFC]" header={<h2 className="text-base font-semibold text-[#1F2937]">Changer le statut</h2>}>
+      <div className="space-y-3">
+        <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Véhicule</p>
+            <p className="mt-1 font-medium text-[#1F2937]">{vehicleLabel}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Statut actuel</p>
+            <p className="mt-1 font-medium text-[#1F2937]">{getStatusLabel(currentStatus)}</p>
+          </div>
         </div>
 
         {apiError ? <Alert variant="danger" title="Mise a jour impossible" message={apiError} /> : null}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Select
-            label="Nouveau statut"
-            options={statusOptions}
-            value={status}
-            onChange={(event) => setStatus(event.target.value as VehicleManagementStatus)}
-            disabled={isSubmitting}
-          />
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <Select
+              label="Nouveau statut"
+              options={statusOptions}
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value as VehicleManagementStatus)
+                setAssignedUserId('')
+              }}
+              disabled={isSubmitting}
+            />
+
+            {assignmentLabel ? (
+              <Select
+                label={assignmentLabel}
+                options={assigneeOptions}
+                value={assignedUserId}
+                onChange={(event) => setAssignedUserId(event.target.value)}
+                disabled={isSubmitting || isLoadingAssignees}
+              />
+            ) : null}
+          </div>
 
           <Input
-            label="Motif (optionnel)"
+            label="Motif"
             placeholder="Ex: vehicule nettoye, retour atelier..."
             maxLength={500}
-            helperText="Champ supporte par l'API, longueur maximale 500 caracteres."
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             disabled={isSubmitting}

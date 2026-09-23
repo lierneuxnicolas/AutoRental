@@ -101,6 +101,7 @@ export default function ManagerInterventionsPage() {
   const [assignUserId, setAssignUserId] = useState('')
   const [assignError, setAssignError] = useState<string | null>(null)
   const [assignSuccessMessage, setAssignSuccessMessage] = useState<string | null>(null)
+  const [reportOpenForId, setReportOpenForId] = useState<number | null>(null)
 
   const interventionsQuery = useQuery({
     queryKey: ['manager-interventions', page],
@@ -536,10 +537,29 @@ export default function ManagerInterventionsPage() {
                       )}
                     </>
                   ) : null}
-                  <Button variant="secondary" size="sm" disabled>
-                    Voir le détail
-                  </Button>
+                  {intervention.status === 'TERMINEE' ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setReportOpenForId((current) => current === intervention.id ? null : intervention.id)}
+                    >
+                      Voir le rapport
+                    </Button>
+                  ) : null}
                 </div>
+
+                {reportOpenForId === intervention.id ? (
+                  <div className="mt-5 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] p-4">
+                    <p className="text-sm font-semibold text-[#2563EB]">Rapport final</p>
+                    {intervention.final_report ? (
+                      <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-6 text-slate-700">
+                        {JSON.stringify(intervention.final_report, null, 2)}
+                      </pre>
+                    ) : (
+                      <p className="mt-2 text-sm text-slate-600">Aucun rapport final disponible.</p>
+                    )}
+                  </div>
+                ) : null}
               </Card>
             )
           })}

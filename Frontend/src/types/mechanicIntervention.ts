@@ -2,6 +2,8 @@ import type {
   PaginatedWorkerInterventionListResponse,
   WorkerInterventionAssigneeSummary,
   WorkerInterventionCompleteRequest,
+  WorkerInterventionCheckInValues,
+  WorkerInterventionCheckOutValues,
   WorkerInterventionListQueryParams,
   WorkerInterventionPhotoResponse,
   WorkerInterventionPhotoUploadRequest,
@@ -10,6 +12,7 @@ import type {
   WorkerInterventionStatus,
   WorkerInterventionType,
   WorkerInterventionVehicleSummary,
+  WorkerInterventionWorkValues,
 } from './workerIntervention'
 
 export type MechanicInterventionType = WorkerInterventionType
@@ -36,6 +39,9 @@ export interface MechanicInterventionStartRequest {
 }
 
 export type MechanicInterventionCompleteRequest = WorkerInterventionCompleteRequest
+export type MechanicInterventionCheckInValues = WorkerInterventionCheckInValues
+export type MechanicInterventionWorkValues = WorkerInterventionWorkValues
+export type MechanicInterventionCheckOutValues = WorkerInterventionCheckOutValues
 
 export type MechanicInterventionPhotoUploadRequest = WorkerInterventionPhotoUploadRequest
 

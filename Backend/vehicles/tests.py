@@ -17,6 +17,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import ClientProfile, Role
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment, VehiclePhoto
+from interventions.models import Intervention
 from vehicles.services import (
 	AvailabilityValidationError,
 	calculate_duration_hours,
@@ -532,6 +533,28 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.vehicle_active.refresh_from_db()
 		self.assertEqual(self.vehicle_active.status, Vehicle.Status.RESERVE)
+
+	def test_status_update_maintenance_to_available_after_completed_mechanical_intervention(self):
+		self.vehicle_active.status = Vehicle.Status.MAINTENANCE
+		self.vehicle_active.save(update_fields=["status", "updated_at"])
+		Intervention.objects.create(
+			reference="INT-TEST-MECA-DONE",
+			vehicle=self.vehicle_active,
+			intervention_type=Intervention.Type.MECANIQUE,
+			status=Intervention.Status.TERMINEE,
+			assigned_to=self.mechanic_user,
+			created_by=self.manager_user,
+			started_at=timezone.now(),
+			completed_at=timezone.now(),
+		)
+		self.client_api.force_authenticate(self.manager_user)
+		url = f"/api/v1/management/vehicles/{self.vehicle_active.id}/status/"
+
+		response = self.client_api.patch(url, {"status": Vehicle.Status.DISPONIBLE}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.vehicle_active.refresh_from_db()
+		self.assertEqual(self.vehicle_active.status, Vehicle.Status.DISPONIBLE)
 
 	def test_status_update_rejects_invalid_status(self):
 		self.client_api.force_authenticate(self.manager_user)

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import axios from 'axios'
 import Alert from '../feedback/Alert'
@@ -11,6 +11,11 @@ export interface InterventionPhotoUploadProps {
   interventionId: number
   role?: WorkerInterventionRole
   onUploadSuccess?: (photo: WorkerInterventionPhotoResponse) => void
+  showSubmitButton?: boolean
+}
+
+export interface InterventionPhotoUploadHandle {
+  uploadSelected: () => Promise<void>
 }
 
 interface ApiErrorPayload {
@@ -73,7 +78,12 @@ function extractUploadErrorMessage(error: unknown): string {
   return "La photo n'a pas pu etre envoyee. Veuillez reessayer."
 }
 
-export default function InterventionPhotoUpload({ interventionId, role = 'mechanic', onUploadSuccess }: InterventionPhotoUploadProps) {
+const InterventionPhotoUpload = forwardRef<InterventionPhotoUploadHandle, InterventionPhotoUploadProps>(function InterventionPhotoUpload({
+  interventionId,
+  role = 'mechanic',
+  onUploadSuccess,
+  showSubmitButton = true,
+}, ref) {
   const fileInputId = useId()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -110,7 +120,7 @@ export default function InterventionPhotoUpload({ interventionId, role = 'mechan
     },
     onSuccess: (photo) => {
       setUploadError(null)
-      setSuccessMessage('Photo envoyee avec succes.')
+      setSuccessMessage('Photo ajoutée')
       setSelectedFile(null)
       setCaption('')
 
@@ -146,55 +156,71 @@ export default function InterventionPhotoUpload({ interventionId, role = 'mechan
     void uploadMutation.mutateAsync()
   }
 
+  useImperativeHandle(ref, () => ({
+    uploadSelected: async () => {
+      if (!selectedFile) {
+        return
+      }
+      setUploadError(null)
+      setSuccessMessage(null)
+      await uploadMutation.mutateAsync()
+    },
+  }), [selectedFile, uploadMutation])
+
+  const fields = (
+    <>
+      <div className="space-y-2">
+        <label htmlFor={fileInputId} className="block text-sm font-medium text-[#1F2937]">
+          Selectionner une image
+        </label>
+        <input
+          ref={fileInputRef}
+          id={fileInputId}
+          type="file"
+          accept="image/*"
+          className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-slate-600 shadow-sm file:mr-4 file:rounded-full file:border-0 file:bg-[#DBEAFE] file:px-3 file:py-2 file:text-sm file:font-medium file:text-[#2563EB]"
+          onChange={handleFileChange}
+        />
+        {selectedFile ? <p className="text-sm text-slate-500">Fichier selectionne : {selectedFile.name}</p> : null}
+      </div>
+
+      {previewUrl ? (
+        <div className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC]">
+          <img src={previewUrl} alt="Previsualisation de la photo" className="h-52 w-full object-cover" />
+        </div>
+      ) : (
+        <div className="flex h-52 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-sm text-slate-500">
+          Aucune image selectionnee.
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <label htmlFor={`${fileInputId}-caption`} className="block text-sm font-medium text-[#1F2937]">
+          Legende (optionnel)
+        </label>
+        <input
+          id={`${fileInputId}-caption`}
+          type="text"
+          value={caption}
+          onChange={(event) => {
+            setCaption(event.target.value)
+            setUploadError(null)
+            setSuccessMessage(null)
+          }}
+          placeholder="Ex: dommage aile avant gauche"
+          className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-slate-700 shadow-sm placeholder:text-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#DBEAFE]"
+        />
+      </div>
+    </>
+  )
+
   return (
-    <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
+    <div className="w-full space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
       {uploadError ? <Alert variant="danger" title="Envoi impossible" message={uploadError} /> : null}
-      {successMessage ? <Alert variant="success" title="Photo envoyee" message={successMessage} /> : null}
+      {successMessage ? <p className="text-sm font-medium text-emerald-700">{successMessage}</p> : null}
 
-      <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-        <div className="space-y-2">
-          <label htmlFor={fileInputId} className="block text-sm font-medium text-[#1F2937]">
-            Selectionner une image
-          </label>
-          <input
-            ref={fileInputRef}
-            id={fileInputId}
-            type="file"
-            accept="image/*"
-            className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-slate-600 shadow-sm file:mr-4 file:rounded-full file:border-0 file:bg-[#DBEAFE] file:px-3 file:py-2 file:text-sm file:font-medium file:text-[#2563EB]"
-            onChange={handleFileChange}
-          />
-          {selectedFile ? <p className="text-sm text-slate-500">Fichier selectionne : {selectedFile.name}</p> : null}
-        </div>
-
-        {previewUrl ? (
-          <div className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC]">
-            <img src={previewUrl} alt="Previsualisation de la photo" className="h-52 w-full object-cover" />
-          </div>
-        ) : (
-          <div className="flex h-52 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-sm text-slate-500">
-            Aucune image selectionnee.
-          </div>
-        )}
-
-        <div className="space-y-2">
-          <label htmlFor="intervention-photo-caption" className="block text-sm font-medium text-[#1F2937]">
-            Legende (optionnel)
-          </label>
-          <input
-            id="intervention-photo-caption"
-            type="text"
-            value={caption}
-            onChange={(event) => {
-              setCaption(event.target.value)
-              setUploadError(null)
-              setSuccessMessage(null)
-            }}
-            placeholder="Ex: dommage aile avant gauche"
-            className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-slate-700 shadow-sm placeholder:text-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#DBEAFE]"
-          />
-        </div>
-
+      {showSubmitButton ? <form className="space-y-4" onSubmit={handleSubmit} noValidate>
+        {fields}
         <Button type="submit" className="w-full sm:w-auto" disabled={uploadMutation.isPending || !selectedFile}>
           {uploadMutation.isPending ? (
             <span className="flex items-center justify-center gap-2">
@@ -205,7 +231,9 @@ export default function InterventionPhotoUpload({ interventionId, role = 'mechan
             'Envoyer la photo'
           )}
         </Button>
-      </form>
+      </form> : <div className="space-y-4">{fields}</div>}
     </div>
   )
-}
+})
+
+export default InterventionPhotoUpload

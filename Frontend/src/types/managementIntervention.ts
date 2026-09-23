@@ -27,6 +27,14 @@ export interface InterventionAssigneeSummary {
   role: string
 }
 
+export interface InterventionAssignableUser {
+  id: number
+  email: string
+  first_name: string
+  last_name: string
+  role: 'MECANICIEN' | 'NETTOYEUR'
+}
+
 export interface ManagementInterventionCreateRequest {
   vehicle_id: number
   reservation_id?: number | null
@@ -49,6 +57,11 @@ export interface ManagementInterventionResponse {
   reservation: InterventionReservationSummary | null
   assigned_to: InterventionAssigneeSummary | null
   created_by: InterventionAssigneeSummary
+  check_in?: unknown
+  check_out?: unknown
+  work_data?: Record<string, unknown> | null
+  final_report?: Record<string, unknown> | null
+  estimated_cost?: string | number | null
   created_at: string
   updated_at: string
 }

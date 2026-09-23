@@ -126,6 +126,10 @@ class Intervention(models.Model):
 
 
 class TechnicalInspection(models.Model):
+	class Phase(models.TextChoices):
+		INITIAL = "INITIAL", "Initial"
+		FINAL = "FINAL", "Final"
+
 	intervention = models.ForeignKey(
 		Intervention,
 		on_delete=models.CASCADE,
@@ -139,12 +143,14 @@ class TechnicalInspection(models.Model):
 	mileage = models.PositiveIntegerField()
 	energy_level_percent = models.PositiveSmallIntegerField()
 	observations = models.TextField(blank=True)
+	phase = models.CharField(max_length=16, choices=Phase.choices, default=Phase.INITIAL)
 	created_at = models.DateTimeField(auto_now_add=True)
 
 	class Meta:
 		ordering = ["-created_at", "-id"]
 		indexes = [
 			models.Index(fields=["intervention"], name="tech_insp_intervention_idx"),
+			models.Index(fields=["intervention", "phase"], name="tech_insp_interv_phase_idx"),
 			models.Index(fields=["vehicle"], name="tech_insp_vehicle_idx"),
 			models.Index(fields=["created_at"], name="tech_insp_created_at_idx"),
 		]
