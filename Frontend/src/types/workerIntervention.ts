@@ -14,6 +14,8 @@ export interface WorkerInterventionVehicleSummary {
   registration_number: string
   brand: string
   model_name: string
+  parking_name?: string | null
+  parking_space_number?: string | null
 }
 
 export interface WorkerInterventionReservationSummary {
@@ -40,8 +42,49 @@ export interface WorkerInterventionResponse {
   reservation: WorkerInterventionReservationSummary | null
   assigned_to: WorkerInterventionAssigneeSummary | null
   created_by: WorkerInterventionAssigneeSummary
+  check_in?: WorkerInterventionCheckIn | null
+  check_out?: WorkerInterventionCheckIn | null
+  estimated_cost?: string | number | null
+  work_data?: WorkerInterventionWorkData | null
+  final_report?: Record<string, unknown> | null
   created_at: string
   updated_at: string
+}
+
+export interface WorkerInterventionWorkData {
+  [key: string]: string | boolean | number | null | undefined
+}
+
+export interface WorkerInterventionWorkValues {
+  work_data: WorkerInterventionWorkData
+  estimated_cost?: number | null
+}
+
+export interface WorkerInterventionCheckOutValues {
+  final_mileage: number
+  final_vehicle_state: string
+  conclusions: string
+  vehicle_operational?: boolean
+  vehicle_clean?: boolean
+  new_intervention_needed: boolean
+  final_comment?: string
+  photos: File[]
+}
+
+export interface WorkerInterventionCheckInPhoto {
+  id: number
+  file: string | null
+  caption: string
+  created_at: string
+}
+
+export interface WorkerInterventionCheckIn {
+  id: number
+  mileage: number
+  energy_level_percent: number
+  observations: string
+  created_at: string
+  photos: WorkerInterventionCheckInPhoto[]
 }
 
 export interface PaginatedWorkerInterventionListResponse {
@@ -59,6 +102,21 @@ export interface WorkerInterventionListQueryParams {
 
 export interface WorkerInterventionCompleteRequest {
   report?: string
+}
+
+export interface WorkerInterventionCheckInValues {
+  mileage: number
+  observations: string
+  vehicle_condition?: string
+  cleanliness_state?: string
+  cleanliness_notes?: string
+  photos: File[]
+}
+
+export interface WorkerInterventionInterruptValues {
+  reason_type: 'vehicule_accidente' | 'probleme_securite' | 'vehicule_inaccessible' | 'vehicule_non_deplacable' | 'mauvais_vehicule' | 'autre'
+  reason_detail?: string
+  photo?: File | null
 }
 
 export interface WorkerInterventionPhotoUploadRequest {

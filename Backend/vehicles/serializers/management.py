@@ -2,6 +2,7 @@ from datetime import date
 
 from rest_framework import serializers
 
+from interventions.models import Intervention
 from vehicles.models import Brand, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment
 
 
@@ -162,11 +163,17 @@ class VehicleStatusUpdateSerializer(serializers.Serializer):
 			)
 
 		if current_status == Vehicle.Status.MAINTENANCE and new_status == Vehicle.Status.DISPONIBLE:
-			raise serializers.ValidationError(
-				{
-					"status": "Transition interdite: un vehicule en maintenance ne peut pas devenir disponible sans controle metier."
-				}
-			)
+			has_completed_mechanical_intervention = Intervention.objects.filter(
+				vehicle=vehicle,
+				intervention_type=Intervention.Type.MECANIQUE,
+				status=Intervention.Status.TERMINEE,
+			).exists()
+			if not has_completed_mechanical_intervention:
+				raise serializers.ValidationError(
+					{
+						"status": "Transition interdite: un vehicule en maintenance ne peut pas devenir disponible sans controle metier."
+					}
+				)
 
 		if current_status in {Vehicle.Status.ACCIDENTE, Vehicle.Status.A_CONTROLER} and new_status == Vehicle.Status.RESERVE:
 			raise serializers.ValidationError(

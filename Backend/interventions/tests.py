@@ -1197,6 +1197,19 @@ class InterventionManagementApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(len(response.data), 2)
 
+	def test_manager_list_assignable_intervention_users(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.get("/api/v1/management/interventions/assignees/")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		roles = {item["role"] for item in response.data}
+		emails = {item["email"] for item in response.data}
+		self.assertEqual(roles, {Role.Code.MECANICIEN, Role.Code.NETTOYEUR})
+		self.assertIn(self.mechanic_user_1.email, emails)
+		self.assertIn(self.cleaner_user_1.email, emails)
+		self.assertNotIn(self.manager_user.email, emails)
+
 
 class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 	def setUp(self):
@@ -1220,16 +1233,56 @@ class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		returned_ids = {item["id"] for item in response.data}
 		self.assertEqual(returned_ids, {mine.id})
 
-	def test_mechanic_start_intervention(self):
+	def test_mechanic_start_intervention_requires_check_in(self):
 		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.ATTRIBUEE)
 		self.client_api.force_authenticate(self.mechanic_user_1)
 
 		response = self.client_api.post(f"/api/v1/mechanic/interventions/{intervention.id}/start/", format="json")
 
 		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(intervention.status, Intervention.Status.ATTRIBUEE)
+
+	def test_mechanic_check_in_creates_initial_state_and_starts_intervention(self):
+		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.ATTRIBUEE)
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/mechanic/interventions/{intervention.id}/check-in/",
+			{
+				"mileage": 1234,
+				"observations": "Controle initial mecanicien",
+				"vehicle_condition": "Bon etat general",
+				"photos": [self._image_file("mechanic-check-in.gif")],
+			},
+			format="multipart",
+		)
+
+		intervention.refresh_from_db()
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(intervention.status, Intervention.Status.EN_COURS)
 		self.assertIsNotNone(intervention.started_at)
+		technical_inspection = intervention.technical_inspections.get()
+		self.assertEqual(technical_inspection.mileage, 1234)
+		self.assertIn("Controle initial mecanicien", technical_inspection.observations)
+		self.assertIn("Bon etat general", technical_inspection.observations)
+		self.assertEqual(technical_inspection.photos.count(), 1)
+
+	def test_mechanic_interrupt_intervention(self):
+		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.ATTRIBUEE)
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/mechanic/interventions/{intervention.id}/interrupt/",
+			{"reason_type": "probleme_securite", "reason_detail": "Fuite carburant"},
+			format="multipart",
+		)
+
+		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.status, Intervention.Status.ANNULEE)
+		self.assertIsNotNone(intervention.cancelled_at)
+		self.assertIn("probleme_securite", intervention.cancellation_reason)
 
 	def test_mechanic_add_photo(self):
 		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.EN_COURS)
@@ -1295,6 +1348,81 @@ class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(intervention.report, "Intervention terminee")
 		self.assertIsNotNone(intervention.started_at)
 
+	def test_mechanic_save_work_keeps_intervention_in_progress(self):
+		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.EN_COURS)
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/mechanic/interventions/{intervention.id}/work/",
+			{
+				"estimated_cost": "125.50",
+				"work_data": {
+					"diagnostic": "Courroie usee",
+					"repairs_done": "Remplacement courroie",
+					"anomaly_type": "securite",
+					"anomaly_comment": "Controle conseille",
+				},
+			},
+			format="json",
+		)
+
+		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.status, Intervention.Status.EN_COURS)
+		self.assertEqual(intervention.estimated_cost, Decimal("125.50"))
+		self.assertEqual(response.data["work_data"]["diagnostic"], "Courroie usee")
+
+	def test_mechanic_check_out_completes_with_final_inspection(self):
+		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.EN_COURS)
+		intervention.started_at = timezone.now() - timedelta(minutes=30)
+		intervention.save(update_fields=["started_at", "updated_at"])
+		TechnicalInspection.objects.create(
+			intervention=intervention,
+			vehicle=intervention.vehicle,
+			phase=TechnicalInspection.Phase.INITIAL,
+			mileage=1000,
+			energy_level_percent=0,
+			observations="Initial ok",
+		)
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/mechanic/interventions/{intervention.id}/check-out/",
+			{
+				"final_mileage": 1010,
+				"final_vehicle_state": "Etat final ok",
+				"conclusions": "Reparation terminee",
+				"vehicle_operational": True,
+				"new_intervention_needed": False,
+				"photos": [self._image_file("mechanic-final.gif")],
+			},
+			format="multipart",
+		)
+
+		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.status, Intervention.Status.TERMINEE)
+		self.assertIsNotNone(intervention.completed_at)
+		self.assertNotEqual(intervention.vehicle.status, Vehicle.Status.DISPONIBLE)
+		final_inspection = intervention.technical_inspections.get(phase=TechnicalInspection.Phase.FINAL)
+		self.assertEqual(final_inspection.mileage, 1010)
+		self.assertEqual(final_inspection.photos.count(), 1)
+		self.assertIsNotNone(response.data["final_report"])
+
+	def test_mechanic_check_out_rejects_invalid_final_state(self):
+		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.EN_COURS)
+		TechnicalInspection.objects.create(intervention=intervention, vehicle=intervention.vehicle, phase=TechnicalInspection.Phase.INITIAL, mileage=1000, energy_level_percent=0, observations="Initial ok")
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/mechanic/interventions/{intervention.id}/check-out/",
+			{"final_mileage": 900, "final_vehicle_state": "Etat", "conclusions": "Conclusion", "vehicle_operational": True, "new_intervention_needed": False, "photos": [self._image_file("invalid-final.gif")]},
+			format="multipart",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "INVALID_FINAL_MILEAGE")
+
 
 class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 	def setUp(self):
@@ -1318,16 +1446,42 @@ class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		returned_ids = {item["id"] for item in response.data}
 		self.assertEqual(returned_ids, {mine.id})
 
-	def test_cleaner_start_intervention(self):
+	def test_cleaner_start_intervention_requires_check_in(self):
 		intervention = self._assigned_cleaning_intervention(status_value=Intervention.Status.ATTRIBUEE)
 		self.client_api.force_authenticate(self.cleaner_user_1)
 
 		response = self.client_api.post(f"/api/v1/cleaning/interventions/{intervention.id}/start/", format="json")
 
 		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(intervention.status, Intervention.Status.ATTRIBUEE)
+
+	def test_cleaner_check_in_creates_initial_state_and_starts_intervention(self):
+		intervention = self._assigned_cleaning_intervention(status_value=Intervention.Status.ATTRIBUEE)
+		self.client_api.force_authenticate(self.cleaner_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/cleaning/interventions/{intervention.id}/check-in/",
+			{
+				"mileage": 2234,
+				"observations": "Controle initial nettoyage",
+				"cleanliness_state": "Habitacle poussiereux",
+				"cleanliness_notes": "Odeur tabac et dechets arriere",
+				"photos": [self._image_file("cleaning-check-in.gif")],
+			},
+			format="multipart",
+		)
+
+		intervention.refresh_from_db()
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(intervention.status, Intervention.Status.EN_COURS)
 		self.assertIsNotNone(intervention.started_at)
+		technical_inspection = intervention.technical_inspections.get()
+		self.assertEqual(technical_inspection.mileage, 2234)
+		self.assertIn("Controle initial nettoyage", technical_inspection.observations)
+		self.assertIn("Habitacle poussiereux", technical_inspection.observations)
+		self.assertIn("Odeur tabac", technical_inspection.observations)
+		self.assertEqual(technical_inspection.photos.count(), 1)
 
 	def test_cleaner_add_photo(self):
 		intervention = self._assigned_cleaning_intervention(status_value=Intervention.Status.EN_COURS)
@@ -1376,6 +1530,65 @@ class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(intervention.status, Intervention.Status.TERMINEE)
 		self.assertEqual(intervention.report, "Nettoyage termine")
 		self.assertIsNotNone(intervention.started_at)
+
+	def test_cleaner_save_work_keeps_intervention_in_progress(self):
+		intervention = self._assigned_cleaning_intervention(status_value=Intervention.Status.EN_COURS)
+		self.client_api.force_authenticate(self.cleaner_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/cleaning/interventions/{intervention.id}/work/",
+			{
+				"work_data": {
+					"waste_removed": True,
+					"vacuuming": True,
+					"cleanliness_after": "Propre",
+					"anomaly_type": "objet_trouve",
+					"anomaly_comment": "Carte retrouvee",
+				},
+			},
+			format="json",
+		)
+
+		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.status, Intervention.Status.EN_COURS)
+		self.assertTrue(response.data["work_data"]["waste_removed"])
+		self.assertEqual(response.data["work_data"]["cleanliness_after"], "Propre")
+
+	def test_cleaner_check_out_completes_with_final_inspection(self):
+		intervention = self._assigned_cleaning_intervention(status_value=Intervention.Status.EN_COURS)
+		intervention.started_at = timezone.now() - timedelta(minutes=30)
+		intervention.save(update_fields=["started_at", "updated_at"])
+		TechnicalInspection.objects.create(intervention=intervention, vehicle=intervention.vehicle, phase=TechnicalInspection.Phase.INITIAL, mileage=2000, energy_level_percent=0, observations="Initial nettoyage")
+		self.client_api.force_authenticate(self.cleaner_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/cleaning/interventions/{intervention.id}/check-out/",
+			{"final_mileage": 2005, "final_vehicle_state": "Propre", "conclusions": "Nettoyage termine", "vehicle_clean": True, "new_intervention_needed": False, "photos": [self._image_file("cleaning-final.gif")]},
+			format="multipart",
+		)
+
+		intervention.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.status, Intervention.Status.TERMINEE)
+		self.assertIsNotNone(intervention.completed_at)
+		self.assertNotEqual(intervention.vehicle.status, Vehicle.Status.DISPONIBLE)
+		final_inspection = intervention.technical_inspections.get(phase=TechnicalInspection.Phase.FINAL)
+		self.assertEqual(final_inspection.mileage, 2005)
+		self.assertEqual(final_inspection.photos.count(), 1)
+
+	def test_cleaner_check_out_requires_conclusions_and_photo(self):
+		intervention = self._assigned_cleaning_intervention(status_value=Intervention.Status.EN_COURS)
+		TechnicalInspection.objects.create(intervention=intervention, vehicle=intervention.vehicle, phase=TechnicalInspection.Phase.INITIAL, mileage=2000, energy_level_percent=0, observations="Initial nettoyage")
+		self.client_api.force_authenticate(self.cleaner_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/cleaning/interventions/{intervention.id}/check-out/",
+			{"final_mileage": 2001, "final_vehicle_state": "Propre", "conclusions": "", "vehicle_clean": True, "new_intervention_needed": False},
+			format="multipart",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 class InterventionWorkflowServiceTests(VehicleAccessTestDataMixin, TestCase):

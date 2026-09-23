@@ -19,9 +19,13 @@ from interventions.services.creation import (
 from interventions.services.workflows import (
     InterventionWorkflowError,
     add_assigned_intervention_photo,
+    check_in_assigned_intervention,
+    check_out_assigned_intervention,
     complete_assigned_intervention,
     get_assigned_intervention,
+    interrupt_assigned_intervention,
     list_assigned_interventions,
+    save_assigned_intervention_work,
     start_assigned_intervention,
 )
 
@@ -34,14 +38,18 @@ __all__ = [
     "activate_vehicle_access",
     "add_assigned_intervention_photo",
     "assign_intervention",
+    "check_in_assigned_intervention",
+    "check_out_assigned_intervention",
     "complete_assigned_intervention",
     "create_intervention",
     "expire_vehicle_access_if_needed",
     "get_assigned_intervention",
+    "interrupt_assigned_intervention",
     "lock_and_revoke_after_return",
     "lock_vehicle",
     "list_assigned_interventions",
     "revoke_vehicle_access",
+    "save_assigned_intervention_work",
     "start_assigned_intervention",
     "unlock_vehicle",
 ]
