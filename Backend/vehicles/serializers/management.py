@@ -2,7 +2,7 @@ from datetime import date
 
 from rest_framework import serializers
 
-from vehicles.models import Brand, ParkingSpace, Vehicle, VehicleCategory
+from vehicles.models import Brand, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment
 
 
 def _normalize_registration(value: str) -> str:
@@ -13,6 +13,12 @@ class VehicleManagementWriteSerializer(serializers.ModelSerializer):
 	brand = serializers.PrimaryKeyRelatedField(queryset=Brand.objects.all())
 	category = serializers.PrimaryKeyRelatedField(queryset=VehicleCategory.objects.all())
 	parking_space = serializers.PrimaryKeyRelatedField(queryset=ParkingSpace.objects.select_related("parking"))
+	category_daily_rate = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, write_only=True)
+	equipment = serializers.PrimaryKeyRelatedField(
+		many=True,
+		required=False,
+		queryset=VehicleEquipment.objects.filter(is_active=True),
+	)
 	fuel_type = serializers.CharField(source="energy_type")
 	status = serializers.ChoiceField(choices=Vehicle.Status.choices)
 
@@ -23,6 +29,7 @@ class VehicleManagementWriteSerializer(serializers.ModelSerializer):
 			"brand",
 			"category",
 			"parking_space",
+			"category_daily_rate",
 			"registration_number",
 			"model_name",
 			"year",
@@ -44,6 +51,7 @@ class VehicleManagementWriteSerializer(serializers.ModelSerializer):
 			"description",
 			"status",
 			"is_active",
+			"equipment",
 		]
 		read_only_fields = ["id"]
 
@@ -55,6 +63,11 @@ class VehicleManagementWriteSerializer(serializers.ModelSerializer):
 	def validate_category(self, value):
 		if not value.is_active:
 			raise serializers.ValidationError("La categorie selectionnee est inactive.")
+		return value
+
+	def validate_category_daily_rate(self, value):
+		if value <= 0:
+			raise serializers.ValidationError("Le tarif journalier doit etre superieur a 0.")
 		return value
 
 	def validate_parking_space(self, value):
@@ -106,6 +119,32 @@ class VehicleManagementWriteSerializer(serializers.ModelSerializer):
 		if self.instance is None and "parking_space" not in attrs:
 			raise serializers.ValidationError({"parking_space": "Ce champ est obligatoire."})
 		return attrs
+
+	def _save_category_daily_rate(self, vehicle, daily_rate):
+		if daily_rate is None:
+			return
+
+		category = vehicle.category
+		if category.daily_rate != daily_rate:
+			category.daily_rate = daily_rate
+			category.save(update_fields=["daily_rate", "updated_at"])
+
+	def create(self, validated_data):
+		daily_rate = validated_data.pop("category_daily_rate", None)
+		vehicle = super().create(validated_data)
+		self._save_category_daily_rate(vehicle, daily_rate)
+		return vehicle
+
+	def update(self, instance, validated_data):
+		daily_rate = validated_data.pop("category_daily_rate", None)
+		vehicle = super().update(instance, validated_data)
+		self._save_category_daily_rate(vehicle, daily_rate)
+		return vehicle
+
+	def to_representation(self, instance):
+		data = super().to_representation(instance)
+		data["category_daily_rate"] = str(instance.category.daily_rate)
+		return data
 
 
 class VehicleStatusUpdateSerializer(serializers.Serializer):

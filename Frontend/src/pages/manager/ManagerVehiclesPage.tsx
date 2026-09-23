@@ -156,9 +156,6 @@ function VehicleMobileCard({ vehicle, onChangeStatus, basePath }: VehicleCardPro
           <Link to={`${basePath}/vehicles/${vehicle.id}/edit`}>
             <Button variant="secondary" size="sm">Modifier</Button>
           </Link>
-          <Link to={`${basePath}/vehicles/${vehicle.id}/photos`}>
-            <Button variant="secondary" size="sm">Gérer les photos</Button>
-          </Link>
           <Button variant="secondary" size="sm" onClick={() => onChangeStatus(vehicle)}>Changer le statut</Button>
         </div>
       </div>
@@ -205,9 +202,6 @@ function VehicleDesktopRow({ vehicle, onChangeStatus, basePath }: VehicleCardPro
         <div className="flex flex-wrap gap-2">
           <Link to={`${basePath}/vehicles/${vehicle.id}/edit`}>
             <Button variant="secondary" size="sm">Modifier</Button>
-          </Link>
-          <Link to={`${basePath}/vehicles/${vehicle.id}/photos`}>
-            <Button variant="secondary" size="sm">Gérer les photos</Button>
           </Link>
           <Button variant="secondary" size="sm" onClick={() => onChangeStatus(vehicle)}>Changer le statut</Button>
         </div>

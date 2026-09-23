@@ -5,7 +5,7 @@ from rest_framework import serializers
 from accounts.models import ClientDocument
 from inspections.services.departure import MANDATORY_PHOTO_TYPES
 from reservations.services.cancellation import get_cancellable_statuses
-from vehicles.models import Parking, Vehicle, VehicleCategory, VehicleEquipment
+from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment
 from vehicles.services import AvailabilityValidationError, validate_availability_period
 
 
@@ -226,7 +226,7 @@ class VehiclePublicDetailSerializer(VehiclePublicSerializer):
 class VehicleCategoryPublicSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = VehicleCategory
-		fields = ["id", "name", "description", "daily_rate"]
+		fields = ["id", "name", "description", "daily_rate", "minimum_deposit"]
 
 
 class ParkingPublicSerializer(serializers.ModelSerializer):
@@ -235,3 +235,30 @@ class ParkingPublicSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = Parking
 		fields = ["id", "name", "address", "latitude", "longitude", "public_capacity"]
+
+
+class BrandPublicSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = Brand
+		fields = ["id", "name"]
+
+
+class ParkingSpacePublicSerializer(serializers.ModelSerializer):
+	parking_id = serializers.IntegerField(source="parking.id", read_only=True)
+	parking_name = serializers.CharField(source="parking.name", read_only=True)
+	occupied_by_vehicle_id = serializers.SerializerMethodField()
+
+	class Meta:
+		model = ParkingSpace
+		fields = ["id", "number", "parking_id", "parking_name", "occupied_by_vehicle_id"]
+
+	@extend_schema_field(serializers.IntegerField(allow_null=True))
+	def get_occupied_by_vehicle_id(self, obj: ParkingSpace):
+		vehicle = getattr(obj, "vehicle", None)
+		return vehicle.id if vehicle is not None else None
+
+
+class VehicleEquipmentCatalogPublicSerializer(serializers.ModelSerializer):
+	class Meta:
+		model = VehicleEquipment
+		fields = ["id", "code", "label"]

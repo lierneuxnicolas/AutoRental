@@ -1,7 +1,9 @@
 from django.urls import path
 
 from vehicles.views import (
+	BrandPublicListView,
 	ParkingPublicListView,
+	ParkingSpacePublicListView,
 	VehicleManagementCreateView,
 	VehicleManagementStatusUpdateView,
 	VehicleManagementUpdateView,
@@ -9,6 +11,7 @@ from vehicles.views import (
 	VehiclePhotoDeleteView,
 	VehicleAvailablePublicListView,
 	VehicleCategoryPublicListView,
+	VehicleEquipmentCatalogPublicListView,
 	VehiclePublicDetailView,
 	VehiclePublicListView,
 )
@@ -42,4 +45,11 @@ urlpatterns = [
 		name="public-vehicle-categories-list",
 	),
 	path("parkings/", ParkingPublicListView.as_view(), name="public-parkings-list"),
+	path("parking-spaces/", ParkingSpacePublicListView.as_view(), name="public-parking-spaces-list"),
+	path("brands/", BrandPublicListView.as_view(), name="public-brands-list"),
+	path(
+		"vehicle-equipment/",
+		VehicleEquipmentCatalogPublicListView.as_view(),
+		name="public-vehicle-equipment-list",
+	),
 ]

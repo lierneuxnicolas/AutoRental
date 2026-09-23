@@ -1,13 +1,37 @@
 import api from './api'
 import type {
+  BrandOption,
   ManagementVehicleDetailResponse,
   ManagementVehicleResponse,
+  ParkingSpaceOption,
+  VehicleCategoryOption,
+  VehicleEquipmentOption,
   VehicleManagementCreateRequest,
   VehicleManagementStatusUpdateRequest,
   VehicleManagementUpdateRequest,
   VehiclePhotoCreateRequest,
   VehiclePhotoRead,
 } from '../types/managementVehicle'
+
+export async function getBrands(): Promise<BrandOption[]> {
+  const { data } = await api.get<BrandOption[]>('/brands/')
+  return data
+}
+
+export async function getVehicleCategoryOptions(): Promise<VehicleCategoryOption[]> {
+  const { data } = await api.get<VehicleCategoryOption[]>('/vehicle-categories/')
+  return data
+}
+
+export async function getParkingSpaceOptions(): Promise<ParkingSpaceOption[]> {
+  const { data } = await api.get<ParkingSpaceOption[]>('/parking-spaces/')
+  return data
+}
+
+export async function getVehicleEquipmentCatalog(): Promise<VehicleEquipmentOption[]> {
+  const { data } = await api.get<VehicleEquipmentOption[]>('/vehicle-equipment/')
+  return data
+}
 
 export async function createVehicle(
   payload: VehicleManagementCreateRequest,
