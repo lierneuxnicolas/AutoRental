@@ -5,6 +5,7 @@ from typing import Any
 
 import stripe
 from django.conf import settings
+from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import DecimalField, Sum, Value
 from django.db.models.functions import Coalesce
@@ -110,6 +111,27 @@ class CancellationPreview:
 
 FREE_CANCELLATION_WINDOW = timedelta(hours=24)
 LATE_CANCELLATION_FEE = Decimal("50.00")
+
+
+def _send_vehicle_unavailable_cancellation_email(*, reservation: Reservation) -> None:
+    client_user = reservation.client.user
+    greeting = f"Bonjour {client_user.first_name}," if client_user.first_name else "Bonjour,"
+    vehicle_label = f"{reservation.vehicle.brand.name} {reservation.vehicle.model_name}".strip()
+    send_mail(
+        subject="Votre réservation GetACar est annulée",
+        message=(
+            f"{greeting}\n\n"
+            "Votre réservation a été annulée car le véhicule prévu est indisponible en raison d'une intervention mécanique prolongée.\n\n"
+            f"Référence : {reservation.reference}\n"
+            f"Véhicule : {vehicle_label}\n"
+            f"Période : {reservation.start_at:%d/%m/%Y %H:%M} → {reservation.end_at:%d/%m/%Y %H:%M}\n\n"
+            "Le remboursement des sommes éligibles a été initié et votre caution est libérée si elle avait été autorisée.\n\n"
+            "Nous vous prions de nous excuser pour la gêne occasionnée.\n\nGetACar"
+        ),
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        recipient_list=[client_user.email],
+        fail_silently=False,
+    )
 
 
 def _get_paid_amount(*, reservation: Reservation) -> Decimal:
@@ -404,6 +426,7 @@ def cancel_reservation(
     requested_by,
     reason: str,
     allow_reassignment_required: bool = False,
+    vehicle_unavailable: bool = False,
 ) -> Reservation:
     """
     Annule une réservation.
@@ -455,7 +478,7 @@ def cancel_reservation(
             "Le client n'a pas d'utilisateur associé.",
         )
 
-    if owner != requested_by and not allow_reassignment_required:
+    if owner != requested_by and not (allow_reassignment_required or vehicle_unavailable):
         _raise_cancellation_error(
             "FORBIDDEN",
             "Vous ne pouvez annuler que vos propres réservations.",
@@ -493,6 +516,10 @@ def cancel_reservation(
             allow_reassignment_required
             and reservation_locked.status == Reservation.Status.REAFFECTATION_REQUIRED
         )
+        is_vehicle_unavailability_cancellation = vehicle_unavailable and is_status_cancellable(
+            reservation_locked.status,
+            reservation=reservation_locked,
+        )
         if not is_management_reassignment_cancellation and not is_status_cancellable(
             reservation_locked.status,
             reservation=reservation_locked,
@@ -504,7 +531,7 @@ def cancel_reservation(
             )
 
         financials = calculate_cancellation_financials(reservation=reservation_locked)
-        if is_management_reassignment_cancellation:
+        if is_management_reassignment_cancellation or is_vehicle_unavailability_cancellation:
             financials = CancellationFinancialBreakdown(
                 amount_paid=financials.amount_paid,
                 cancellation_fee=Decimal("0.00"),
@@ -550,15 +577,29 @@ def cancel_reservation(
                     )
                     if is_management_reassignment_cancellation
                     else (
-                        "Votre reservation a ete annulee. "
-                        f"Remboursement : {_format_eur_amount(financials.refundable_amount)}. "
-                        f"Frais : {_format_eur_amount(financials.cancellation_fee)}. "
-                        "Caution liberee."
+                        (
+                            f"Votre réservation {reservation_locked.reference} a été annulée car le véhicule prévu est indisponible "
+                            "en raison d'une intervention mécanique prolongée."
+                            + (" Le remboursement a été initié." if financials.refundable_amount > Decimal("0.00") else "")
+                        )
+                        if is_vehicle_unavailability_cancellation
+                        else (
+                            "Votre reservation a ete annulee. "
+                            f"Remboursement : {_format_eur_amount(financials.refundable_amount)}. "
+                            f"Frais : {_format_eur_amount(financials.cancellation_fee)}. "
+                            "Caution liberee."
+                        )
                     )
                 ),
                 related_object_type="reservation",
                 related_object_id=reservation_locked.id,
             )
         )
+        if is_vehicle_unavailability_cancellation:
+            transaction.on_commit(
+                lambda reservation_id=reservation_locked.id: _send_vehicle_unavailable_cancellation_email(
+                    reservation=Reservation.objects.select_related("client__user", "vehicle__brand").get(pk=reservation_id),
+                )
+            )
 
     return reservation_locked

@@ -5,7 +5,7 @@ import json
 from rest_framework import serializers
 
 from accounts.models import User
-from interventions.models import Intervention, TechnicalInspection, TechnicalPhoto
+from interventions.models import Intervention, InterventionWorkPeriod, TechnicalInspection, TechnicalPhoto
 from reservations.models import Reservation
 from vehicles.models import Vehicle
 
@@ -83,6 +83,7 @@ class InterventionVehicleSummarySerializer(serializers.Serializer):
     registration_number = serializers.CharField(read_only=True)
     brand = serializers.CharField(source="brand.name", read_only=True)
     model_name = serializers.CharField(read_only=True)
+    color = serializers.CharField(read_only=True)
     parking_name = serializers.CharField(source="parking_space.parking.name", read_only=True)
     parking_space_number = serializers.CharField(source="parking_space.number", read_only=True)
 
@@ -106,6 +107,12 @@ class TechnicalInspectionSummarySerializer(serializers.ModelSerializer):
         fields = ["id", "phase", "mileage", "energy_level_percent", "observations", "created_at", "photos"]
 
 
+class InterventionWorkPeriodSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InterventionWorkPeriod
+        fields = ["id", "started_at", "ended_at"]
+
+
 class InterventionManagementResponseSerializer(serializers.ModelSerializer):
     type = serializers.CharField(source="intervention_type", read_only=True)
     vehicle = InterventionVehicleSummarySerializer(read_only=True)
@@ -116,6 +123,7 @@ class InterventionManagementResponseSerializer(serializers.ModelSerializer):
     check_out = serializers.SerializerMethodField()
     work_data = serializers.SerializerMethodField()
     final_report = serializers.SerializerMethodField()
+    work_periods = InterventionWorkPeriodSerializer(many=True, read_only=True)
 
     class Meta:
         model = Intervention
@@ -137,11 +145,14 @@ class InterventionManagementResponseSerializer(serializers.ModelSerializer):
             "estimated_cost",
             "planned_start_at",
             "planned_end_at",
+            "started_at",
+            "completed_at",
             "decision",
             "decided_at",
             "decided_by",
             "decision_comment",
             "work_data",
+            "work_periods",
             "final_report",
             "created_at",
             "updated_at",
@@ -217,7 +228,7 @@ class InterventionWorkerCheckOutSerializer(serializers.Serializer):
     conclusions = serializers.CharField(required=True, allow_blank=False)
     vehicle_operational = serializers.BooleanField(required=False, allow_null=True)
     vehicle_clean = serializers.BooleanField(required=False, allow_null=True)
-    new_intervention_needed = serializers.BooleanField(required=True)
+    new_intervention_needed = serializers.BooleanField(required=False, default=False)
     final_comment = serializers.CharField(required=False, allow_blank=True, default="")
 
 

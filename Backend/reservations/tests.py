@@ -3705,6 +3705,91 @@ class ReservationManagementReassignmentTests(ReservationTestDataMixin, TestCase)
 		self.assertIsNone(self.reservation.cancelled_at)
 		self.assertEqual(Refund.objects.filter(reservation=self.reservation).count(), 0)
 
+	@patch("reservations.services.cancellation.send_mail")
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_manager_can_cancel_for_prolonged_intervention_without_reassignment(self, mocked_refund_create, mocked_send_mail):
+		reservation = self._create_reservation(
+			vehicle=self.vehicle_available,
+			status=Reservation.Status.CONFIRMEE,
+			start_at=self.start_at,
+			end_at=self.end_at,
+		)
+		Payment.objects.create(
+			reservation=reservation,
+			provider=Payment.Provider.STRIPE,
+			amount=Decimal("120.00"),
+			currency="EUR",
+			status=Payment.Status.REUSSI,
+			stripe_payment_intent_id="pi_intervention_overrun",
+		)
+		deposit = Deposit.objects.create(reservation=reservation, mode=Deposit.Mode.SIMULATED, amount=Decimal("350.00"), currency="EUR", status=Deposit.Status.AUTORISEE, authorized_at=timezone.now())
+		mocked_refund_create.return_value = SimpleNamespace(id="re_intervention_overrun", status="succeeded")
+		Notification.objects.create(
+			user=self.manager_user,
+			notification_type=Notification.NotificationType.INTERVENTION_OVERRUN,
+			title="Intervention prolongée : réservation impactée",
+			message="Intervention prolongée",
+			related_object_type="reservation",
+			related_object_id=reservation.id,
+		)
+		url = reverse("reservations:management-reservation-cancel-vehicle-unavailable", kwargs={"pk": reservation.id})
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_overrun_123"):
+			with self.captureOnCommitCallbacks(execute=True):
+				response = self.client_api.post(url, {}, format="json")
+
+		reservation.refresh_from_db()
+		deposit.refresh_from_db()
+		self.vehicle_available.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
+		self.assertIn("intervention mécanique prolongée", reservation.cancellation_reason)
+		self.assertEqual(Refund.objects.get(reservation=reservation).status, Refund.Status.REUSSI)
+		self.assertEqual(deposit.status, Deposit.Status.LIBEREE)
+		self.assertEqual(self.vehicle_available.status, Vehicle.Status.DISPONIBLE)
+		mocked_send_mail.assert_called_once()
+
+	@patch("reservations.services.cancellation.send_mail")
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_prolonged_intervention_cancellation_rolls_back_when_stripe_fails(self, mocked_refund_create, mocked_send_mail):
+		reservation = self._create_reservation(
+			vehicle=self.vehicle_available,
+			status=Reservation.Status.CONFIRMEE,
+			start_at=self.start_at,
+			end_at=self.end_at,
+		)
+		Payment.objects.create(reservation=reservation, provider=Payment.Provider.STRIPE, amount=Decimal("120.00"), currency="EUR", status=Payment.Status.REUSSI, stripe_payment_intent_id="pi_intervention_overrun_failure")
+		Notification.objects.create(user=self.manager_user, notification_type=Notification.NotificationType.INTERVENTION_OVERRUN, title="Intervention prolongée : réservation impactée", message="Intervention prolongée", related_object_type="reservation", related_object_id=reservation.id)
+		mocked_refund_create.side_effect = stripe.error.APIConnectionError("network down")
+		url = reverse("reservations:management-reservation-cancel-vehicle-unavailable", kwargs={"pk": reservation.id})
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_overrun_123"):
+			response = self.client_api.post(url, {}, format="json")
+
+		reservation.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "STRIPE_UNAVAILABLE")
+		self.assertEqual(reservation.status, Reservation.Status.CONFIRMEE)
+		self.assertIsNone(reservation.cancelled_at)
+		self.assertEqual(Refund.objects.filter(reservation=reservation).count(), 0)
+		mocked_send_mail.assert_not_called()
+
+	def test_vehicle_unavailability_cancellation_requires_an_overrun_alert(self):
+		reservation = self._create_reservation(
+			vehicle=self.vehicle_available,
+			status=Reservation.Status.CONFIRMEE,
+			start_at=self.start_at,
+			end_at=self.end_at,
+		)
+		url = reverse("reservations:management-reservation-cancel-vehicle-unavailable", kwargs={"pk": reservation.id})
+
+		response = self.client_api.post(url, {}, format="json")
+
+		reservation.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "OVERRUN_NOT_DETECTED")
+		self.assertEqual(reservation.status, Reservation.Status.CONFIRMEE)
+
 
 class ReservationConcurrencyAuditTests(TestCase):
 	def test_create_draft_reservation_uses_atomic_lock_and_rechecks_availability(self):

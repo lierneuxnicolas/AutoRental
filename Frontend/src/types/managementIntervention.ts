@@ -3,7 +3,9 @@ export type InterventionType = 'MECANIQUE' | 'NETTOYAGE'
 export type InterventionStatus =
   | 'A_ATTRIBUER'
   | 'ATTRIBUEE'
+  | 'PLANIFIEE'
   | 'EN_COURS'
+  | 'EN_PAUSE'
   | 'TERMINEE'
   | 'ANNULEE'
 
@@ -79,10 +81,13 @@ export interface ManagementInterventionResponse {
   check_in?: unknown
   check_out?: unknown
   work_data?: Record<string, unknown> | null
+  work_periods: Array<{ id: number; started_at: string; ended_at: string | null }>
   final_report?: Record<string, unknown> | null
   estimated_cost?: string | number | null
   planned_start_at?: string | null
   planned_end_at?: string | null
+  started_at?: string | null
+  completed_at?: string | null
   created_at: string
   updated_at: string
 }

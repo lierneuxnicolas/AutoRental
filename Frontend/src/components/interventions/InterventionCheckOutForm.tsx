@@ -49,7 +49,6 @@ export default function InterventionCheckOutForm({ role, initialMileage, embedde
   const [finalObservation, setFinalObservation] = useState('')
   const [finalVehicleState, setFinalVehicleState] = useState('')
   const [conclusions, setConclusions] = useState('')
-  const [vehicleOperational, setVehicleOperational] = useState(true)
   const [vehicleClean, setVehicleClean] = useState(true)
   const [newInterventionNeeded, setNewInterventionNeeded] = useState(false)
   const [finalComment, setFinalComment] = useState('')
@@ -102,6 +101,10 @@ export default function InterventionCheckOutForm({ role, initialMileage, embedde
       setLocalError('L’observation finale est obligatoire.')
       return
     }
+    if (role === 'mechanic' && !finalVehicleState.trim()) {
+      setLocalError('L’état général du véhicule est obligatoire.')
+      return
+    }
     if (role === 'cleaning' && !finalVehicleState.trim()) {
       setLocalError('L’état final du véhicule est obligatoire.')
       return
@@ -122,11 +125,11 @@ export default function InterventionCheckOutForm({ role, initialMileage, embedde
     const mechanicObservation = finalObservation.trim()
     onSubmit({
       final_mileage: parsedMileage,
-      final_vehicle_state: role === 'mechanic' ? mechanicObservation : finalVehicleState.trim(),
+      final_vehicle_state: role === 'mechanic' ? finalVehicleState.trim() : finalVehicleState.trim(),
       conclusions: role === 'mechanic' ? mechanicObservation : conclusions.trim(),
-      vehicle_operational: role === 'mechanic' ? vehicleOperational : undefined,
+      vehicle_operational: undefined,
       vehicle_clean: role === 'cleaning' ? vehicleClean : undefined,
-      new_intervention_needed: newInterventionNeeded,
+      new_intervention_needed: role === 'cleaning' ? newInterventionNeeded : undefined,
       final_comment: role === 'mechanic' ? mechanicObservation : finalComment.trim() || undefined,
       photos: selectedPhotos,
     })
@@ -137,19 +140,10 @@ export default function InterventionCheckOutForm({ role, initialMileage, embedde
         {localError ? <Alert variant="danger" title="Check-out incomplet" message={localError} /> : null}
 
         {role === 'mechanic' ? (
-          <>
+          <div className="grid gap-4 md:grid-cols-2">
             <Input label="Kilométrage final" inputMode="numeric" value={finalMileage} onChange={(event) => setFinalMileage(event.target.value)} disabled={disabled || isSubmitting} />
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="flex min-h-12 items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm text-[#1F2937]">
-                <input type="checkbox" checked={vehicleOperational} onChange={(event) => setVehicleOperational(event.target.checked)} disabled={disabled || isSubmitting} />
-                Véhicule opérationnel
-              </label>
-              <label className="flex min-h-12 items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm text-[#1F2937]">
-                <input type="checkbox" checked={newInterventionNeeded} onChange={(event) => setNewInterventionNeeded(event.target.checked)} disabled={disabled || isSubmitting} />
-                Nouvelle intervention nécessaire
-              </label>
-            </div>
-          </>
+            <Input label="État général du véhicule" value={finalVehicleState} onChange={(event) => setFinalVehicleState(event.target.value)} disabled={disabled || isSubmitting} />
+          </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             <Input label="Kilométrage final" inputMode="numeric" value={finalMileage} onChange={(event) => setFinalMileage(event.target.value)} disabled={disabled || isSubmitting} />
@@ -166,7 +160,7 @@ export default function InterventionCheckOutForm({ role, initialMileage, embedde
         )}
         {role === 'mechanic' ? (
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-[#1F2937]">Observation finale</label>
+            <label className="block text-sm font-medium text-[#1F2937]">Observations finales</label>
             <textarea rows={4} value={finalObservation} onChange={(event) => setFinalObservation(event.target.value)} disabled={disabled || isSubmitting} className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100" />
           </div>
         ) : (

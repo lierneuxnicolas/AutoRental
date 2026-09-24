@@ -5,7 +5,9 @@ export type WorkerInterventionType = 'MECANIQUE' | 'NETTOYAGE'
 export type WorkerInterventionStatus =
   | 'A_ATTRIBUER'
   | 'ATTRIBUEE'
+  | 'PLANIFIEE'
   | 'EN_COURS'
+  | 'EN_PAUSE'
   | 'TERMINEE'
   | 'ANNULEE'
 
@@ -14,6 +16,7 @@ export interface WorkerInterventionVehicleSummary {
   registration_number: string
   brand: string
   model_name: string
+  color: string
   parking_name?: string | null
   parking_space_number?: string | null
 }
@@ -47,10 +50,19 @@ export interface WorkerInterventionResponse {
   estimated_cost?: string | number | null
   planned_start_at?: string | null
   planned_end_at?: string | null
+  started_at?: string | null
+  completed_at?: string | null
   work_data?: WorkerInterventionWorkData | null
+  work_periods: WorkerInterventionWorkPeriod[]
   final_report?: Record<string, unknown> | null
   created_at: string
   updated_at: string
+}
+
+export interface WorkerInterventionWorkPeriod {
+  id: number
+  started_at: string
+  ended_at: string | null
 }
 
 export interface WorkerInterventionWorkData {
@@ -68,7 +80,7 @@ export interface WorkerInterventionCheckOutValues {
   conclusions: string
   vehicle_operational?: boolean
   vehicle_clean?: boolean
-  new_intervention_needed: boolean
+  new_intervention_needed?: boolean
   final_comment?: string
   photos: File[]
 }

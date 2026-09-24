@@ -13,6 +13,7 @@ interface InterventionWorkFormProps {
   role: WorkerInterventionRole
   initialWorkData?: WorkerInterventionWorkData | null
   initialEstimatedCost?: string | number | null
+  workRequest?: string
   photos?: WorkerInterventionCheckInPhoto[]
   embedded?: boolean
   disabled?: boolean
@@ -51,6 +52,7 @@ export default function InterventionWorkForm({
   role,
   initialWorkData,
   initialEstimatedCost,
+  workRequest,
   photos = [],
   embedded = false,
   disabled = false,
@@ -98,7 +100,7 @@ export default function InterventionWorkForm({
         estimated_cost: parsedCost,
       })
     } catch {
-      // Upload and work mutation errors are rendered by their owning components.
+      setLocalError('L’enregistrement du travail ou l’envoi de la photo a échoué. Veuillez réessayer.')
     } finally {
       setIsSaving(false)
     }
@@ -107,6 +109,13 @@ export default function InterventionWorkForm({
   const content = (
       <form onSubmit={handleSubmit} className="space-y-5" noValidate>
         {localError ? <Alert variant="danger" title="Saisie invalide" message={localError} /> : null}
+
+        {role === 'mechanic' && workRequest?.trim() ? (
+          <div>
+            <p className="text-sm font-medium text-[#1F2937]">Travail demandé</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">{workRequest}</p>
+          </div>
+        ) : null}
 
         <div className="space-y-2">
           <label className="block text-sm font-medium text-[#1F2937]">Travail effectué</label>
@@ -118,19 +127,21 @@ export default function InterventionWorkForm({
             className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-[#F5F5F5]"
           />
         </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm text-[#1F2937]">
-            <input type="checkbox" checked={isWorkFinished} onChange={(event) => setIsWorkFinished(event.target.checked)} disabled={disabled || isSubmitting} className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-2 focus:ring-blue-100" />
-            Intervention terminée
-          </label>
-          <label className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm text-[#1F2937]">
-            <input type="checkbox" checked={Boolean(anomalyType)} onChange={(event) => setAnomalyType(event.target.checked ? 'autre' : '')} disabled={disabled || isSubmitting} className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-2 focus:ring-blue-100" />
-            Anomalie constatée
-          </label>
-        </div>
+        {role !== 'mechanic' ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm text-[#1F2937]">
+              <input type="checkbox" checked={isWorkFinished} onChange={(event) => setIsWorkFinished(event.target.checked)} disabled={disabled || isSubmitting} className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-2 focus:ring-blue-100" />
+              Intervention terminée
+            </label>
+            <label className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm text-[#1F2937]">
+              <input type="checkbox" checked={Boolean(anomalyType)} onChange={(event) => setAnomalyType(event.target.checked ? 'autre' : '')} disabled={disabled || isSubmitting} className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-2 focus:ring-blue-100" />
+              Anomalie constatée
+            </label>
+          </div>
+        ) : null}
         {role === 'mechanic' ? <Input label="Coût éventuel" value={estimatedCost} inputMode="decimal" onChange={(event) => setEstimatedCost(event.target.value)} disabled={disabled || isSubmitting} /> : null}
 
-        {anomalyType ? (
+        {role !== 'mechanic' && anomalyType ? (
           <div className="grid gap-4 md:grid-cols-[220px_1fr] md:items-end">
             <div className="space-y-2">
               <label className="block text-sm font-medium text-[#1F2937]">Type d’anomalie</label>

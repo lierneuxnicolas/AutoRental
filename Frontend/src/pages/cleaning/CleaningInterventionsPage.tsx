@@ -15,8 +15,12 @@ function mapStatusToBadge(status: WorkerInterventionStatus): { label: string; va
       return { label: 'A attribuer', variant: 'warning' }
     case 'ATTRIBUEE':
       return { label: 'Attribuée', variant: 'info' }
+    case 'PLANIFIEE':
+      return { label: 'Planifiée', variant: 'info' }
     case 'EN_COURS':
       return { label: 'En cours', variant: 'info' }
+    case 'EN_PAUSE':
+      return { label: 'En pause', variant: 'warning' }
     case 'TERMINEE':
       return { label: 'Terminée', variant: 'success' }
     case 'ANNULEE':

@@ -16,6 +16,7 @@ from .management import (
     ReservationReassignView,
     ReservationReplacementVehicleListView,
     ReservationUnavailableCancellationView,
+    ReservationVehicleUnavailableCancellationView,
 )
 from .pricing import PriceSimulationView
 
@@ -34,6 +35,7 @@ __all__ = [
     "ReservationReassignView",
     "ReservationReplacementVehicleListView",
     "ReservationUnavailableCancellationView",
+    "ReservationVehicleUnavailableCancellationView",
      "ReservationLockView",
      "ReservationUnlockView",
 ]

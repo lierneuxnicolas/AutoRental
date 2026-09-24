@@ -20,7 +20,9 @@ class Intervention(models.Model):
 	class Status(models.TextChoices):
 		A_ATTRIBUER = "A_ATTRIBUER", "A attribuer"
 		ATTRIBUEE = "ATTRIBUEE", "Attribuee"
+		PLANIFIEE = "PLANIFIEE", "Planifiee"
 		EN_COURS = "EN_COURS", "En cours"
+		EN_PAUSE = "EN_PAUSE", "En pause"
 		TERMINEE = "TERMINEE", "Terminee"
 		ANNULEE = "ANNULEE", "Annulee"
 
@@ -101,8 +103,8 @@ class Intervention(models.Model):
 			),
 			models.CheckConstraint(
 				condition=(
-					Q(status__in=["A_ATTRIBUER", "ATTRIBUEE", "ANNULEE"], started_at__isnull=True)
-					| Q(status__in=["EN_COURS", "TERMINEE"], started_at__isnull=False)
+					Q(status__in=["A_ATTRIBUER", "ATTRIBUEE", "PLANIFIEE", "ANNULEE"], started_at__isnull=True)
+					| Q(status__in=["EN_COURS", "EN_PAUSE", "TERMINEE"], started_at__isnull=False)
 				),
 				name="interv_started_at_only_in_progress",
 			),
@@ -139,6 +141,37 @@ class Intervention(models.Model):
 
 	def __str__(self) -> str:
 		return f"Intervention<{self.reference}:{self.status}>"
+
+
+class InterventionWorkPeriod(models.Model):
+	intervention = models.ForeignKey(
+		Intervention,
+		on_delete=models.CASCADE,
+		related_name="work_periods",
+	)
+	started_at = models.DateTimeField()
+	ended_at = models.DateTimeField(null=True, blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		ordering = ["started_at", "id"]
+		indexes = [
+			models.Index(fields=["intervention", "started_at"], name="interv_work_period_start_idx"),
+		]
+		constraints = [
+			models.CheckConstraint(
+				condition=Q(ended_at__isnull=True) | Q(ended_at__gte=models.F("started_at")),
+				name="interv_work_period_end_after_start",
+			),
+			models.UniqueConstraint(
+				fields=["intervention"],
+				condition=Q(ended_at__isnull=True),
+				name="interv_one_open_work_period",
+			),
+		]
+
+	def __str__(self) -> str:
+		return f"InterventionWorkPeriod<{self.intervention_id}:{self.started_at.isoformat()}>"
 
 
 class TechnicalInspection(models.Model):

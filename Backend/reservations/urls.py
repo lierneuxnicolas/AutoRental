@@ -17,6 +17,7 @@ from reservations.views import (
     ReservationReassignView,
     ReservationReplacementVehicleListView,
     ReservationUnavailableCancellationView,
+    ReservationVehicleUnavailableCancellationView,
     ReservationUnlockView,
 )
 
@@ -59,6 +60,11 @@ urlpatterns = [
         "management/reservations/<int:pk>/cancel-unavailable/",
         ReservationUnavailableCancellationView.as_view(),
         name="management-reservation-cancel-unavailable",
+    ),
+    path(
+        "management/reservations/<int:pk>/cancel-vehicle-unavailable/",
+        ReservationVehicleUnavailableCancellationView.as_view(),
+        name="management-reservation-cancel-vehicle-unavailable",
     ),
     path(
         "management/reservations/<int:pk>/complete/",

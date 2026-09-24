@@ -64,7 +64,7 @@ def plan_intervention(
             Intervention.objects.select_for_update()
             .filter(
                 vehicle=vehicle,
-                status__in=(Intervention.Status.A_ATTRIBUER, Intervention.Status.ATTRIBUEE, Intervention.Status.EN_COURS),
+                status__in=(Intervention.Status.A_ATTRIBUER, Intervention.Status.ATTRIBUEE, Intervention.Status.PLANIFIEE, Intervention.Status.EN_COURS, Intervention.Status.EN_PAUSE),
                 planned_start_at__lt=planned_end_at,
                 planned_end_at__gt=planned_start_at,
             )
@@ -94,6 +94,8 @@ def plan_intervention(
                 assigned_user_id=assigned_user_id,
                 manager=manager,
             )
+            intervention.status = Intervention.Status.PLANIFIEE
+            intervention.save(update_fields=["status", "updated_at"])
         except (InterventionCreationError, InterventionAssignmentError, ValidationError) as error:
             if isinstance(error, ValidationError):
                 message = "; ".join(
