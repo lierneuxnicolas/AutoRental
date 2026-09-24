@@ -29,6 +29,9 @@ function text(value: unknown): string | null {
 }
 
 function resultFor(intervention: ManagementInterventionResponse): 'OK' | 'A_CONTROLER' {
+  if (intervention.intervention_type === 'MECANIQUE') {
+    return 'OK'
+  }
   const finalReport = asRecord(intervention.final_report)
   const checkOut = asRecord(finalReport.check_out)
   const work = intervention.work_data ?? asRecord(finalReport.work)
@@ -78,6 +81,11 @@ function Field({ label, value }: { label: string; value: unknown }) {
   return <div><p className="text-xs text-slate-500">{label}</p><p className="mt-1 whitespace-pre-line text-sm font-medium text-[#1F2937]">{valueText}</p></div>
 }
 
+function WorkPeriodHistory({ periods }: { periods: ManagementInterventionResponse['work_periods'] }) {
+  if (periods.length === 0) return null
+  return <ReportSection title="Périodes de travail">{periods.map((period) => <Field key={period.id} label={formatDate(period.started_at) ?? 'Début non renseigné'} value={period.ended_at ? `Fin : ${formatDate(period.ended_at)}` : 'En cours'} />)}</ReportSection>
+}
+
 function ReportDetail({ intervention }: { intervention: ManagementInterventionResponse }) {
   const finalReport = asRecord(intervention.final_report)
   const checkIn = asRecord(finalReport.check_in)
@@ -121,6 +129,7 @@ function ReportDetail({ intervention }: { intervention: ManagementInterventionRe
         <Field label="Nouvelle intervention nécessaire" value={checkOut.new_intervention_needed === true ? 'Oui' : checkOut.new_intervention_needed === false ? 'Non' : null} />
         <ReportPhotos title="Photos finales" photos={checkOutPhotos} />
       </ReportSection>
+      <WorkPeriodHistory periods={intervention.work_periods} />
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4"><StatusBadge label={badge.label} variant={badge.variant} />{result === 'OK' ? <p className="text-sm text-slate-600">Véhicule remis automatiquement au parc.</p> : <p className="text-sm font-medium text-amber-700">Décision requise.</p>}</div>
     </div>
   )

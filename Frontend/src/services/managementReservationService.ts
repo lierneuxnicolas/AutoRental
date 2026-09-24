@@ -58,6 +58,15 @@ export async function cancelUnavailableManagementReservation(
   return data
 }
 
+export async function cancelVehicleUnavailableManagementReservation(
+  id: number | string,
+): Promise<ReservationUnavailableCancellationResponse> {
+  const { data } = await api.post<ReservationUnavailableCancellationResponse>(
+    `/management/reservations/${id}/cancel-vehicle-unavailable/`,
+  )
+  return data
+}
+
 export async function validateManagementReservationReturn(
   id: number | string,
   payload: ManagementReservationValidationRequest = {},

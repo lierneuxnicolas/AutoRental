@@ -22,6 +22,8 @@ from interventions.views import (
     MechanicInterventionDetailView,
     MechanicInterventionListView,
     MechanicInterventionPhotoCreateView,
+    MechanicInterventionPauseView,
+    MechanicInterventionResumeView,
     MechanicInterventionStartView,
     MechanicInterventionWorkView,
 )
@@ -70,6 +72,8 @@ urlpatterns = [
         MechanicInterventionCheckInView.as_view(),
         name="mechanic-interventions-check-in",
     ),
+    path("mechanic/interventions/<int:id>/pause/", MechanicInterventionPauseView.as_view(), name="mechanic-interventions-pause"),
+    path("mechanic/interventions/<int:id>/resume/", MechanicInterventionResumeView.as_view(), name="mechanic-interventions-resume"),
     path("mechanic/interventions/<int:id>/interrupt/", MechanicInterventionInterruptView.as_view(), name="mechanic-interventions-interrupt"),
     path(
         "mechanic/interventions/<int:id>/photos/",

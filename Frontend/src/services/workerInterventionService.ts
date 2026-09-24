@@ -97,6 +97,22 @@ export async function checkInIntervention(
   return data
 }
 
+export async function pauseIntervention(
+  role: WorkerInterventionRole,
+  id: number,
+): Promise<WorkerInterventionResponse> {
+  const { data } = await api.post<WorkerInterventionResponse>(`${getBasePath(role)}/${id}/pause/`, {})
+  return data
+}
+
+export async function resumeIntervention(
+  role: WorkerInterventionRole,
+  id: number,
+): Promise<WorkerInterventionResponse> {
+  const { data } = await api.post<WorkerInterventionResponse>(`${getBasePath(role)}/${id}/resume/`, {})
+  return data
+}
+
 export async function interruptIntervention(
   role: WorkerInterventionRole,
   id: number,
@@ -149,7 +165,7 @@ export async function checkOutIntervention(
   formData.append('final_mileage', String(payload.final_mileage))
   formData.append('final_vehicle_state', payload.final_vehicle_state)
   formData.append('conclusions', payload.conclusions)
-  formData.append('new_intervention_needed', String(payload.new_intervention_needed))
+  if (payload.new_intervention_needed !== undefined) formData.append('new_intervention_needed', String(payload.new_intervention_needed))
   if (payload.vehicle_operational !== undefined) formData.append('vehicle_operational', String(payload.vehicle_operational))
   if (payload.vehicle_clean !== undefined) formData.append('vehicle_clean', String(payload.vehicle_clean))
   if (payload.final_comment) formData.append('final_comment', payload.final_comment)

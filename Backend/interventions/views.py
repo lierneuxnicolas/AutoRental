@@ -40,9 +40,12 @@ from interventions.services import (
 	interrupt_assigned_intervention,
 	list_assigned_interventions,
 	plan_intervention,
+	pause_assigned_intervention,
+	notify_overrun_reservation_conflicts,
 	InterventionDecisionError,
 	decide_intervention,
 	save_assigned_intervention_work,
+	resume_assigned_intervention,
 	start_assigned_intervention,
 )
 
@@ -142,7 +145,9 @@ class InterventionManagementCreateListView(generics.GenericAPIView):
 		},
 	)
 	def get(self, request, *args, **kwargs):
-		queryset = self.get_queryset()
+		queryset = list(self.get_queryset())
+		for intervention in queryset:
+			notify_overrun_reservation_conflicts(intervention=intervention)
 		response_serializer = InterventionManagementResponseSerializer(queryset, many=True, context={"request": request})
 		return Response(response_serializer.data, status=status.HTTP_200_OK)
 
@@ -421,6 +426,42 @@ class _InterventionWorkerCheckInView(_InterventionWorkerBaseView):
 		return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 
+class _InterventionWorkerPauseView(_InterventionWorkerBaseView):
+	serializer_class = InterventionManagementResponseSerializer
+
+	@extend_schema(
+		tags=["Interventions"],
+		responses={200: InterventionManagementResponseSerializer, 401: ErrorDetailResponseSerializer, 403: ErrorDetailResponseSerializer, 404: ErrorDetailResponseSerializer, 409: ErrorDetailResponseSerializer},
+	)
+	def post(self, request, *args, **kwargs):
+		try:
+			intervention = self._resolve_intervention()
+			updated = pause_assigned_intervention(intervention=intervention)
+		except InterventionWorkflowError as exc:
+			return Response({"code": exc.code, "detail": exc.message}, status=self._map_workflow_error_status(exc))
+
+		response_serializer = InterventionManagementResponseSerializer(updated, context={"request": request})
+		return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class _InterventionWorkerResumeView(_InterventionWorkerBaseView):
+	serializer_class = InterventionManagementResponseSerializer
+
+	@extend_schema(
+		tags=["Interventions"],
+		responses={200: InterventionManagementResponseSerializer, 401: ErrorDetailResponseSerializer, 403: ErrorDetailResponseSerializer, 404: ErrorDetailResponseSerializer, 409: ErrorDetailResponseSerializer},
+	)
+	def post(self, request, *args, **kwargs):
+		try:
+			intervention = self._resolve_intervention()
+			updated = resume_assigned_intervention(intervention=intervention)
+		except InterventionWorkflowError as exc:
+			return Response({"code": exc.code, "detail": exc.message}, status=self._map_workflow_error_status(exc))
+
+		response_serializer = InterventionManagementResponseSerializer(updated, context={"request": request})
+		return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
 class _InterventionWorkerInterruptView(_InterventionWorkerBaseView):
 	serializer_class = InterventionWorkerInterruptSerializer
 	parser_classes = [MultiPartParser, FormParser]
@@ -609,6 +650,16 @@ class MechanicInterventionStartView(_InterventionWorkerStartView):
 
 
 class MechanicInterventionCheckInView(_InterventionWorkerCheckInView):
+	permission_classes = [IsAuthenticated, IsMechanic]
+	intervention_type = Intervention.Type.MECANIQUE
+
+
+class MechanicInterventionPauseView(_InterventionWorkerPauseView):
+	permission_classes = [IsAuthenticated, IsMechanic]
+	intervention_type = Intervention.Type.MECANIQUE
+
+
+class MechanicInterventionResumeView(_InterventionWorkerResumeView):
 	permission_classes = [IsAuthenticated, IsMechanic]
 	intervention_type = Intervention.Type.MECANIQUE
 

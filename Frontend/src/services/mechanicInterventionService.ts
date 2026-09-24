@@ -17,6 +17,8 @@ import {
   getInterventionById,
   getInterventions,
   interruptIntervention,
+  pauseIntervention,
+  resumeIntervention,
   saveInterventionWork,
   startIntervention,
   uploadInterventionPhoto,
@@ -45,6 +47,14 @@ export async function checkInMechanicIntervention(
   payload: MechanicInterventionCheckInValues,
 ): Promise<MechanicInterventionResponse> {
   return checkInIntervention('mechanic', id, payload)
+}
+
+export async function pauseMechanicIntervention(id: number): Promise<MechanicInterventionResponse> {
+  return pauseIntervention('mechanic', id)
+}
+
+export async function resumeMechanicIntervention(id: number): Promise<MechanicInterventionResponse> {
+  return resumeIntervention('mechanic', id)
 }
 
 export async function interruptMechanicIntervention(

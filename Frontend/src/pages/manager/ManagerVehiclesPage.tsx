@@ -85,10 +85,13 @@ function getPendingValidation(vehicle: ManagementVehicleListItem, interventions:
   }
 
   const interventionType = latest.intervention_type
+  if (interventionType === 'MECANIQUE') {
+    return null
+  }
   return {
     intervention: latest,
     interventionType,
-    label: interventionType === 'MECANIQUE' ? 'Maintenance terminée — à valider' : 'Nettoyage terminé — à valider',
+    label: 'Nettoyage terminé — à valider',
   }
 }
 
@@ -139,19 +142,19 @@ function getOperationalState(
   }
 
   const activeIntervention = interventions.find((intervention) => (
-    intervention.vehicle.id === vehicle.id && intervention.status === 'EN_COURS'
+    intervention.vehicle.id === vehicle.id && ['EN_COURS', 'EN_PAUSE'].includes(intervention.status)
   ))
   if (activeIntervention) {
     const checkIn = asRecord(activeIntervention.check_in)
     const startedAt = formatOperationalDateTime(checkIn.created_at, true)
     const plannedEndAt = formatOperationalDateTime(activeIntervention.planned_end_at, true)
+    const isPaused = activeIntervention.status === 'EN_PAUSE'
     return {
-      label: 'En intervention',
+      label: isPaused ? 'En pause' : 'En intervention',
       variant: 'warning',
-      detail: [
-        activeIntervention.intervention_type === 'MECANIQUE' ? 'Maintenance' : 'Nettoyage',
-        plannedEndAt ? `jusqu’au ${plannedEndAt}` : startedAt ? `depuis le ${startedAt}` : null,
-      ].filter(Boolean).join(' · ') || null,
+      detail: isPaused
+        ? (activeIntervention.intervention_type === 'MECANIQUE' ? 'Maintenance' : 'Nettoyage')
+        : plannedEndAt ? `jusqu’au ${plannedEndAt}` : startedAt ? `depuis le ${startedAt}` : null,
       reservation: reassignmentReservation,
     }
   }
@@ -166,6 +169,19 @@ function getOperationalState(
   }
 
   const normalizedStatus = vehicle.public_status.trim().toUpperCase()
+  const hasCompletedMechanicalIntervention = interventions.some((intervention) => (
+    intervention.vehicle.id === vehicle.id
+    && intervention.intervention_type === 'MECANIQUE'
+    && intervention.status === 'TERMINEE'
+  ))
+  if (normalizedStatus === 'A_CONTROLER' && hasCompletedMechanicalIntervention) {
+    return {
+      label: 'Au parc',
+      variant: 'success',
+      detail: null,
+      reservation: reassignmentReservation,
+    }
+  }
   const fallbackReservation = normalizedStatus === 'RESERVE' || normalizedStatus === 'LOUE'
     ? [...vehicleReservations].sort((left, right) => new Date(right.start_at).getTime() - new Date(left.start_at).getTime())[0] ?? null
     : null
@@ -209,11 +225,11 @@ interface VehicleCardProps {
   validationPanel?: ReactNode
 }
 
-function OperationalStateDisplay({ state }: { state: OperationalState }) {
+function OperationalStateDisplay({ state, compact = false }: { state: OperationalState; compact?: boolean }) {
   return (
     <div className="space-y-1">
       <StatusBadge variant={state.variant} label={state.label} />
-      {state.detail ? <p className="text-xs leading-5 text-slate-500">{state.detail}</p> : null}
+      {state.detail ? <p className={`text-xs leading-5 text-slate-500${compact ? ' whitespace-nowrap' : ''}`}>{state.detail}</p> : null}
     </div>
   )
 }
@@ -522,14 +538,14 @@ function VehicleDesktopRow({ vehicle, operationalState, onPlanIntervention, onTo
         )}
       </td>
       <td className="px-4 py-3 text-sm text-[#1F2937]">
-        <p className="font-medium">{vehicle.brand} {vehicle.model_name}</p>
+        <p className="whitespace-nowrap font-medium">{vehicle.brand} {vehicle.model_name}</p>
         <p className="text-slate-500">{vehicle.category}</p>
       </td>
       <td className="px-4 py-3 text-sm text-[#1F2937]">{registrationNumber ?? '—'}</td>
       <td className="px-4 py-3">
-        <OperationalStateDisplay state={operationalState} />
+        <OperationalStateDisplay state={operationalState} compact />
       </td>
-      <td className="px-4 py-3 text-sm text-[#1F2937]">
+      <td className="whitespace-nowrap px-4 py-3 text-sm text-[#1F2937]">
         {getParkingLabel(vehicle)}
       </td>
       <td className="px-4 py-3">

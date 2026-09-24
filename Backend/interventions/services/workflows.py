@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from django.db import transaction
 from django.utils import timezone
 
-from interventions.models import Intervention, TechnicalInspection, TechnicalPhoto
+from interventions.models import Intervention, InterventionWorkPeriod, TechnicalInspection, TechnicalPhoto
+from interventions.services.overruns import notify_overrun_reservation_conflicts
 from vehicles.models import Vehicle
 
 
@@ -22,6 +23,32 @@ class InterventionWorkflowError(ValueError):
 
 def _raise_workflow_error(code: str, message: str, *, http_status: int = 400) -> None:
     raise InterventionWorkflowError(code=code, message=message, http_status=http_status)
+
+
+def _open_work_period(*, intervention, started_at):
+    InterventionWorkPeriod.objects.get_or_create(
+        intervention=intervention,
+        ended_at__isnull=True,
+        defaults={"started_at": started_at},
+    )
+
+
+def _close_open_work_period(*, intervention, ended_at):
+    period = (
+        InterventionWorkPeriod.objects.select_for_update()
+        .filter(intervention=intervention, ended_at__isnull=True)
+        .order_by("-started_at", "-id")
+        .first()
+    )
+    if period is None:
+        period = InterventionWorkPeriod.objects.create(
+            intervention=intervention,
+            started_at=intervention.started_at or ended_at,
+            ended_at=ended_at,
+        )
+    else:
+        period.ended_at = ended_at
+        period.save(update_fields=["ended_at"])
 
 
 def _assigned_queryset_for(*, user, intervention_type: str):
@@ -88,7 +115,7 @@ def start_assigned_intervention(*, intervention):
                 http_status=409,
             )
 
-        if locked.status == Intervention.Status.ATTRIBUEE:
+        if locked.status in {Intervention.Status.ATTRIBUEE, Intervention.Status.PLANIFIEE}:
             locked.status = Intervention.Status.EN_COURS
             if locked.started_at is None:
                 locked.started_at = timezone.now()
@@ -100,6 +127,7 @@ def start_assigned_intervention(*, intervention):
                 else Vehicle.Status.NETTOYAGE
             )
             locked.vehicle.save(update_fields=["status", "updated_at"])
+            _open_work_period(intervention=locked, started_at=locked.started_at)
 
         intervention.status = locked.status
         intervention.started_at = locked.started_at
@@ -157,7 +185,7 @@ def check_in_assigned_intervention(
     with transaction.atomic():
         locked = Intervention.objects.select_for_update().select_related("vehicle").get(pk=intervention.pk)
 
-        if locked.status != Intervention.Status.ATTRIBUEE:
+        if locked.status not in {Intervention.Status.ATTRIBUEE, Intervention.Status.PLANIFIEE}:
             _raise_workflow_error(
                 "INVALID_STATUS",
                 "Le check-in est possible uniquement sur une intervention attribuee.",
@@ -190,6 +218,44 @@ def check_in_assigned_intervention(
     return start_assigned_intervention(intervention=intervention)
 
 
+def pause_assigned_intervention(*, intervention):
+    with transaction.atomic():
+        locked = Intervention.objects.select_for_update().get(pk=intervention.pk)
+
+        if locked.status != Intervention.Status.EN_COURS:
+            _raise_workflow_error(
+                "INVALID_STATUS",
+                "Seule une intervention EN_COURS peut etre mise en pause.",
+                http_status=409,
+            )
+
+        locked.status = Intervention.Status.EN_PAUSE
+        locked.save(update_fields=["status", "updated_at"])
+        _close_open_work_period(intervention=locked, ended_at=timezone.now())
+
+    notify_overrun_reservation_conflicts(intervention=locked)
+    return locked
+
+
+def resume_assigned_intervention(*, intervention):
+    with transaction.atomic():
+        locked = Intervention.objects.select_for_update().get(pk=intervention.pk)
+
+        if locked.status != Intervention.Status.EN_PAUSE:
+            _raise_workflow_error(
+                "INVALID_STATUS",
+                "Seule une intervention EN_PAUSE peut etre reprise.",
+                http_status=409,
+            )
+
+        locked.status = Intervention.Status.EN_COURS
+        locked.save(update_fields=["status", "updated_at"])
+        _open_work_period(intervention=locked, started_at=timezone.now())
+
+    notify_overrun_reservation_conflicts(intervention=locked)
+    return locked
+
+
 def _get_or_create_technical_inspection(*, intervention):
     technical_inspection = intervention.technical_inspections.filter(phase=TechnicalInspection.Phase.INITIAL).order_by("id").first()
     if technical_inspection is not None:
@@ -210,10 +276,10 @@ def add_assigned_intervention_photo(*, intervention, uploaded_file, caption: str
     with transaction.atomic():
         locked = Intervention.objects.select_for_update().select_related("vehicle").get(pk=intervention.pk)
 
-        if locked.status != Intervention.Status.EN_COURS:
+        if locked.status not in {Intervention.Status.EN_COURS, Intervention.Status.EN_PAUSE}:
             _raise_workflow_error(
                 "INVALID_STATUS",
-                "Les photos ne peuvent etre ajoutees que sur une intervention EN_COURS.",
+                "Les photos ne peuvent etre ajoutees que sur une intervention EN_COURS ou EN_PAUSE.",
                 http_status=409,
             )
 
@@ -224,6 +290,7 @@ def add_assigned_intervention_photo(*, intervention, uploaded_file, caption: str
             caption=(caption or "").strip(),
         )
 
+    notify_overrun_reservation_conflicts(intervention=locked)
     return photo
 
 
@@ -249,6 +316,7 @@ def complete_assigned_intervention(*, intervention, report: str = ""):
             )
 
         now = timezone.now()
+        _close_open_work_period(intervention=locked, ended_at=now)
         locked.status = Intervention.Status.TERMINEE
         locked.completed_at = now
         locked.report = (report or "").strip()
@@ -264,10 +332,10 @@ def save_assigned_intervention_work(*, intervention, work_data: dict, estimated_
     with transaction.atomic():
         locked = Intervention.objects.select_for_update().get(pk=intervention.pk)
 
-        if locked.status != Intervention.Status.EN_COURS:
+        if locked.status not in {Intervention.Status.EN_COURS, Intervention.Status.EN_PAUSE}:
             _raise_workflow_error(
                 "INVALID_STATUS",
-                "Le travail peut etre enregistre uniquement sur une intervention EN_COURS.",
+                "Le travail peut etre enregistre uniquement sur une intervention EN_COURS ou EN_PAUSE.",
                 http_status=409,
             )
 
@@ -279,10 +347,11 @@ def save_assigned_intervention_work(*, intervention, work_data: dict, estimated_
         intervention.estimated_cost = locked.estimated_cost
         intervention.updated_at = locked.updated_at
 
+    notify_overrun_reservation_conflicts(intervention=locked)
     return intervention
 
 
-def _final_report_payload(*, intervention, check_in, check_out, work_data, estimated_cost, final_payload):
+def _final_report_payload(*, intervention, check_in, check_out, work_data, estimated_cost, final_payload, work_periods):
     vehicle = intervention.vehicle
     return {
         "vehicle": {
@@ -298,6 +367,10 @@ def _final_report_payload(*, intervention, check_in, check_out, work_data, estim
         "description": intervention.description,
         "started_at": intervention.started_at.isoformat() if intervention.started_at else None,
         "completed_at": intervention.completed_at.isoformat() if intervention.completed_at else None,
+        "work_periods": [
+            {"started_at": period.started_at.isoformat(), "ended_at": period.ended_at.isoformat() if period.ended_at else None}
+            for period in work_periods
+        ],
         "check_in": {
             "mileage": check_in.mileage,
             "observations": check_in.observations,
@@ -336,8 +409,6 @@ def check_out_assigned_intervention(
         _raise_workflow_error("FINAL_STATE_REQUIRED", "L'etat final est obligatoire.")
     if not cleaned_conclusions:
         _raise_workflow_error("CONCLUSIONS_REQUIRED", "Les conclusions sont obligatoires.")
-    if vehicle_operational is False and not cleaned_comment:
-        _raise_workflow_error("FINAL_COMMENT_REQUIRED", "Un commentaire est obligatoire si le vehicule n'est pas operationnel.")
     if vehicle_clean is False and not cleaned_comment:
         _raise_workflow_error("FINAL_COMMENT_REQUIRED", "Un commentaire est obligatoire si le vehicule n'est pas propre.")
 
@@ -354,6 +425,9 @@ def check_out_assigned_intervention(
         )
         if locked.status != Intervention.Status.EN_COURS:
             _raise_workflow_error("INVALID_STATUS", "L'intervention doit etre EN_COURS avant cloture.", http_status=409)
+        if locked.intervention_type == Intervention.Type.MECANIQUE:
+            vehicle_operational = True
+            new_intervention_needed = False
         check_in = locked.technical_inspections.filter(phase=TechnicalInspection.Phase.INITIAL).order_by("id").first()
         if check_in is None:
             _raise_workflow_error("CHECK_IN_REQUIRED", "Le check-in est obligatoire avant le check-out.", http_status=409)
@@ -393,16 +467,8 @@ def check_out_assigned_intervention(
             "new_intervention_needed": new_intervention_needed,
             "final_comment": cleaned_comment,
         }
-        anomaly_type = str(work_payload.get("anomaly_type") or "").strip()
-        anomaly_comment = str(work_payload.get("anomaly_comment") or "").strip()
-        requires_manager_validation = (
-            vehicle_operational is False
-            or vehicle_clean is False
-            or new_intervention_needed
-            or bool(anomaly_type)
-            or bool(anomaly_comment)
-        )
         locked.completed_at = timezone.now()
+        _close_open_work_period(intervention=locked, ended_at=locked.completed_at)
         locked.status = Intervention.Status.TERMINEE
         locked.report = json.dumps({"final_report": _final_report_payload(
             intervention=locked,
@@ -411,9 +477,10 @@ def check_out_assigned_intervention(
             work_data=work_payload,
             estimated_cost=locked.estimated_cost,
             final_payload=final_payload,
+            work_periods=list(locked.work_periods.order_by("started_at", "id")),
         )}, ensure_ascii=False)
         locked.save(update_fields=["status", "completed_at", "report", "updated_at"])
-        locked.vehicle.status = Vehicle.Status.A_CONTROLER if requires_manager_validation else Vehicle.Status.DISPONIBLE
+        locked.vehicle.status = Vehicle.Status.DISPONIBLE
         locked.vehicle.save(update_fields=["status", "updated_at"])
 
         intervention.status = locked.status

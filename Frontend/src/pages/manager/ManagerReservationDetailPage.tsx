@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { AlertTriangle, CheckCircle2, Fuel, Gauge, UserRound, CarFront, Camera, FileWarning } from 'lucide-react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -11,6 +11,7 @@ import Card from '../../components/ui/Card'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import ReservationReassignmentPanel from '../../components/reservations/ReservationReassignmentPanel'
 import {
+  cancelVehicleUnavailableManagementReservation,
   getManagementReservationById,
 } from '../../services/managementReservationService'
 import type {
@@ -274,9 +275,11 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
   const [searchParams] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const reservationId = Number(id)
   const isValidReservationId = Number.isInteger(reservationId) && reservationId > 0
   const [decisionInfo, setDecisionInfo] = useState<string | null>(null)
+  const [isVehicleUnavailableCancellationOpen, setIsVehicleUnavailableCancellationOpen] = useState(false)
   const toastMessage = (location.state as { toast?: string } | null)?.toast ?? null
 
   useEffect(() => {
@@ -293,6 +296,17 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
     queryKey: ['manager-reservation-detail', reservationId],
     queryFn: () => getManagementReservationById(reservationId),
     enabled: isValidReservationId,
+  })
+
+  const vehicleUnavailableCancellationMutation = useMutation({
+    mutationFn: () => cancelVehicleUnavailableManagementReservation(reservationId),
+    onSuccess: async () => {
+      setIsVehicleUnavailableCancellationOpen(false)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['manager-reservations'] }),
+        queryClient.invalidateQueries({ queryKey: ['manager-reservation-detail', reservationId] }),
+      ])
+    },
   })
 
   const controlReservation = useMemo(
@@ -380,6 +394,25 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
       </div>
 
       {decisionInfo ? <Alert variant="info" title="Decision preparee" message={decisionInfo} /> : null}
+
+      {reservation.status === 'CONFIRMEE' ? (
+        <Card className="border-red-200 bg-red-50" header={<h2 className="text-base font-semibold text-[#991B1B]">Indisponibilité du véhicule</h2>}>
+          <p className="text-sm leading-6 text-[#7F1D1D]">Annulez cette réservation uniquement si le véhicule est indisponible. Aucun véhicule de remplacement ne sera proposé automatiquement.</p>
+          {vehicleUnavailableCancellationMutation.isError ? <Alert className="mt-4" variant="danger" title="Annulation impossible" message={toErrorState(vehicleUnavailableCancellationMutation.error).message} /> : null}
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <Button variant="danger" onClick={() => setIsVehicleUnavailableCancellationOpen(true)}>Annuler pour indisponibilité du véhicule</Button>
+          </div>
+          {isVehicleUnavailableCancellationOpen ? (
+            <div className="mt-4 border-t border-red-200 pt-4">
+              <p className="text-sm leading-6 text-[#7F1D1D]">Confirmez l’annulation de la réservation {reservation.reference}. Le remboursement des sommes éligibles et la libération de la caution seront déclenchés.</p>
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <Button variant="secondary" onClick={() => setIsVehicleUnavailableCancellationOpen(false)} disabled={vehicleUnavailableCancellationMutation.isPending}>Retour</Button>
+                <Button variant="danger" onClick={() => vehicleUnavailableCancellationMutation.mutate()} disabled={vehicleUnavailableCancellationMutation.isPending}>{vehicleUnavailableCancellationMutation.isPending ? 'Annulation...' : 'Confirmer l’annulation'}</Button>
+              </div>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
 
       {reservation.status !== 'A_CONTROLER' ? (
         <Alert

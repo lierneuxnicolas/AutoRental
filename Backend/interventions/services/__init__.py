@@ -17,6 +17,7 @@ from interventions.services.creation import (
     create_intervention,
 )
 from interventions.services.planning import InterventionPlanningError, plan_intervention
+from interventions.services.overruns import notify_overrun_reservation_conflicts
 from interventions.services.decision import InterventionDecisionError, decide_intervention
 from interventions.services.workflows import (
     InterventionWorkflowError,
@@ -27,6 +28,8 @@ from interventions.services.workflows import (
     get_assigned_intervention,
     interrupt_assigned_intervention,
     list_assigned_interventions,
+	pause_assigned_intervention,
+	resume_assigned_intervention,
     save_assigned_intervention_work,
     start_assigned_intervention,
 )
@@ -51,10 +54,13 @@ __all__ = [
     "lock_and_revoke_after_return",
     "lock_vehicle",
     "list_assigned_interventions",
+	"notify_overrun_reservation_conflicts",
     "plan_intervention",
+	"pause_assigned_intervention",
     "InterventionDecisionError",
     "decide_intervention",
     "revoke_vehicle_access",
+	"resume_assigned_intervention",
     "save_assigned_intervention_work",
     "start_assigned_intervention",
     "unlock_vehicle",

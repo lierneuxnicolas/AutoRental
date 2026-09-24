@@ -34,6 +34,7 @@ from rest_framework.response import Response
 from accounts.permissions import IsManagerOrAdministrator
 from inspections.models import Inspection
 from interventions.models import Intervention
+from notifications.models import Notification
 from payments.models import Deposit
 from reservations.models import Reservation
 from reservations.serializers.management import (
@@ -527,6 +528,55 @@ class ReservationUnavailableCancellationView(generics.GenericAPIView):
         }
         return Response(
             ReservationUnavailableCancellationResponseSerializer(payload, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class ReservationVehicleUnavailableCancellationView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    serializer_class = ReservationUnavailableCancellationResponseSerializer
+
+    def post(self, request, pk):
+        reservation = generics.get_object_or_404(
+            Reservation.objects.select_related("client", "client__user", "vehicle", "vehicle__brand"),
+            pk=pk,
+        )
+        if not Notification.objects.filter(
+            notification_type=Notification.NotificationType.INTERVENTION_OVERRUN,
+            related_object_type="reservation",
+            related_object_id=reservation.id,
+        ).exists():
+            return Response(
+                {
+                    "code": "OVERRUN_NOT_DETECTED",
+                    "detail": "Cette réservation n'est pas signalée comme impactée par une intervention mécanique prolongée.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            reservation = cancel_reservation(
+                reservation=reservation,
+                requested_by=request.user,
+                reason="Véhicule indisponible en raison d’une intervention mécanique prolongée",
+                vehicle_unavailable=True,
+            )
+        except CancellationError as error:
+            payload = {"code": error.code, "detail": error.message}
+            if error.details:
+                payload["details"] = error.details
+            return Response(payload, status=status.HTTP_409_CONFLICT)
+
+        refund_initiated = reservation.cancellation_financials.refundable_amount > 0
+        reservation = ReservationManagementDetailView().get_queryset().get(pk=reservation.pk)
+        return Response(
+            ReservationUnavailableCancellationResponseSerializer(
+                {
+                    "message": "Réservation annulée pour indisponibilité du véhicule.",
+                    "reservation": reservation,
+                    "refund_initiated": refund_initiated,
+                },
+                context={"request": request},
+            ).data,
             status=status.HTTP_200_OK,
         )
 
