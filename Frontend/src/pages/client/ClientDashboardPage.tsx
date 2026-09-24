@@ -101,6 +101,8 @@ function getReservationState(status: ReservationStatus | undefined): DashboardRe
       return { label: 'En attente paiement', variant: 'warning' }
     case 'CONFIRMEE':
       return { label: 'Confirmee', variant: 'success' }
+    case 'REAFFECTATION_REQUIRED':
+      return { label: 'À réaffecter', variant: 'warning' }
     case 'EN_COURS':
       return { label: 'En cours', variant: 'info' }
     case 'A_CONTROLER':

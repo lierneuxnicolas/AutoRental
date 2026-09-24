@@ -435,6 +435,11 @@ export default function MechanicInterventionDetailPage() {
           <p className="text-sm text-slate-600">
             {intervention.vehicle.parking_name ?? 'Parking non renseigné'} / {intervention.vehicle.parking_space_number ?? '—'}
           </p>
+          {intervention.planned_start_at && intervention.planned_end_at ? (
+            <p className="mt-2 text-sm font-medium text-slate-700">
+              Prévue : {formatDateTime(intervention.planned_start_at)} → {formatDateTime(intervention.planned_end_at)}
+            </p>
+          ) : null}
         </div>
         <Link
           to="/mechanic/interventions"

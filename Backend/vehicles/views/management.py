@@ -6,7 +6,8 @@ from rest_framework.views import APIView
 
 from accounts.permissions import IsManagerOrAdministrator
 from vehicles.models import Vehicle
-from vehicles.serializers.management import VehicleManagementWriteSerializer, VehicleStatusUpdateSerializer
+from vehicles.serializers.management import VehicleManagementListSerializer, VehicleManagementWriteSerializer, VehicleStatusUpdateSerializer
+from vehicles.services.reassignment import update_vehicle_status_and_flag_reassignments
 from vehicles.serializers.public import VehiclePublicSerializer
 
 
@@ -15,14 +16,27 @@ ErrorDetailResponseSerializer = OpenApiResponse(
 )
 
 
-class VehicleManagementCreateView(generics.CreateAPIView):
+class VehicleManagementCreateView(generics.ListCreateAPIView):
 	permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
 	serializer_class = VehicleManagementWriteSerializer
 
 	def get_queryset(self):
 		if getattr(self, "swagger_fake_view", False):
 			return Vehicle.objects.none()
-		return Vehicle.objects.select_related("brand", "category", "parking_space", "parking_space__parking")
+		return Vehicle.objects.select_related(
+			"brand",
+			"category",
+			"parking_space",
+			"parking_space__parking",
+		).prefetch_related("photos")
+
+	def get_serializer_class(self):
+		if self.request.method == "GET":
+			return VehicleManagementListSerializer
+		return VehicleManagementWriteSerializer
+
+	def get(self, request, *args, **kwargs):
+		return self.list(request, *args, **kwargs)
 
 	@extend_schema(
 		tags=["Vehicle Management"],
@@ -112,8 +126,10 @@ class VehicleManagementStatusUpdateView(APIView):
 		serializer = VehicleStatusUpdateSerializer(data=request.data, context={"vehicle": vehicle})
 		serializer.is_valid(raise_exception=True)
 
-		vehicle.status = serializer.validated_data["status"]
-		vehicle.save(update_fields=["status", "updated_at"])
+		vehicle = update_vehicle_status_and_flag_reassignments(
+			vehicle=vehicle,
+			new_status=serializer.validated_data["status"],
+		)
 
 		response_serializer = VehiclePublicSerializer(vehicle, context={"request": request})
 		return Response(response_serializer.data, status=status.HTTP_200_OK)

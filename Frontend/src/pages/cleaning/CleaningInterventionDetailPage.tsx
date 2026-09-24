@@ -7,7 +7,6 @@ import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import InterventionCheckInForm from '../../components/interventions/InterventionCheckInForm'
 import InterventionCheckOutForm from '../../components/interventions/InterventionCheckOutForm'
 import InterventionWorkForm from '../../components/interventions/InterventionWorkForm'
-import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import { checkInIntervention, checkOutIntervention, getInterventionById, interruptIntervention, saveInterventionWork } from '../../services/workerInterventionService'
@@ -354,6 +353,11 @@ export default function CleaningInterventionDetailPage() {
           <p className="text-sm text-slate-600">
             {intervention.vehicle.registration_number} · {intervention.vehicle.parking_name ?? 'Parking non renseigné'} / {intervention.vehicle.parking_space_number ?? '—'}
           </p>
+          {intervention.planned_start_at && intervention.planned_end_at ? (
+            <p className="mt-2 text-sm font-medium text-slate-700">
+              Prévue : {formatDateTime(intervention.planned_start_at)} → {formatDateTime(intervention.planned_end_at)}
+            </p>
+          ) : null}
         </div>
         <Link
           to="/cleaning/interventions"

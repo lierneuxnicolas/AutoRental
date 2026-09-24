@@ -210,14 +210,14 @@ def _assert_unlock_business_rules(
 
     now = timezone.now()
     unlock_early_tolerance = timedelta(
-        minutes=getattr(settings, "VEHICLE_UNLOCK_EARLY_TOLERANCE_MINUTES", 15)
+        minutes=getattr(settings, "VEHICLE_UNLOCK_EARLY_TOLERANCE_MINUTES", 30)
     )
     unlock_available_at = reservation.start_at - unlock_early_tolerance
 
     if now < unlock_available_at:
         _raise_vehicle_access_error(
             "ACCESS_NOT_STARTED",
-            "Le deverrouillage sera disponible 15 minutes avant le debut de la reservation.",
+            "Le deverrouillage sera disponible 30 minutes avant le debut de la reservation.",
             http_status=409,
         )
 
@@ -691,7 +691,7 @@ def unlock_vehicle(
 
 
 def _build_validity_window(*, reservation: Reservation) -> tuple:
-    early_tolerance = timedelta(minutes=getattr(settings, "VEHICLE_UNLOCK_EARLY_TOLERANCE_MINUTES", 15))
+    early_tolerance = timedelta(minutes=getattr(settings, "VEHICLE_UNLOCK_EARLY_TOLERANCE_MINUTES", 30))
     return reservation.start_at - early_tolerance, reservation.end_at
 
 

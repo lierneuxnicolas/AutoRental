@@ -3373,6 +3373,44 @@ class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase)
 		ids_vehicle = {item["id"] for item in by_vehicle.data["results"]}
 		self.assertIn(self.reservation_client_2.id, ids_vehicle)
 
+		by_vehicle_model = self.client_api.get(self.list_url, {"search": self.vehicle_reserved.model_name})
+		self.assertEqual(by_vehicle_model.status_code, status.HTTP_200_OK)
+		self.assertIn(self.reservation_client_2.id, {item["id"] for item in by_vehicle_model.data["results"]})
+
+	def test_vehicle_search_combines_brand_model_and_registration(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		by_brand = self.client_api.get(self.list_url, {"vehicle_search": self.brand.name})
+		by_model = self.client_api.get(self.list_url, {"vehicle_search": self.vehicle_reserved.model_name})
+		by_registration = self.client_api.get(self.list_url, {"vehicle_search": self.vehicle_reserved.registration_number})
+
+		self.assertIn(self.reservation_client_2.id, {item["id"] for item in by_brand.data["results"]})
+		self.assertIn(self.reservation_client_2.id, {item["id"] for item in by_model.data["results"]})
+		self.assertIn(self.reservation_client_2.id, {item["id"] for item in by_registration.data["results"]})
+
+	def test_filter_reassignment_required_status(self):
+		reservation = self._create_reservation(status=Reservation.Status.REAFFECTATION_REQUIRED)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.get(self.list_url, {"status": Reservation.Status.REAFFECTATION_REQUIRED})
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual({item["id"] for item in response.data["results"]}, {reservation.id})
+
+	def test_filter_reservation_date_bounds(self):
+		start = timezone.now() + timedelta(days=10)
+		matching = self._create_reservation(start_at=start, end_at=start + timedelta(hours=4))
+		self._create_reservation(start_at=start + timedelta(days=5), end_at=start + timedelta(days=5, hours=4))
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.get(self.list_url, {
+			"start_at_from": (start - timedelta(minutes=1)).isoformat(),
+			"end_at_to": (start + timedelta(hours=4, minutes=1)).isoformat(),
+		})
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual({item["id"] for item in response.data["results"]}, {matching.id})
+
 	def test_aucune_donnee_documentaire_ou_bancaire_exposee(self):
 		self.client_api.force_authenticate(self.manager_user)
 		detail_url = reverse("reservations:management-reservation-detail", kwargs={"pk": self.reservation_client_1.id})
@@ -3456,6 +3494,216 @@ class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase)
 		self.assertEqual(len(response.data["return_inspection"]["photos"]), 6)
 		self.assertEqual(response.data["departure_inspection"]["damages"], [])
 		self.assertEqual(response.data["return_inspection"]["damages"], [])
+
+
+class ReservationManagementReassignmentTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+		self.client_api.force_authenticate(self.manager_user)
+		self.start_at, self.end_at = self._period(start_hours=48, duration_hours=48)
+		self.reservation = self._create_reservation(
+			vehicle=self.vehicle_available,
+			status=Reservation.Status.REAFFECTATION_REQUIRED,
+			start_at=self.start_at,
+			end_at=self.end_at,
+		)
+		self.candidate = self._create_vehicle("R4", "RSV-004", Vehicle.Status.DISPONIBLE)
+		self.maintenance_vehicle = self._create_vehicle("R5", "RSV-005", Vehicle.Status.MAINTENANCE)
+		self.overlap_vehicle = self._create_vehicle("R6", "RSV-006", Vehicle.Status.DISPONIBLE)
+		self._create_reservation(
+			client=self.client_profile_2,
+			vehicle=self.overlap_vehicle,
+			status=Reservation.Status.CONFIRMEE,
+			start_at=self.start_at + timedelta(hours=1),
+			end_at=self.end_at - timedelta(hours=1),
+		)
+		self.candidates_url = reverse(
+			"reservations:management-reservation-replacement-vehicles",
+			kwargs={"pk": self.reservation.id},
+		)
+		self.reassign_url = reverse(
+			"reservations:management-reservation-reassign",
+			kwargs={"pk": self.reservation.id},
+		)
+		self.cancel_unavailable_url = reverse(
+			"reservations:management-reservation-cancel-unavailable",
+			kwargs={"pk": self.reservation.id},
+		)
+
+	def _create_vehicle(self, space_number, registration_number, status_value):
+		space = ParkingSpace.objects.create(parking=self.parking, number=space_number, is_active=True)
+		return Vehicle.objects.create(
+			brand=self.brand,
+			category=self.category,
+			parking_space=space,
+			registration_number=registration_number,
+			model_name=f"Model {space_number}",
+			year=2025,
+			color="Black",
+			energy_type="Hybrid",
+			transmission="Auto",
+			seats=5,
+			doors=5,
+			mileage=100,
+			status=status_value,
+			is_active=True,
+		)
+
+	def _disable_replacement_candidates(self):
+		self.candidate.status = Vehicle.Status.MAINTENANCE
+		self.candidate.save(update_fields=["status", "updated_at"])
+
+	def test_candidates_include_compatible_and_exclude_conflict_maintenance_and_current(self):
+		response = self.client_api.get(self.candidates_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		vehicle_ids = {item["id"] for item in response.data}
+		self.assertIn(self.candidate.id, vehicle_ids)
+		self.assertNotIn(self.reservation.vehicle_id, vehicle_ids)
+		self.assertNotIn(self.overlap_vehicle.id, vehicle_ids)
+		self.assertNotIn(self.maintenance_vehicle.id, vehicle_ids)
+
+	def test_candidates_return_empty_when_no_vehicle_is_available(self):
+		Vehicle.objects.exclude(pk=self.vehicle_available.id).update(status=Vehicle.Status.MAINTENANCE)
+
+		response = self.client_api.get(self.candidates_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data, [])
+
+	def test_reassignment_updates_only_vehicle_and_status_and_notifies_client(self):
+		reference = self.reservation.reference
+		rental_amount = self.reservation.rental_amount
+		deposit_amount = self.reservation.deposit_amount
+
+		with self.captureOnCommitCallbacks(execute=True):
+			response = self.client_api.post(self.reassign_url, {"vehicle_id": self.candidate.id}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.reservation.refresh_from_db()
+		self.assertEqual(self.reservation.vehicle_id, self.candidate.id)
+		self.assertEqual(self.reservation.status, Reservation.Status.CONFIRMEE)
+		self.assertEqual(self.reservation.reference, reference)
+		self.assertEqual(self.reservation.rental_amount, rental_amount)
+		self.assertEqual(self.reservation.deposit_amount, deposit_amount)
+		self.assertTrue(SystemLog.objects.filter(action="RESERVATION_REASSIGNED").exists())
+		self.assertTrue(Notification.objects.filter(
+			user=self.client_user_1,
+			notification_type=Notification.NotificationType.RESERVATION_REASSIGNED,
+			title="Véhicule remplacé",
+			related_object_type="reservation",
+			related_object_id=self.reservation.id,
+		).exists())
+
+	def test_reassignment_rejects_vehicle_that_became_unavailable(self):
+		self.candidate.status = Vehicle.Status.MAINTENANCE
+		self.candidate.save(update_fields=["status", "updated_at"])
+
+		response = self.client_api.post(self.reassign_url, {"vehicle_id": self.candidate.id}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "VEHICLE_UNAVAILABLE")
+		self.reservation.refresh_from_db()
+		self.assertEqual(self.reservation.vehicle_id, self.vehicle_available.id)
+		self.assertEqual(self.reservation.status, Reservation.Status.REAFFECTATION_REQUIRED)
+
+	def test_cancel_unavailable_without_payment_cancels_without_refund_and_notifies_client(self):
+		self._disable_replacement_candidates()
+		self.vehicle_available.status = Vehicle.Status.MAINTENANCE
+		self.vehicle_available.save(update_fields=["status", "updated_at"])
+
+		with self.captureOnCommitCallbacks(execute=True):
+			response = self.client_api.post(self.cancel_unavailable_url, {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertFalse(response.data["refund_initiated"])
+		self.reservation.refresh_from_db()
+		self.vehicle_available.refresh_from_db()
+		self.assertEqual(self.reservation.status, Reservation.Status.ANNULEE)
+		self.assertIsNotNone(self.reservation.cancelled_at)
+		self.assertEqual(
+			self.reservation.cancellation_reason,
+			"Véhicule indisponible — aucun remplacement disponible",
+		)
+		self.assertEqual(self.vehicle_available.status, Vehicle.Status.MAINTENANCE)
+		self.assertEqual(Refund.objects.filter(reservation=self.reservation).count(), 0)
+		notification = Notification.objects.get(
+			user=self.client_user_1,
+			notification_type=Notification.NotificationType.RESERVATION_CANCELLED,
+			related_object_id=self.reservation.id,
+		)
+		self.assertNotIn("remboursement", notification.message.lower())
+
+	def test_cancel_unavailable_is_rejected_when_replacement_exists(self):
+		response = self.client_api.post(self.cancel_unavailable_url, {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "REPLACEMENT_AVAILABLE")
+		self.reservation.refresh_from_db()
+		self.assertEqual(self.reservation.status, Reservation.Status.REAFFECTATION_REQUIRED)
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_cancel_unavailable_refunds_successful_payment(self, mocked_refund_create):
+		self._disable_replacement_candidates()
+		Payment.objects.create(
+			reservation=self.reservation,
+			provider=Payment.Provider.STRIPE,
+			amount=Decimal("120.00"),
+			currency="EUR",
+			status=Payment.Status.REUSSI,
+			stripe_payment_intent_id="pi_reassignment_cancel",
+		)
+		mocked_refund_create.return_value = SimpleNamespace(id="re_reassignment_cancel", status="succeeded")
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+			response = self.client_api.post(self.cancel_unavailable_url, {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertTrue(response.data["refund_initiated"])
+		refund = Refund.objects.get(reservation=self.reservation)
+		self.assertEqual(refund.amount, Decimal("120.00"))
+		self.assertEqual(refund.status, Refund.Status.REUSSI)
+
+	def test_cancel_unavailable_releases_authorized_deposit(self):
+		self._disable_replacement_candidates()
+		deposit = Deposit.objects.create(
+			reservation=self.reservation,
+			mode=Deposit.Mode.SIMULATED,
+			amount=Decimal("350.00"),
+			currency="EUR",
+			status=Deposit.Status.AUTORISEE,
+			authorized_at=timezone.now(),
+		)
+
+		response = self.client_api.post(self.cancel_unavailable_url, {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		deposit.refresh_from_db()
+		self.assertEqual(deposit.status, Deposit.Status.LIBEREE)
+		self.assertIsNotNone(deposit.released_at)
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_cancel_unavailable_stripe_failure_keeps_coherent_state(self, mocked_refund_create):
+		self._disable_replacement_candidates()
+		Payment.objects.create(
+			reservation=self.reservation,
+			provider=Payment.Provider.STRIPE,
+			amount=Decimal("120.00"),
+			currency="EUR",
+			status=Payment.Status.REUSSI,
+			stripe_payment_intent_id="pi_reassignment_failure",
+		)
+		mocked_refund_create.side_effect = stripe.error.APIConnectionError("network down")
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+			response = self.client_api.post(self.cancel_unavailable_url, {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "STRIPE_UNAVAILABLE")
+		self.reservation.refresh_from_db()
+		self.assertEqual(self.reservation.status, Reservation.Status.REAFFECTATION_REQUIRED)
+		self.assertIsNone(self.reservation.cancelled_at)
+		self.assertEqual(Refund.objects.filter(reservation=self.reservation).count(), 0)
 
 
 class ReservationConcurrencyAuditTests(TestCase):

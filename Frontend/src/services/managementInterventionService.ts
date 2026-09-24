@@ -4,7 +4,9 @@ import type {
   ManagementInterventionAssignRequest,
   ManagementInterventionCreateRequest,
   ManagementInterventionListQueryParams,
+  ManagementInterventionPlanRequest,
   ManagementInterventionResponse,
+  InterventionDecision,
   PaginatedManagementInterventionListResponse,
 } from '../types/managementIntervention'
 
@@ -46,6 +48,21 @@ export async function createManagementIntervention(
   payload: ManagementInterventionCreateRequest,
 ): Promise<ManagementInterventionResponse> {
   const { data } = await api.post<ManagementInterventionResponse>('/management/interventions/', payload)
+  return data
+}
+
+export async function planManagementIntervention(
+  payload: ManagementInterventionPlanRequest,
+): Promise<ManagementInterventionResponse> {
+  const { data } = await api.post<ManagementInterventionResponse>('/management/interventions/plan/', payload)
+  return data
+}
+
+export async function decideManagementIntervention(
+  id: number,
+  payload: { decision: InterventionDecision; comment?: string; assigned_user_id?: number; planned_start_at?: string; planned_end_at?: string; description?: string },
+): Promise<ManagementInterventionResponse> {
+  const { data } = await api.post<ManagementInterventionResponse>(`/management/interventions/${id}/decision/`, payload)
   return data
 }
 

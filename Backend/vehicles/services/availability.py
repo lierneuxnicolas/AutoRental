@@ -26,7 +26,6 @@ def _raise_validation_error(code, message):
 
 BOOKABLE_VEHICLE_STATUSES = (
     Vehicle.Status.DISPONIBLE,
-    Vehicle.Status.RESERVE,
 )
 
 
@@ -85,6 +84,30 @@ def _get_reservation_model():
     return reservation_model
 
 
+def _get_intervention_model():
+    try:
+        intervention_model = apps.get_model("interventions", "Intervention")
+    except LookupError as exc:
+        raise ImproperlyConfigured("The interventions.Intervention model is required for availability search.") from exc
+    if intervention_model is None:
+        raise ImproperlyConfigured("The interventions.Intervention model is required for availability search.")
+    return intervention_model
+
+
+def _get_planned_intervention_conflicts(*, vehicle_id, start, end):
+    intervention_model = _get_intervention_model()
+    return intervention_model.objects.filter(
+        vehicle_id=vehicle_id,
+        status__in=(
+            intervention_model.Status.A_ATTRIBUER,
+            intervention_model.Status.ATTRIBUEE,
+            intervention_model.Status.EN_COURS,
+        ),
+        planned_start_at__lt=end,
+        planned_end_at__gt=start,
+    )
+
+
 def _get_reservation_statuses():
     """Return the Reservation statuses used by availability checks.
 
@@ -92,7 +115,7 @@ def _get_reservation_statuses():
     - BROUILLON does not block.
     - EN_ATTENTE_CAUTION does not block yet because there is no hold expiry.
     - EN_ATTENTE_PAIEMENT blocks temporarily.
-    - CONFIRMEE and EN_COURS block.
+    - CONFIRMEE, REAFFECTATION_REQUIRED and EN_COURS block.
     - All other statuses do not block.
     """
 
@@ -100,6 +123,7 @@ def _get_reservation_statuses():
     return (
         reservation_model.Status.EN_ATTENTE_PAIEMENT,
         reservation_model.Status.CONFIRMEE,
+        reservation_model.Status.REAFFECTATION_REQUIRED,
         reservation_model.Status.EN_COURS,
     )
 
@@ -111,7 +135,7 @@ def get_blocking_reservation_statuses():
     - BROUILLON does not block.
     - EN_ATTENTE_CAUTION does not block yet because there is no hold expiry.
     - EN_ATTENTE_PAIEMENT blocks temporarily.
-    - CONFIRMEE and EN_COURS block.
+    - CONFIRMEE, REAFFECTATION_REQUIRED and EN_COURS block.
     - All other statuses do not block.
     """
 
@@ -179,6 +203,11 @@ def is_vehicle_available(*, vehicle, start, end, reservation_queryset=None) -> b
             reservation_queryset=reservation_queryset,
         ),
     ).exists()
+    intervention_conflict_exists = _get_planned_intervention_conflicts(
+        vehicle_id=vehicle.pk,
+        start=period["start"],
+        end=period["end"],
+    ).exists()
 
     return (
         vehicle.is_active
@@ -186,6 +215,7 @@ def is_vehicle_available(*, vehicle, start, end, reservation_queryset=None) -> b
         and vehicle.brand.is_active
         and vehicle.category.is_active
         and not conflict_exists
+        and not intervention_conflict_exists
     )
 
 
@@ -215,10 +245,25 @@ def get_available_vehicles(*, start, end, base_queryset=None, reservation_querys
             reservation_queryset=reservation_queryset,
         ),
     )
+    intervention_model = _get_intervention_model()
+    conflicting_interventions = intervention_model.objects.filter(
+        vehicle_id=OuterRef("pk"),
+        status__in=(
+            intervention_model.Status.A_ATTRIBUER,
+            intervention_model.Status.ATTRIBUEE,
+            intervention_model.Status.EN_COURS,
+        ),
+        planned_start_at__lt=period["end"],
+        planned_end_at__gt=period["start"],
+    )
 
     return queryset.annotate(
         _has_conflicting_reservation=Exists(conflicting_reservations),
-    ).filter(_has_conflicting_reservation=False).distinct()
+        _has_conflicting_intervention=Exists(conflicting_interventions),
+    ).filter(
+        _has_conflicting_reservation=False,
+        _has_conflicting_intervention=False,
+    ).distinct()
 
 
 def validate_availability_period(*, start, end, minimum_hours=None):

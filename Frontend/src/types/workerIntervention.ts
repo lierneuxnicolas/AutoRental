@@ -45,6 +45,8 @@ export interface WorkerInterventionResponse {
   check_in?: WorkerInterventionCheckIn | null
   check_out?: WorkerInterventionCheckIn | null
   estimated_cost?: string | number | null
+  planned_start_at?: string | null
+  planned_end_at?: string | null
   work_data?: WorkerInterventionWorkData | null
   final_report?: Record<string, unknown> | null
   created_at: string

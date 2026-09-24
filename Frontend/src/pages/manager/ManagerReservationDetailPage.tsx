@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
 import { AlertTriangle, CheckCircle2, Fuel, Gauge, UserRound, CarFront, Camera, FileWarning } from 'lucide-react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
+import ReservationReassignmentPanel from '../../components/reservations/ReservationReassignmentPanel'
 import {
   getManagementReservationById,
 } from '../../services/managementReservationService'
@@ -35,6 +36,8 @@ function mapStatusToUi(status: ManagementReservationStatus): { label: string; va
       return { label: 'En attente paiement', variant: 'warning' }
     case 'CONFIRMEE':
       return { label: 'Confirmee', variant: 'success' }
+    case 'REAFFECTATION_REQUIRED':
+      return { label: 'À réaffecter', variant: 'warning' }
     case 'EN_COURS':
       return { label: 'En cours', variant: 'info' }
     case 'A_CONTROLER':
@@ -268,9 +271,23 @@ function InspectionSummary({ inspection, title, accent }: { inspection: Manageme
 
 export default function ManagerReservationDetailPage({ basePath = '/manager' }: ManagerReservationDetailPageProps) {
   const { id } = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
+  const location = useLocation()
+  const navigate = useNavigate()
   const reservationId = Number(id)
   const isValidReservationId = Number.isInteger(reservationId) && reservationId > 0
   const [decisionInfo, setDecisionInfo] = useState<string | null>(null)
+  const toastMessage = (location.state as { toast?: string } | null)?.toast ?? null
+
+  useEffect(() => {
+    if (!toastMessage) {
+      return
+    }
+    const timeoutId = window.setTimeout(() => {
+      navigate(location.pathname, { replace: true, state: null })
+    }, 4000)
+    return () => window.clearTimeout(timeoutId)
+  }, [location.pathname, navigate, toastMessage])
 
   const detailQuery = useQuery({
     queryKey: ['manager-reservation-detail', reservationId],
@@ -318,6 +335,10 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
   }
 
   const reservation = controlReservation
+  if (searchParams.get('action') === 'reassign' && reservation.status === 'REAFFECTATION_REQUIRED') {
+    return <ReservationReassignmentPanel reservation={reservation} basePath={basePath} />
+  }
+
   const reservationStatus = mapStatusToUi(reservation.status)
   const depositStatus = mapDepositStatus(reservation.deposit_status)
   const departureInspection = reservation.departure_inspection
@@ -332,12 +353,21 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
 
   return (
     <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+      {toastMessage ? (
+        <div role="status" className="fixed right-4 top-20 z-50 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-medium text-white shadow-lg">
+          {toastMessage}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#0F766E]">Espace gestionnaire</p>
-          <h1 className="mt-2 text-3xl font-bold text-[#0F172A]">Controle du retour</h1>
+          <h1 className="mt-2 text-3xl font-bold text-[#0F172A]">
+            {isManagerActionable ? 'Contrôle du retour' : 'Détail de la réservation'}
+          </h1>
           <p className="mt-2 max-w-3xl text-sm text-slate-600">
-            Analysez l'etat du vehicule au retour et comparez les preuves de depart et de restitution avant de prendre une decision.
+            {isManagerActionable
+              ? 'Analysez l’état du véhicule au retour avant de prendre une décision.'
+              : 'Consultez les informations de la réservation, du client et du véhicule.'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -381,9 +411,9 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
           <div className="space-y-4">
             <div className="rounded-3xl border border-[#F59E0B] bg-white/80 p-5">
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Lecture rapide</p>
-              <p className="mt-3 text-2xl font-bold text-[#9A3412]">Caution : 500 € — À vérifier</p>
+              <p className="mt-3 text-2xl font-bold text-[#9A3412]">Caution : {reservation.deposit_amount} EUR — {depositStatus.label}</p>
               <p className="mt-2 text-sm text-slate-600">
-                Montant enregiste: {reservation.deposit_amount} EUR. Statut actuel: {depositStatus.label}.
+                Montant enregistré : {reservation.deposit_amount} EUR. Statut actuel : {depositStatus.label}.
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -394,7 +424,7 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
         </Card>
       </div>
 
-      <Card
+      {isManagerActionable ? <Card
         header={<SectionHeader icon={<CheckCircle2 className="h-5 w-5" />} title="Decision du gestionnaire" subtitle="Les consequences metier/financieres seront branchees dans une prochaine tache." />}
       >
         <div className="flex flex-wrap gap-3">
@@ -419,7 +449,7 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
           </Button>
         </div>
         <p className="mt-3 text-sm text-slate-500">Les actions sont reservees aux gestionnaires autorises.</p>
-      </Card>
+      </Card> : null}
 
       <div className="grid gap-6 xl:grid-cols-2">
         <InspectionSummary inspection={departureInspection} title="Etat des lieux depart" accent="bg-[#DBEAFE] text-[#1D4ED8]" />

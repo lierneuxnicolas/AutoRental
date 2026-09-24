@@ -26,6 +26,7 @@ class Reservation(models.Model):
 		EN_ATTENTE_CAUTION = "EN_ATTENTE_CAUTION", "En attente caution"
 		EN_ATTENTE_PAIEMENT = "EN_ATTENTE_PAIEMENT", "En attente paiement"
 		CONFIRMEE = "CONFIRMEE", "Confirmee"
+		REAFFECTATION_REQUIRED = "REAFFECTATION_REQUIRED", "A reaffecter"
 		EN_COURS = "EN_COURS", "En cours"
 		A_CONTROLER = "A_CONTROLER", "A controler"
 		TERMINEE = "TERMINEE", "Terminee"
@@ -37,11 +38,13 @@ class Reservation(models.Model):
 		Status.EN_ATTENTE_CAUTION,
 		Status.EN_ATTENTE_PAIEMENT,
 		Status.CONFIRMEE,
+		Status.REAFFECTATION_REQUIRED,
 		Status.EN_COURS,
 		Status.A_CONTROLER,
 	}
 	CONFIRMED_STATUSES = {
 		Status.CONFIRMEE,
+		Status.REAFFECTATION_REQUIRED,
 		Status.EN_COURS,
 		Status.A_CONTROLER,
 		Status.TERMINEE,

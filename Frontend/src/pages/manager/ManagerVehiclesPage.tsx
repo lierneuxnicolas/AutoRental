@@ -15,22 +15,17 @@ import {
   createManagementIntervention,
   getManagementInterventionAssignees,
   getManagementInterventions,
+  planManagementIntervention,
 } from '../../services/managementInterventionService'
-import { updateVehicleStatus } from '../../services/managementVehicleService'
-import { getVehicles } from '../../services/vehicleService'
-import type { InterventionType, ManagementInterventionResponse } from '../../types/managementIntervention'
-import type { VehicleManagementStatus, VehicleManagementStatusUpdateRequest } from '../../types/managementVehicle'
-import type { PaginatedResponse, PublicVehicle } from '../../types/vehicle'
+import { getManagementReservations } from '../../services/managementReservationService'
+import { getManagementVehicles, updateVehicle, updateVehicleStatus } from '../../services/managementVehicleService'
+import type { InterventionPlanningConflictReservation, InterventionType, ManagementInterventionResponse } from '../../types/managementIntervention'
+import type { ReservationManagementDetail } from '../../types/managementReservation'
+import type { ManagementVehicleListItem, VehicleManagementStatus, VehicleManagementStatusUpdateRequest } from '../../types/managementVehicle'
 import { resolveMediaUrl } from '../../utils/media'
 
 interface ManagerVehiclesPageProps {
   basePath?: string
-}
-
-type StatusFilter = 'all' | VehicleManagementStatus
-
-type VehicleWithOptionalRegistration = PublicVehicle & {
-  registration_number?: string | null
 }
 
 type ManagerDecision = 'DISPONIBLE' | 'A_CONTROLER' | 'INDISPONIBLE' | 'RELANCER'
@@ -42,21 +37,16 @@ interface PendingValidation {
 }
 
 interface SelectedValidation {
-  vehicle: PublicVehicle
+  vehicle: ManagementVehicleListItem
   validation: PendingValidation
 }
 
-const statusOptions: Array<{ value: StatusFilter; label: string }> = [
-  { value: 'all', label: 'Tous les statuts' },
-  { value: 'DISPONIBLE', label: 'Disponible' },
-  { value: 'RESERVE', label: 'Réservé' },
-  { value: 'LOUE', label: 'Loué' },
-  { value: 'A_CONTROLER', label: 'À contrôler' },
-  { value: 'MAINTENANCE', label: 'Maintenance' },
-  { value: 'NETTOYAGE', label: 'Nettoyage' },
-  { value: 'ACCIDENTE', label: 'Accidenté' },
-  { value: 'INDISPONIBLE', label: 'Indisponible' },
-]
+interface OperationalState {
+  label: string
+  variant: StatusVariant
+  detail: string | null
+  reservation: ReservationManagementDetail | null
+}
 
 function mapStatusToUi(status: string): { label: string; variant: StatusVariant } {
   const normalized = status.trim().toUpperCase()
@@ -83,32 +73,18 @@ function mapStatusToUi(status: string): { label: string; variant: StatusVariant 
   }
 }
 
-function expectedInterventionTypeForVehicle(status: string): InterventionType | null {
-  const normalized = status.trim().toUpperCase()
-  if (normalized === 'MAINTENANCE') {
-    return 'MECANIQUE'
-  }
-  if (normalized === 'NETTOYAGE') {
-    return 'NETTOYAGE'
-  }
-  return null
-}
-
-function getPendingValidation(vehicle: PublicVehicle, interventions: ManagementInterventionResponse[]): PendingValidation | null {
-  const interventionType = expectedInterventionTypeForVehicle(vehicle.public_status)
-  if (!interventionType) {
+function getPendingValidation(vehicle: ManagementVehicleListItem, interventions: ManagementInterventionResponse[]): PendingValidation | null {
+  if (vehicle.public_status.trim().toUpperCase() !== 'A_CONTROLER') {
     return null
   }
 
-  const latest = interventions.find((intervention) => (
-    intervention.vehicle.id === vehicle.id
-    && intervention.intervention_type === interventionType
-  ))
+  const latest = interventions.find((intervention) => intervention.vehicle.id === vehicle.id && intervention.status === 'TERMINEE')
 
-  if (!latest || latest.status !== 'TERMINEE') {
+  if (!latest) {
     return null
   }
 
+  const interventionType = latest.intervention_type
   return {
     intervention: latest,
     interventionType,
@@ -116,54 +92,134 @@ function getPendingValidation(vehicle: PublicVehicle, interventions: ManagementI
   }
 }
 
-function formatPricePerDay(amount: string): string {
-  const numericValue = Number(amount)
-
-  if (Number.isNaN(numericValue)) {
-    return `${amount} EUR / jour`
-  }
-
-  return `${new Intl.NumberFormat('fr-FR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(numericValue)} EUR / jour`
-}
-
-function getRegistrationNumber(vehicle: PublicVehicle): string | null {
-  if (!('registration_number' in vehicle)) {
+function formatOperationalDateTime(value: unknown, includeAt = false): string | null {
+  if (typeof value !== 'string' || !value.trim()) {
     return null
   }
-
-  const registration = (vehicle as VehicleWithOptionalRegistration).registration_number
-
-  if (typeof registration === 'string' && registration.trim().length > 0) {
-    return registration
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) {
+    return null
   }
-
-  return null
+  const formatted = new Intl.DateTimeFormat('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date).replace(',', '')
+  return includeAt ? formatted.replace(' ', ' à ') : formatted
 }
 
-function toPaginationPayload(payload: Awaited<ReturnType<typeof getVehicles>>): PaginatedResponse<PublicVehicle> {
-  if (Array.isArray(payload)) {
+function getOperationalState(
+  vehicle: ManagementVehicleListItem,
+  interventions: ManagementInterventionResponse[],
+  reservations: ReservationManagementDetail[],
+  pendingValidation: PendingValidation | null,
+): OperationalState {
+  const vehicleReservations = reservations
+    .filter((reservation) => reservation.vehicle.id === vehicle.id)
+    .sort((left, right) => new Date(left.start_at).getTime() - new Date(right.start_at).getTime())
+  const reassignmentReservation = vehicleReservations.find(
+    (reservation) => reservation.status === 'REAFFECTATION_REQUIRED',
+  ) ?? null
+
+  const now = Date.now()
+  const currentRental = vehicleReservations.find((reservation) => (
+    reservation.status === 'EN_COURS'
+    && new Date(reservation.start_at).getTime() <= now
+    && new Date(reservation.end_at).getTime() > now
+  ))
+  if (currentRental) {
+    const endAt = formatOperationalDateTime(currentRental.end_at, true)
     return {
-      count: payload.length,
-      next: null,
-      previous: null,
-      results: payload,
+      label: 'En location',
+      variant: 'info',
+      detail: endAt ? `Jusqu’au ${endAt}` : null,
+      reservation: currentRental,
     }
   }
 
-  return payload
+  const activeIntervention = interventions.find((intervention) => (
+    intervention.vehicle.id === vehicle.id && intervention.status === 'EN_COURS'
+  ))
+  if (activeIntervention) {
+    const checkIn = asRecord(activeIntervention.check_in)
+    const startedAt = formatOperationalDateTime(checkIn.created_at, true)
+    const plannedEndAt = formatOperationalDateTime(activeIntervention.planned_end_at, true)
+    return {
+      label: 'En intervention',
+      variant: 'warning',
+      detail: [
+        activeIntervention.intervention_type === 'MECANIQUE' ? 'Maintenance' : 'Nettoyage',
+        plannedEndAt ? `jusqu’au ${plannedEndAt}` : startedAt ? `depuis le ${startedAt}` : null,
+      ].filter(Boolean).join(' · ') || null,
+      reservation: reassignmentReservation,
+    }
+  }
+
+  if (pendingValidation) {
+    return {
+      label: 'À valider',
+      variant: 'warning',
+      detail: pendingValidation.interventionType === 'MECANIQUE' ? 'Maintenance terminée' : 'Nettoyage terminé',
+      reservation: null,
+    }
+  }
+
+  const normalizedStatus = vehicle.public_status.trim().toUpperCase()
+  const fallbackReservation = normalizedStatus === 'RESERVE' || normalizedStatus === 'LOUE'
+    ? [...vehicleReservations].sort((left, right) => new Date(right.start_at).getTime() - new Date(left.start_at).getTime())[0] ?? null
+    : null
+  const isUnavailable = !vehicle.is_active || ['ACCIDENTE', 'INDISPONIBLE', 'A_CONTROLER', 'MAINTENANCE', 'NETTOYAGE'].includes(normalizedStatus)
+  if (isUnavailable) {
+    return {
+      label: 'Indisponible',
+      variant: 'danger',
+      detail: normalizedStatus === 'ACCIDENTE' ? 'Accidenté' : null,
+      reservation: reassignmentReservation ?? fallbackReservation,
+    }
+  }
+
+  return {
+    label: 'Au parc',
+    variant: 'success',
+    detail: null,
+    reservation: reassignmentReservation ?? fallbackReservation,
+  }
+}
+
+function getRegistrationNumber(vehicle: ManagementVehicleListItem): string | null {
+  return vehicle.registration_number.trim() || null
+}
+
+function getParkingLabel(vehicle: ManagementVehicleListItem): string {
+  return [vehicle.parking_name, vehicle.parking_space_number]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(' · ') || '—'
 }
 
 interface VehicleCardProps {
-  vehicle: PublicVehicle
+  vehicle: ManagementVehicleListItem
   pendingValidation: PendingValidation | null
-  onChangeStatus: (vehicle: PublicVehicle) => void
+  operationalState: OperationalState
+  onPlanIntervention: (vehicle: ManagementVehicleListItem) => void
+  onToggleActive: (vehicle: ManagementVehicleListItem) => void
   onOpenValidation: (selection: SelectedValidation) => void
   basePath: string
   statusForm?: ReactNode
   validationPanel?: ReactNode
+}
+
+function OperationalStateDisplay({ state }: { state: OperationalState }) {
+  return (
+    <div className="space-y-1">
+      <StatusBadge variant={state.variant} label={state.label} />
+      {state.detail ? <p className="text-xs leading-5 text-slate-500">{state.detail}</p> : null}
+    </div>
+  )
+}
+
+function canPlanIntervention(vehicle: ManagementVehicleListItem, state: OperationalState): boolean {
+  return vehicle.is_active && !['En location', 'En intervention', 'À valider'].includes(state.label)
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -389,8 +445,8 @@ function InterventionReport({ intervention }: { intervention: ManagementInterven
   )
 }
 
-function VehicleMobileCard({ vehicle, pendingValidation, onChangeStatus, onOpenValidation, basePath, statusForm, validationPanel }: VehicleCardProps) {
-  const statusUi = pendingValidation ? { label: pendingValidation.label, variant: 'warning' as const } : mapStatusToUi(vehicle.public_status)
+function VehicleMobileCard({ vehicle, operationalState, onPlanIntervention, onToggleActive, basePath, statusForm, validationPanel }: VehicleCardProps) {
+  const planningEnabled = canPlanIntervention(vehicle, operationalState)
   const registrationNumber = getRegistrationNumber(vehicle)
   const mainPhotoUrl = resolveMediaUrl(vehicle.main_photo?.file)
 
@@ -417,16 +473,13 @@ function VehicleMobileCard({ vehicle, pendingValidation, onChangeStatus, onOpenV
             </p>
             <p className="text-sm text-slate-500">{vehicle.category}</p>
             <div className="mt-2">
-              <StatusBadge variant={statusUi.variant} label={statusUi.label} />
+              <OperationalStateDisplay state={operationalState} />
             </div>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-sm text-[#1F2937]">
-          <p><span className="text-slate-500">Année :</span> {vehicle.year}</p>
-          <p><span className="text-slate-500">Prix :</span> {formatPricePerDay(vehicle.category_daily_rate)}</p>
-          <p><span className="text-slate-500">Parking :</span> {vehicle.parking_name ?? '—'}</p>
-          <p><span className="text-slate-500">Place :</span> {vehicle.parking_space_number ?? '—'}</p>
+          <p className="col-span-2"><span className="text-slate-500">Parking / place :</span> {getParkingLabel(vehicle)}</p>
           {registrationNumber ? (
             <p className="col-span-2"><span className="text-slate-500">Immatriculation :</span> {registrationNumber}</p>
           ) : null}
@@ -436,12 +489,8 @@ function VehicleMobileCard({ vehicle, pendingValidation, onChangeStatus, onOpenV
           <Link to={`${basePath}/vehicles/${vehicle.id}/edit`}>
             <Button variant="secondary" size="sm">Modifier</Button>
           </Link>
-          <Button variant="secondary" size="sm" onClick={() => onChangeStatus(vehicle)}>Changer le statut</Button>
-          {pendingValidation ? (
-            <Button variant="primary" size="sm" onClick={() => onOpenValidation({ vehicle, validation: pendingValidation })}>
-              Voir le rapport / Valider
-            </Button>
-          ) : null}
+          <Button variant="secondary" size="sm" disabled={!planningEnabled} onClick={() => onPlanIntervention(vehicle)}>Planifier une intervention</Button>
+          <Button variant={vehicle.is_active ? 'danger' : 'success'} className={vehicle.is_active ? 'min-w-[10.5rem] whitespace-nowrap border border-[#EF4444] bg-[#FCA5A5] text-[#111111] hover:bg-[#F87171]' : 'min-w-[10.5rem] whitespace-nowrap border border-[#22C55E] bg-[#86EFAC] text-[#111111] hover:bg-[#4ADE80]'} size="sm" onClick={() => onToggleActive(vehicle)}>{vehicle.is_active ? 'Retirer du service' : 'Réactiver'}</Button>
         </div>
         {statusForm ? <div className="pt-2">{statusForm}</div> : null}
         {validationPanel ? <div className="pt-2">{validationPanel}</div> : null}
@@ -450,8 +499,8 @@ function VehicleMobileCard({ vehicle, pendingValidation, onChangeStatus, onOpenV
   )
 }
 
-function VehicleDesktopRow({ vehicle, pendingValidation, onChangeStatus, onOpenValidation, basePath, statusForm, validationPanel }: VehicleCardProps) {
-  const statusUi = pendingValidation ? { label: pendingValidation.label, variant: 'warning' as const } : mapStatusToUi(vehicle.public_status)
+function VehicleDesktopRow({ vehicle, operationalState, onPlanIntervention, onToggleActive, basePath, statusForm, validationPanel }: VehicleCardProps) {
+  const planningEnabled = canPlanIntervention(vehicle, operationalState)
   const registrationNumber = getRegistrationNumber(vehicle)
   const mainPhotoUrl = resolveMediaUrl(vehicle.main_photo?.file)
 
@@ -476,40 +525,33 @@ function VehicleDesktopRow({ vehicle, pendingValidation, onChangeStatus, onOpenV
         <p className="font-medium">{vehicle.brand} {vehicle.model_name}</p>
         <p className="text-slate-500">{vehicle.category}</p>
       </td>
-      <td className="px-4 py-3 text-sm text-[#1F2937]">{vehicle.year}</td>
       <td className="px-4 py-3 text-sm text-[#1F2937]">{registrationNumber ?? '—'}</td>
       <td className="px-4 py-3">
-        <StatusBadge variant={statusUi.variant} label={statusUi.label} />
+        <OperationalStateDisplay state={operationalState} />
       </td>
-      <td className="px-4 py-3 text-sm text-[#1F2937]">{formatPricePerDay(vehicle.category_daily_rate)}</td>
       <td className="px-4 py-3 text-sm text-[#1F2937]">
-        <p>{vehicle.parking_name ?? '—'}</p>
-        <p className="text-slate-500">Place: {vehicle.parking_space_number ?? '—'}</p>
+        {getParkingLabel(vehicle)}
       </td>
       <td className="px-4 py-3">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-nowrap gap-2">
           <Link to={`${basePath}/vehicles/${vehicle.id}/edit`}>
             <Button variant="secondary" size="sm">Modifier</Button>
           </Link>
-          <Button variant="secondary" size="sm" onClick={() => onChangeStatus(vehicle)}>Changer le statut</Button>
-          {pendingValidation ? (
-            <Button variant="primary" size="sm" onClick={() => onOpenValidation({ vehicle, validation: pendingValidation })}>
-              Voir le rapport / Valider
-            </Button>
-          ) : null}
+          <Button variant="secondary" size="sm" disabled={!planningEnabled} onClick={() => onPlanIntervention(vehicle)}>Planifier une intervention</Button>
+          <Button variant={vehicle.is_active ? 'danger' : 'success'} className={vehicle.is_active ? 'min-w-[10.5rem] whitespace-nowrap border border-[#EF4444] bg-[#FCA5A5] text-[#111111] hover:bg-[#F87171]' : 'min-w-[10.5rem] whitespace-nowrap border border-[#22C55E] bg-[#86EFAC] text-[#111111] hover:bg-[#4ADE80]'} size="sm" onClick={() => onToggleActive(vehicle)}>{vehicle.is_active ? 'Retirer du service' : 'Réactiver'}</Button>
         </div>
       </td>
     </tr>
     {statusForm ? (
       <tr className="border-b border-[#E5E7EB] bg-[#F8FAFC]">
-        <td colSpan={8} className="px-4 py-4">
+        <td colSpan={6} className="px-4 py-4">
           {statusForm}
         </td>
       </tr>
     ) : null}
     {validationPanel ? (
       <tr className="border-b border-[#E5E7EB] bg-[#F8FAFC]">
-        <td colSpan={8} className="px-4 py-4">
+        <td colSpan={6} className="px-4 py-4">
           {validationPanel}
         </td>
       </tr>
@@ -558,33 +600,23 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
   const queryClient = useQueryClient()
 
   const [page, setPage] = useState(1)
-  const [searchInput, setSearchInput] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [selectedVehicle, setSelectedVehicle] = useState<PublicVehicle | null>(null)
+  const [selectedVehicle, setSelectedVehicle] = useState<ManagementVehicleListItem | null>(null)
+  const [planningType, setPlanningType] = useState<'MAINTENANCE' | 'NETTOYAGE'>('MAINTENANCE')
   const [selectedValidation, setSelectedValidation] = useState<SelectedValidation | null>(null)
   const [validationDecision, setValidationDecision] = useState<ManagerDecision>('DISPONIBLE')
   const [validationReason, setValidationReason] = useState('')
   const [validationAssigneeId, setValidationAssigneeId] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
   const [statusApiError, setStatusApiError] = useState<string | null>(null)
+  const [statusConflict, setStatusConflict] = useState<InterventionPlanningConflictReservation | null>(null)
   const [statusSuccessMessage, setStatusSuccessMessage] = useState<string | null>(null)
 
   const state = location.state as { successMessage?: string } | null
   const successMessage = state?.successMessage
 
   const vehiclesQuery = useQuery({
-    queryKey: ['manager-vehicles', page, searchQuery, statusFilter],
-    queryFn: async () => {
-      const payload = await getVehicles({
-        page,
-        search: searchQuery.trim().length > 0 ? searchQuery.trim() : undefined,
-        status: statusFilter === 'all' ? undefined : statusFilter,
-        ordering: '-id',
-      })
-
-      return toPaginationPayload(payload)
-    },
+    queryKey: ['manager-vehicles', page],
+    queryFn: () => getManagementVehicles(page),
   })
 
   const assigneesQuery = useQuery({
@@ -595,25 +627,24 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
 
   const interventionsQuery = useQuery({
     queryKey: ['manager-interventions'],
-    queryFn: () => getManagementInterventions(),
+    queryFn: () => getManagementInterventions({ ordering: '-created_at' }),
+  })
+
+  const reservationsQuery = useQuery({
+    queryKey: ['manager-reservations', 'fleet-state'],
+    queryFn: () => getManagementReservations({ page_size: 100, ordering: 'start_at' }),
   })
 
   const vehicles = useMemo(() => vehiclesQuery.data?.results ?? [], [vehiclesQuery.data?.results])
   const interventions = useMemo(() => interventionsQuery.data?.results ?? [], [interventionsQuery.data?.results])
+  const reservations = useMemo(() => reservationsQuery.data?.results ?? [], [reservationsQuery.data?.results])
 
   const statusMutation = useMutation({
     mutationFn: ({ vehicleId, payload }: { vehicleId: number; payload: VehicleManagementStatusUpdateRequest }) =>
       updateVehicleStatus(vehicleId, payload),
   })
 
-  const createInterventionMutation = useMutation({
-    mutationFn: createManagementIntervention,
-  })
-
-  const assignInterventionMutation = useMutation({
-    mutationFn: ({ id, assignedUserId }: { id: number; assignedUserId: number }) =>
-      assignManagementIntervention(id, { assigned_user_id: assignedUserId }),
-  })
+  const planInterventionMutation = useMutation({ mutationFn: planManagementIntervention })
 
   const validationStatusMutation = useMutation({
     mutationFn: ({ vehicleId, status }: { vehicleId: number; status: VehicleManagementStatus }) =>
@@ -646,21 +677,22 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
     return assignees.filter((assignee) => assignee.role === expectedRole)
   }, [assigneesQuery.data, selectedValidation])
 
-  const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setPage(1)
-    setSearchQuery(searchInput)
-  }
-
-  const handleStatusChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    setStatusFilter(event.target.value as StatusFilter)
-    setPage(1)
-  }
-
-  const handleOpenStatusForm = (vehicle: PublicVehicle) => {
+  const handleOpenPlanningForm = (vehicle: ManagementVehicleListItem) => {
     setSelectedVehicle(vehicle)
+    setPlanningType('MAINTENANCE')
     setStatusApiError(null)
+    setStatusConflict(null)
     setStatusSuccessMessage(null)
+  }
+
+  const handleToggleActive = async (vehicle: ManagementVehicleListItem) => {
+    setStatusApiError(null)
+    try {
+      await updateVehicle(vehicle.id, { is_active: !vehicle.is_active })
+      await queryClient.invalidateQueries({ queryKey: ['manager-vehicles'] })
+    } catch (error) {
+      setStatusApiError(getStatusSubmitError(error))
+    }
   }
 
   const handleOpenValidation = (selection: SelectedValidation) => {
@@ -672,7 +704,11 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
     setValidationError(null)
   }
 
-  const handleSubmitStatus = async (payload: VehicleManagementStatusUpdateRequest & { assigned_user_id?: number }) => {
+  const handleSubmitStatus = async (payload: VehicleManagementStatusUpdateRequest & {
+    assigned_user_id?: number
+    planned_start_at?: string
+    planned_end_at?: string
+  }) => {
     if (!selectedVehicle) {
       return
     }
@@ -683,38 +719,35 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
         ? 'NETTOYAGE'
         : null
 
-    if (interventionType && !payload.assigned_user_id) {
-      setStatusApiError('Veuillez sélectionner une personne à affecter.')
+    if (interventionType && (!payload.assigned_user_id || !payload.planned_start_at || !payload.planned_end_at || !payload.reason)) {
+      setStatusApiError('L’intervenant, la période prévue et le motif sont obligatoires.')
       return
     }
 
     setStatusApiError(null)
+    setStatusConflict(null)
     setStatusSuccessMessage(null)
 
     try {
-      const statusPayload: VehicleManagementStatusUpdateRequest = {
-        status: payload.status,
-        reason: payload.reason,
-      }
-      const updatedVehicle = await statusMutation.mutateAsync({
-        vehicleId: selectedVehicle.id,
-        payload: statusPayload,
-      })
-
       let assignedInterventionReference: string | null = null
+      let updatedStatus = payload.status
 
-      if (interventionType && payload.assigned_user_id) {
-        const intervention = await createInterventionMutation.mutateAsync({
+      if (interventionType && payload.assigned_user_id && payload.planned_start_at && payload.planned_end_at) {
+        const intervention = await planInterventionMutation.mutateAsync({
           vehicle_id: selectedVehicle.id,
-          reservation_id: null,
           type: interventionType,
+          assigned_user_id: payload.assigned_user_id,
+          planned_start_at: payload.planned_start_at,
+          planned_end_at: payload.planned_end_at,
           description: payload.reason ?? '',
         })
-        const assignedIntervention = await assignInterventionMutation.mutateAsync({
-          id: intervention.id,
-          assignedUserId: payload.assigned_user_id,
+        assignedInterventionReference = intervention.reference
+      } else {
+        const updatedVehicle = await statusMutation.mutateAsync({
+          vehicleId: selectedVehicle.id,
+          payload: { status: payload.status, reason: payload.reason },
         })
-        assignedInterventionReference = assignedIntervention.reference
+        updatedStatus = updatedVehicle.public_status as VehicleManagementStatus
       }
 
       await Promise.all([
@@ -727,7 +760,7 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
         queryClient.invalidateQueries({ queryKey: ['cleaning-interventions'] }),
       ])
 
-      const updatedStatusUi = mapStatusToUi(updatedVehicle.public_status)
+      const updatedStatusUi = mapStatusToUi(updatedStatus)
       setStatusSuccessMessage(
         assignedInterventionReference
           ? `Nouveau statut enregistré: ${updatedStatusUi.label}. Intervention ${assignedInterventionReference} assignée.`
@@ -735,6 +768,26 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
       )
       setSelectedVehicle(null)
     } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const data = error.response?.data as { code?: unknown; detail?: unknown; reservation?: unknown; intervention?: unknown } | undefined
+        if (data?.code === 'RESERVATION_CONFLICT' && data.reservation && typeof data.reservation === 'object') {
+          setStatusConflict(data.reservation as InterventionPlanningConflictReservation)
+          setStatusApiError(null)
+          return
+        }
+        if (data?.code === 'INTERVENTION_CONFLICT' && data.intervention && typeof data.intervention === 'object') {
+          const conflict = data.intervention as { planned_start_at?: string; planned_end_at?: string; reference?: string }
+          setStatusApiError(
+            `${data.detail ?? 'Créneau indisponible'}${conflict.reference ? ` (${conflict.reference})` : ''}`
+              + (conflict.planned_start_at && conflict.planned_end_at ? ` ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflict.planned_start_at))} → ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflict.planned_end_at))}` : ''),
+          )
+          return
+        }
+        if (typeof data?.detail === 'string' && data.detail.trim()) {
+          setStatusApiError(data.detail)
+          return
+        }
+      }
       setStatusApiError(getStatusSubmitError(error))
     }
   }
@@ -796,7 +849,7 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
     }
   }
 
-  const renderStatusFormFor = (vehicle: PublicVehicle): ReactNode => {
+  const renderStatusFormFor = (vehicle: ManagementVehicleListItem): ReactNode => {
     if (selectedVehicle?.id !== vehicle.id) {
       return null
     }
@@ -812,14 +865,21 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
         onCancel={() => {
           setSelectedVehicle(null)
           setStatusApiError(null)
+          setStatusConflict(null)
         }}
-        isSubmitting={statusMutation.isPending || createInterventionMutation.isPending || assignInterventionMutation.isPending}
+        isSubmitting={statusMutation.isPending || planInterventionMutation.isPending}
         apiError={statusApiError}
+        conflictReservation={statusConflict}
+        reservationBasePath={`${basePath}/reservations`}
+        forcedStatus={planningType}
+        vehicleId={selectedVehicle.id}
+        reservations={reservations}
+        interventions={interventions}
       />
     )
   }
 
-  const renderValidationPanelFor = (vehicle: PublicVehicle): ReactNode => {
+  const renderValidationPanelFor = (vehicle: ManagementVehicleListItem): ReactNode => {
     if (!selectedValidation || selectedValidation.vehicle.id !== vehicle.id) {
       return null
     }
@@ -906,51 +966,15 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
   return (
     <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold text-[#0F172A]">Gestion des véhicules</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Gérez la flotte et l'état des véhicules AutoRental.
-          </p>
-        </div>
+        <h1 className="text-3xl font-semibold text-[#0F172A]">Gestion des véhicules</h1>
 
-        <Link to={`${basePath}/vehicles/new`}>
-          <Button>Ajouter un véhicule</Button>
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link to={`${basePath}/vehicles/new`}>
+            <Button>Ajouter un véhicule</Button>
+          </Link>
+          <Button variant="secondary" onClick={() => navigate('/')}>Retour</Button>
+        </div>
       </div>
-
-      <Card>
-        <div className="grid gap-4 md:grid-cols-[1fr_260px_auto] md:items-end">
-          <form onSubmit={handleSearchSubmit} className="contents">
-            <Input
-              type="search"
-              label="Rechercher"
-              placeholder="Marque ou modèle"
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-            />
-
-            <div className="space-y-2">
-              <label htmlFor="vehicle-status-filter" className="block text-sm font-medium text-[#1F2937]">
-                Statut
-              </label>
-              <select
-                id="vehicle-status-filter"
-                value={statusFilter}
-                onChange={handleStatusChange}
-                className="block h-12.5 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-              >
-                {statusOptions.map((status) => (
-                  <option key={status.value} value={status.value}>
-                    {status.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <Button type="submit" className="w-full md:w-auto">Rechercher</Button>
-          </form>
-        </div>
-      </Card>
 
       {successMessage ? (
         <Alert
@@ -1015,12 +1039,15 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
           <div className="flex flex-col gap-4 lg:hidden">
             {vehicles.map((vehicle) => {
               const pendingValidation = getPendingValidation(vehicle, interventions)
+              const operationalState = getOperationalState(vehicle, interventions, reservations, pendingValidation)
               return (
                 <VehicleMobileCard
                   key={vehicle.id}
                   vehicle={vehicle}
                   pendingValidation={pendingValidation}
-                  onChangeStatus={handleOpenStatusForm}
+                  operationalState={operationalState}
+                  onPlanIntervention={handleOpenPlanningForm}
+                  onToggleActive={handleToggleActive}
                   onOpenValidation={handleOpenValidation}
                   basePath={basePath}
                   statusForm={renderStatusFormFor(vehicle)}
@@ -1036,10 +1063,8 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
                 <tr>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Photo</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Véhicule</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Année</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Immatriculation</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Statut</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Prix journalier</th>
+                  <th className="min-w-[8.5rem] whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">État actuel</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Parking / place</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</th>
                 </tr>
@@ -1047,12 +1072,15 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
               <tbody>
                 {vehicles.map((vehicle) => {
                   const pendingValidation = getPendingValidation(vehicle, interventions)
+                  const operationalState = getOperationalState(vehicle, interventions, reservations, pendingValidation)
                   return (
                     <VehicleDesktopRow
                       key={vehicle.id}
                       vehicle={vehicle}
                       pendingValidation={pendingValidation}
-                      onChangeStatus={handleOpenStatusForm}
+                      operationalState={operationalState}
+                      onPlanIntervention={handleOpenPlanningForm}
+                      onToggleActive={handleToggleActive}
                       onOpenValidation={handleOpenValidation}
                       basePath={basePath}
                       statusForm={renderStatusFormFor(vehicle)}

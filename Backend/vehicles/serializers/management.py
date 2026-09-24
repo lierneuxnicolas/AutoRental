@@ -4,10 +4,32 @@ from rest_framework import serializers
 
 from interventions.models import Intervention
 from vehicles.models import Brand, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment
+from vehicles.serializers.public import VehiclePhotoPublicSerializer
 
 
 def _normalize_registration(value: str) -> str:
 	return " ".join(value.split()).upper()
+
+
+class VehicleManagementListSerializer(serializers.Serializer):
+	id = serializers.IntegerField(read_only=True)
+	brand = serializers.CharField(source="brand.name", read_only=True)
+	model_name = serializers.CharField(read_only=True)
+	category = serializers.CharField(source="category.name", read_only=True)
+	registration_number = serializers.CharField(read_only=True)
+	is_active = serializers.BooleanField(read_only=True)
+	public_status = serializers.CharField(source="status", read_only=True)
+	parking_name = serializers.CharField(source="parking_space.parking.name", read_only=True)
+	parking_space_number = serializers.CharField(source="parking_space.number", read_only=True)
+	main_photo = serializers.SerializerMethodField()
+
+	def get_main_photo(self, obj):
+		photos = list(obj.photos.all())
+		primary = next((photo for photo in photos if photo.is_primary), None)
+		photo = primary or (photos[0] if photos else None)
+		if photo is None:
+			return None
+		return VehiclePhotoPublicSerializer(photo, context=self.context).data
 
 
 class VehicleManagementWriteSerializer(serializers.ModelSerializer):
@@ -21,7 +43,7 @@ class VehicleManagementWriteSerializer(serializers.ModelSerializer):
 		queryset=VehicleEquipment.objects.filter(is_active=True),
 	)
 	fuel_type = serializers.CharField(source="energy_type")
-	status = serializers.ChoiceField(choices=Vehicle.Status.choices)
+	status = serializers.ChoiceField(choices=Vehicle.Status.choices, required=False, default=Vehicle.Status.DISPONIBLE)
 
 	class Meta:
 		model = Vehicle
@@ -132,6 +154,7 @@ class VehicleManagementWriteSerializer(serializers.ModelSerializer):
 
 	def create(self, validated_data):
 		daily_rate = validated_data.pop("category_daily_rate", None)
+		validated_data["status"] = Vehicle.Status.DISPONIBLE
 		vehicle = super().create(validated_data)
 		self._save_category_daily_rate(vehicle, daily_rate)
 		return vehicle

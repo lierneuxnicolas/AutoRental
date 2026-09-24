@@ -2,6 +2,7 @@ import api from './api'
 import type {
   BrandOption,
   ManagementVehicleDetailResponse,
+  ManagementVehicleListItem,
   ManagementVehicleResponse,
   ParkingSpaceOption,
   VehicleCategoryOption,
@@ -12,6 +13,7 @@ import type {
   VehiclePhotoCreateRequest,
   VehiclePhotoRead,
 } from '../types/managementVehicle'
+import type { PaginatedResponse } from '../types/vehicle'
 
 export async function getBrands(): Promise<BrandOption[]> {
   const { data } = await api.get<BrandOption[]>('/brands/')
@@ -37,6 +39,13 @@ export async function createVehicle(
   payload: VehicleManagementCreateRequest,
 ): Promise<ManagementVehicleResponse> {
   const { data } = await api.post<ManagementVehicleResponse>('/management/vehicles/', payload)
+  return data
+}
+
+export async function getManagementVehicles(page = 1): Promise<PaginatedResponse<ManagementVehicleListItem>> {
+  const { data } = await api.get<PaginatedResponse<ManagementVehicleListItem>>('/management/vehicles/', {
+    params: { page },
+  })
   return data
 }
 

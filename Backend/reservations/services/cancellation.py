@@ -403,6 +403,7 @@ def cancel_reservation(
     reservation: Reservation,
     requested_by,
     reason: str,
+    allow_reassignment_required: bool = False,
 ) -> Reservation:
     """
     Annule une réservation.
@@ -454,7 +455,7 @@ def cancel_reservation(
             "Le client n'a pas d'utilisateur associé.",
         )
 
-    if owner != requested_by:
+    if owner != requested_by and not allow_reassignment_required:
         _raise_cancellation_error(
             "FORBIDDEN",
             "Vous ne pouvez annuler que vos propres réservations.",
@@ -488,7 +489,14 @@ def cancel_reservation(
                 "La réservation est déjà annulée.",
             )
 
-        if not is_status_cancellable(reservation_locked.status, reservation=reservation_locked):
+        is_management_reassignment_cancellation = (
+            allow_reassignment_required
+            and reservation_locked.status == Reservation.Status.REAFFECTATION_REQUIRED
+        )
+        if not is_management_reassignment_cancellation and not is_status_cancellable(
+            reservation_locked.status,
+            reservation=reservation_locked,
+        ):
             _raise_cancellation_error(
                 "CANNOT_CANCEL",
                 f"Une réservation au statut '{reservation_locked.get_status_display()}' ne peut pas être annulée.",
@@ -496,6 +504,12 @@ def cancel_reservation(
             )
 
         financials = calculate_cancellation_financials(reservation=reservation_locked)
+        if is_management_reassignment_cancellation:
+            financials = CancellationFinancialBreakdown(
+                amount_paid=financials.amount_paid,
+                cancellation_fee=Decimal("0.00"),
+                refundable_amount=financials.amount_paid,
+            )
         _execute_cancellation_financial_operations(
             reservation=reservation_locked,
             requested_by=requested_by,
@@ -527,12 +541,20 @@ def cancel_reservation(
             lambda: create_notification(
                 user=owner,
                 notification_type="RESERVATION_CANCELLED",
-                title="Reservation annulee",
+                title="Réservation annulée" if is_management_reassignment_cancellation else "Reservation annulee",
                 message=(
-                    "Votre reservation a ete annulee. "
-                    f"Remboursement : {_format_eur_amount(financials.refundable_amount)}. "
-                    f"Frais : {_format_eur_amount(financials.cancellation_fee)}. "
-                    "Caution liberee."
+                    (
+                        f"Votre réservation {reservation_locked.reference} a été annulée car le véhicule prévu "
+                        "est indisponible et aucun véhicule de remplacement n’a pu être proposé."
+                        + (" Le remboursement a été initié." if financials.refundable_amount > Decimal("0.00") else "")
+                    )
+                    if is_management_reassignment_cancellation
+                    else (
+                        "Votre reservation a ete annulee. "
+                        f"Remboursement : {_format_eur_amount(financials.refundable_amount)}. "
+                        f"Frais : {_format_eur_amount(financials.cancellation_fee)}. "
+                        "Caution liberee."
+                    )
                 ),
                 related_object_type="reservation",
                 related_object_id=reservation_locked.id,

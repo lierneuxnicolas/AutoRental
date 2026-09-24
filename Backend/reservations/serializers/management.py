@@ -20,6 +20,7 @@ from interventions.models import Intervention
 from interventions.serializers import InterventionManagementResponseSerializer
 from reservations.models import Reservation
 from vehicles.models import Vehicle
+from vehicles.serializers.public import VehiclePhotoPublicSerializer
 
 
 # ==============================================================================
@@ -58,6 +59,18 @@ class ReservationManagementVehicleSummarySerializer(serializers.Serializer):
     transmission = serializers.CharField(read_only=True)
     seats = serializers.IntegerField(read_only=True)
     doors = serializers.IntegerField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    parking_name = serializers.CharField(source="parking_space.parking.name", read_only=True)
+    parking_space_number = serializers.CharField(source="parking_space.number", read_only=True)
+    main_photo = serializers.SerializerMethodField()
+
+    def get_main_photo(self, obj):
+        photos = list(obj.photos.all())
+        primary = next((photo for photo in photos if photo.is_primary), None)
+        photo = primary or (photos[0] if photos else None)
+        if photo is None:
+            return None
+        return VehiclePhotoPublicSerializer(photo, context=self.context).data
 
 
 class ReservationManagementInspectionSerializer(serializers.ModelSerializer):
@@ -243,3 +256,38 @@ class ReservationManagementIssueResponseSerializer(serializers.Serializer):
     message = serializers.CharField(read_only=True)
     reservation = ReservationManagementDetailSerializer(read_only=True)
     intervention = InterventionManagementResponseSerializer(read_only=True, allow_null=True)
+
+
+class ReservationReplacementVehicleSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    brand = serializers.CharField(source="brand.name", read_only=True)
+    model_name = serializers.CharField(read_only=True)
+    registration_number = serializers.CharField(read_only=True)
+    category = serializers.CharField(source="category.name", read_only=True)
+    category_daily_rate = serializers.DecimalField(source="category.daily_rate", max_digits=10, decimal_places=2, read_only=True)
+    parking_name = serializers.CharField(source="parking_space.parking.name", read_only=True)
+    parking_space_number = serializers.CharField(source="parking_space.number", read_only=True)
+    main_photo = serializers.SerializerMethodField()
+
+    def get_main_photo(self, obj):
+        photos = list(obj.photos.all())
+        primary = next((photo for photo in photos if photo.is_primary), None)
+        photo = primary or (photos[0] if photos else None)
+        if photo is None:
+            return None
+        return VehiclePhotoPublicSerializer(photo, context=self.context).data
+
+
+class ReservationReassignRequestSerializer(serializers.Serializer):
+    vehicle_id = serializers.IntegerField(min_value=1)
+
+
+class ReservationReassignResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(read_only=True)
+    reservation = ReservationManagementDetailSerializer(read_only=True)
+
+
+class ReservationUnavailableCancellationResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(read_only=True)
+    reservation = ReservationManagementDetailSerializer(read_only=True)
+    refund_initiated = serializers.BooleanField(read_only=True)

@@ -46,6 +46,25 @@ export interface ManagementInterventionAssignRequest {
   assigned_user_id?: number
 }
 
+export interface ManagementInterventionPlanRequest {
+  vehicle_id: number
+  type: InterventionType
+  assigned_user_id: number
+  planned_start_at: string
+  planned_end_at: string
+  description: string
+}
+
+export type InterventionDecision = 'RETURN_TO_PARK' | 'MARK_UNAVAILABLE' | 'PLAN_MAINTENANCE' | 'PLAN_CLEANING'
+
+export interface InterventionPlanningConflictReservation {
+  id: number
+  reference: string
+  client: string
+  start_at: string
+  end_at: string
+}
+
 export interface ManagementInterventionResponse {
   id: number
   reference: string
@@ -62,6 +81,8 @@ export interface ManagementInterventionResponse {
   work_data?: Record<string, unknown> | null
   final_report?: Record<string, unknown> | null
   estimated_cost?: string | number | null
+  planned_start_at?: string | null
+  planned_end_at?: string | null
   created_at: string
   updated_at: string
 }

@@ -14,6 +14,8 @@ from interventions.serializers import (
 	InterventionManagementAssignSerializer,
 	InterventionAssignableUserSerializer,
 	InterventionManagementCreateSerializer,
+	InterventionManagementPlanSerializer,
+	InterventionDecisionSerializer,
 	InterventionManagementResponseSerializer,
 	InterventionWorkerCheckInSerializer,
 	InterventionWorkerCheckOutSerializer,
@@ -27,6 +29,7 @@ from interventions.services import (
 	InterventionAssignmentError,
 	InterventionCreationError,
 	InterventionWorkflowError,
+	InterventionPlanningError,
 	add_assigned_intervention_photo,
 	assign_intervention,
 	check_in_assigned_intervention,
@@ -36,6 +39,9 @@ from interventions.services import (
 	get_assigned_intervention,
 	interrupt_assigned_intervention,
 	list_assigned_interventions,
+	plan_intervention,
+	InterventionDecisionError,
+	decide_intervention,
 	save_assigned_intervention_work,
 	start_assigned_intervention,
 )
@@ -139,6 +145,68 @@ class InterventionManagementCreateListView(generics.GenericAPIView):
 		queryset = self.get_queryset()
 		response_serializer = InterventionManagementResponseSerializer(queryset, many=True, context={"request": request})
 		return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class InterventionManagementPlanView(generics.GenericAPIView):
+	permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+	serializer_class = InterventionManagementPlanSerializer
+
+	def post(self, request, *args, **kwargs):
+		serializer = self.get_serializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+		try:
+			intervention = plan_intervention(
+				vehicle_id=serializer.validated_data["vehicle_id"],
+				intervention_type=serializer.validated_data["intervention_type"],
+				assigned_user_id=serializer.validated_data["assigned_user_id"],
+				planned_start_at=serializer.validated_data["planned_start_at"],
+				planned_end_at=serializer.validated_data["planned_end_at"],
+				description=serializer.validated_data["description"],
+				manager=request.user,
+			)
+		except InterventionPlanningError as error:
+			payload = {"code": error.code, "detail": error.message}
+			if error.conflict_reservation is not None:
+				reservation = error.conflict_reservation
+				payload["reservation"] = {
+					"id": reservation.id,
+					"reference": reservation.reference,
+					"client": f"{reservation.client.user.last_name} {reservation.client.user.first_name}".strip(),
+					"start_at": reservation.start_at,
+					"end_at": reservation.end_at,
+				}
+			if error.conflict_intervention is not None:
+				payload["intervention"] = {
+					"id": error.conflict_intervention.id,
+					"reference": error.conflict_intervention.reference,
+					"planned_start_at": error.conflict_intervention.planned_start_at,
+					"planned_end_at": error.conflict_intervention.planned_end_at,
+				}
+			return Response(payload, status=status.HTTP_409_CONFLICT)
+
+		return Response(
+			InterventionManagementResponseSerializer(intervention, context={"request": request}).data,
+			status=status.HTTP_201_CREATED,
+		)
+
+class InterventionManagementDecisionView(generics.GenericAPIView):
+	permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+	serializer_class = InterventionDecisionSerializer
+
+	def post(self, request, id):
+		serializer = self.get_serializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+		data = serializer.validated_data
+		planning = None
+		if data["decision"] in {Intervention.Decision.PLAN_MAINTENANCE, Intervention.Decision.PLAN_CLEANING}:
+			if not all(data.get(key) for key in ("assigned_user_id", "planned_start_at", "planned_end_at")):
+				return Response({"detail": "Les informations de planification sont obligatoires."}, status=status.HTTP_400_BAD_REQUEST)
+			planning = data
+		try:
+			intervention = decide_intervention(intervention_id=id, decision=data["decision"], manager=request.user, comment=data.get("comment", ""), planning=planning)
+		except InterventionDecisionError as error:
+			return Response({"code": error.code, "detail": error.message}, status=status.HTTP_409_CONFLICT)
+		return Response(InterventionManagementResponseSerializer(intervention, context={"request": request}).data, status=status.HTTP_200_OK)
 
 
 class InterventionManagementAssignView(generics.GenericAPIView):

@@ -7,6 +7,9 @@ import type {
   ManagementReservationValidationResponse,
   PaginatedManagementReservationListResponse,
   ReservationManagementDetail,
+  ReservationReassignmentResponse,
+  ReservationReplacementVehicle,
+  ReservationUnavailableCancellationResponse,
 } from '../types/managementReservation'
 
 export async function getManagementReservations(
@@ -23,6 +26,35 @@ export async function getManagementReservationById(
   id: number | string,
 ): Promise<ReservationManagementDetail> {
   const { data } = await api.get<ReservationManagementDetail>(`/management/reservations/${id}/`)
+  return data
+}
+
+export async function getReservationReplacementVehicles(
+  id: number | string,
+): Promise<ReservationReplacementVehicle[]> {
+  const { data } = await api.get<ReservationReplacementVehicle[]>(
+    `/management/reservations/${id}/replacement-vehicles/`,
+  )
+  return data
+}
+
+export async function reassignManagementReservation(
+  id: number | string,
+  vehicleId: number,
+): Promise<ReservationReassignmentResponse> {
+  const { data } = await api.post<ReservationReassignmentResponse>(
+    `/management/reservations/${id}/reassign/`,
+    { vehicle_id: vehicleId },
+  )
+  return data
+}
+
+export async function cancelUnavailableManagementReservation(
+  id: number | string,
+): Promise<ReservationUnavailableCancellationResponse> {
+  const { data } = await api.post<ReservationUnavailableCancellationResponse>(
+    `/management/reservations/${id}/cancel-unavailable/`,
+  )
   return data
 }
 
