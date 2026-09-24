@@ -24,6 +24,8 @@ class Notification(models.Model):
 		INTERVENTION_COMPLETED = "INTERVENTION_COMPLETED", "Intervention completed"
 		INVOICE_AVAILABLE = "INVOICE_AVAILABLE", "Invoice available"
 		VEHICLE_REQUIRES_REVIEW = "VEHICLE_REQUIRES_REVIEW", "Vehicle requires review"
+		RESERVATION_REASSIGNMENT_REQUIRED = "RESERVATION_REASSIGNMENT_REQUIRED", "Reservation reassignment required"
+		RESERVATION_REASSIGNED = "RESERVATION_REASSIGNED", "Reservation reassigned"
 
 		# Existing codes kept for backward compatibility with current services/tests.
 		PASSWORD_CHANGED = "PASSWORD_CHANGED", "Password changed"

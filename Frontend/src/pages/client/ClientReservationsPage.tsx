@@ -20,6 +20,8 @@ function mapStatusToUi(status: ReservationStatus | undefined): { label: string; 
       return { label: 'En attente paiement', variant: 'warning' }
     case 'CONFIRMEE':
       return { label: 'Confirmée', variant: 'success' }
+    case 'REAFFECTATION_REQUIRED':
+      return { label: 'À réaffecter', variant: 'warning' }
     case 'EN_COURS':
       return { label: 'En cours', variant: 'info' }
     case 'A_CONTROLER':

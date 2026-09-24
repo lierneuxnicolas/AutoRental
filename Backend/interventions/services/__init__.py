@@ -16,6 +16,8 @@ from interventions.services.creation import (
     InterventionCreationError,
     create_intervention,
 )
+from interventions.services.planning import InterventionPlanningError, plan_intervention
+from interventions.services.decision import InterventionDecisionError, decide_intervention
 from interventions.services.workflows import (
     InterventionWorkflowError,
     add_assigned_intervention_photo,
@@ -33,6 +35,7 @@ __all__ = [
     "InterventionAssignmentError",
     "InterventionCreationError",
     "InterventionWorkflowError",
+    "InterventionPlanningError",
     "VehicleAccessError",
     "VehicleAccessLifecycleError",
     "activate_vehicle_access",
@@ -48,6 +51,9 @@ __all__ = [
     "lock_and_revoke_after_return",
     "lock_vehicle",
     "list_assigned_interventions",
+    "plan_intervention",
+    "InterventionDecisionError",
+    "decide_intervention",
     "revoke_vehicle_access",
     "save_assigned_intervention_work",
     "start_assigned_intervention",

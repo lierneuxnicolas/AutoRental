@@ -22,7 +22,7 @@ Les informations utiles leur seront exposées uniquement via:
 Aucun endpoint général n'est créé pour eux.
 """
 
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import generics, status
@@ -43,8 +43,18 @@ from reservations.serializers.management import (
     ReservationManagementIssueRequestSerializer,
     ReservationManagementIssueResponseSerializer,
     ReservationManagementListSerializer,
+    ReservationReassignRequestSerializer,
+    ReservationReassignResponseSerializer,
+    ReservationReplacementVehicleSerializer,
+    ReservationUnavailableCancellationResponseSerializer,
 )
 from reservations.services import ReservationCompletionError, complete_reservation, report_return_issue
+from reservations.services.reassignment import (
+    ReservationReassignmentError,
+    get_replacement_vehicles,
+    reassign_reservation,
+)
+from reservations.services.cancellation import CancellationError, cancel_reservation
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou d'autorisation.")
@@ -101,6 +111,17 @@ class ReservationManagementFilterSet(filters.FilterSet):
     client_first_name = filters.CharFilter(field_name="client__user__first_name", lookup_expr="icontains")
     client_last_name = filters.CharFilter(field_name="client__user__last_name", lookup_expr="icontains")
     vehicle_registration_plate = filters.CharFilter(field_name="vehicle__registration_number", lookup_expr="icontains")
+    vehicle_search = filters.CharFilter(method="filter_vehicle_search")
+
+    def filter_vehicle_search(self, queryset, name, value):
+        cleaned_value = (value or "").strip()
+        if not cleaned_value:
+            return queryset
+        return queryset.filter(
+            Q(vehicle__brand__name__icontains=cleaned_value)
+            | Q(vehicle__model_name__icontains=cleaned_value)
+            | Q(vehicle__registration_number__icontains=cleaned_value)
+        )
 
     class Meta:
         model = Reservation
@@ -156,6 +177,8 @@ class ReservationManagementListView(generics.ListAPIView):
         "client__user__email",
         "client__user__first_name",
         "client__user__last_name",
+        "vehicle__brand__name",
+        "vehicle__model_name",
         "vehicle__registration_number",
     ]
     ordering_fields = ["created_at", "start_at", "rental_amount"]
@@ -171,7 +194,9 @@ class ReservationManagementListView(generics.ListAPIView):
             "vehicle",
             "vehicle__brand",
             "vehicle__category",
-        ).order_by(*self.ordering)
+            "vehicle__parking_space",
+            "vehicle__parking_space__parking",
+        ).prefetch_related("vehicle__photos").order_by(*self.ordering)
 
     @extend_schema(
         tags=["Reservation Management"],
@@ -361,7 +386,10 @@ class ReservationManagementDetailView(generics.RetrieveAPIView):
             "vehicle",
             "vehicle__brand",
             "vehicle__category",
+            "vehicle__parking_space",
+            "vehicle__parking_space__parking",
         ).prefetch_related(
+            "vehicle__photos",
             Prefetch(
                 "inspections",
                 queryset=Inspection.objects.select_related("completed_by").prefetch_related(
@@ -407,6 +435,100 @@ class ReservationManagementDetailView(generics.RetrieveAPIView):
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+
+
+class ReservationReplacementVehicleListView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    serializer_class = ReservationReplacementVehicleSerializer
+
+    def get(self, request, pk):
+        reservation = generics.get_object_or_404(
+            Reservation.objects.select_related("vehicle", "vehicle__category"),
+            pk=pk,
+        )
+        try:
+            vehicles = get_replacement_vehicles(reservation=reservation)
+        except ReservationReassignmentError as error:
+            return Response({"code": error.code, "detail": str(error)}, status=error.http_status)
+
+        return Response(
+            ReservationReplacementVehicleSerializer(vehicles, many=True, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class ReservationReassignView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    serializer_class = ReservationReassignRequestSerializer
+
+    def post(self, request, pk):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            reservation = reassign_reservation(
+                reservation_id=pk,
+                new_vehicle_id=serializer.validated_data["vehicle_id"],
+                actor=request.user,
+            )
+        except ReservationReassignmentError as error:
+            return Response({"code": error.code, "detail": str(error)}, status=error.http_status)
+
+        reservation = ReservationManagementDetailView().get_queryset().get(pk=reservation.pk)
+        payload = {
+            "message": "Réservation réaffectée avec succès.",
+            "reservation": reservation,
+        }
+        return Response(
+            ReservationReassignResponseSerializer(payload, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class ReservationUnavailableCancellationView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    serializer_class = ReservationUnavailableCancellationResponseSerializer
+
+    def post(self, request, pk):
+        reservation = generics.get_object_or_404(
+            Reservation.objects.select_related("client", "client__user", "vehicle", "vehicle__category"),
+            pk=pk,
+        )
+        try:
+            if get_replacement_vehicles(reservation=reservation).exists():
+                return Response(
+                    {
+                        "code": "REPLACEMENT_AVAILABLE",
+                        "detail": "Un véhicule de remplacement est encore disponible pour cette période.",
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+        except ReservationReassignmentError as error:
+            return Response({"code": error.code, "detail": str(error)}, status=error.http_status)
+
+        try:
+            reservation = cancel_reservation(
+                reservation=reservation,
+                requested_by=request.user,
+                reason="Véhicule indisponible — aucun remplacement disponible",
+                allow_reassignment_required=True,
+            )
+        except CancellationError as error:
+            payload = {"code": error.code, "detail": error.message}
+            if error.details:
+                payload["details"] = error.details
+            return Response(payload, status=status.HTTP_409_CONFLICT)
+
+        refund_initiated = reservation.cancellation_financials.refundable_amount > 0
+        reservation = ReservationManagementDetailView().get_queryset().get(pk=reservation.pk)
+        payload = {
+            "message": "Réservation annulée.",
+            "reservation": reservation,
+            "refund_initiated": refund_initiated,
+        }
+        return Response(
+            ReservationUnavailableCancellationResponseSerializer(payload, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class ReservationManagementCompleteView(generics.GenericAPIView):

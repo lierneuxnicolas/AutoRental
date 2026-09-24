@@ -8,6 +8,11 @@ from django.db.models import Q
 
 
 class Intervention(models.Model):
+	class Decision(models.TextChoices):
+		RETURN_TO_PARK = "RETURN_TO_PARK", "Remis au parc"
+		MARK_UNAVAILABLE = "MARK_UNAVAILABLE", "Rendu indisponible"
+		PLAN_MAINTENANCE = "PLAN_MAINTENANCE", "Nouvelle maintenance planifiée"
+		PLAN_CLEANING = "PLAN_CLEANING", "Nouveau nettoyage planifié"
 	class Type(models.TextChoices):
 		MECANIQUE = "MECANIQUE", "Mecanique"
 		NETTOYAGE = "NETTOYAGE", "Nettoyage"
@@ -58,8 +63,14 @@ class Intervention(models.Model):
 	report = models.TextField(blank=True)
 	estimated_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 	final_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+	planned_start_at = models.DateTimeField(null=True, blank=True)
+	planned_end_at = models.DateTimeField(null=True, blank=True)
 	started_at = models.DateTimeField(null=True, blank=True)
 	completed_at = models.DateTimeField(null=True, blank=True)
+	decision = models.CharField(max_length=30, choices=Decision.choices, null=True, blank=True)
+	decided_at = models.DateTimeField(null=True, blank=True)
+	decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="intervention_decisions")
+	decision_comment = models.TextField(blank=True)
 	cancelled_at = models.DateTimeField(null=True, blank=True)
 	cancellation_reason = models.TextField(blank=True)
 	created_at = models.DateTimeField(auto_now_add=True)
@@ -116,6 +127,11 @@ class Intervention(models.Model):
 				raise ValidationError(
 					{"assigned_to": f"Le role assigne doit etre {expected_role} pour ce type d'intervention."}
 				)
+
+		if bool(self.planned_start_at) != bool(self.planned_end_at):
+			raise ValidationError({"planned_end_at": "Le début et la fin prévus doivent être renseignés ensemble."})
+		if self.planned_start_at and self.planned_end_at and self.planned_end_at <= self.planned_start_at:
+			raise ValidationError({"planned_end_at": "La fin prévue doit être postérieure au début prévu."})
 
 	def save(self, *args, **kwargs):
 		self.full_clean()

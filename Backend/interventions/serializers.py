@@ -37,6 +37,30 @@ class InterventionManagementAssignSerializer(serializers.Serializer):
             raise serializers.ValidationError("L'utilisateur assigne est introuvable.")
         return value
 
+class InterventionDecisionSerializer(serializers.Serializer):
+    decision = serializers.ChoiceField(choices=Intervention.Decision.choices)
+    comment = serializers.CharField(required=False, allow_blank=True, default="")
+    assigned_user_id = serializers.IntegerField(required=False, min_value=1)
+    planned_start_at = serializers.DateTimeField(required=False)
+    planned_end_at = serializers.DateTimeField(required=False)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class InterventionManagementPlanSerializer(serializers.Serializer):
+    vehicle_id = serializers.IntegerField(min_value=1)
+    type = serializers.ChoiceField(choices=Intervention.Type.choices, source="intervention_type")
+    assigned_user_id = serializers.IntegerField(min_value=1)
+    planned_start_at = serializers.DateTimeField()
+    planned_end_at = serializers.DateTimeField()
+    description = serializers.CharField(allow_blank=False, trim_whitespace=True)
+
+    def validate(self, attrs):
+        if attrs["planned_start_at"].minute not in {0, 30}:
+            raise serializers.ValidationError({"planned_start_at": "Veuillez choisir un horaire par tranche de 30 minutes."})
+        if attrs["planned_end_at"] <= attrs["planned_start_at"]:
+            raise serializers.ValidationError({"planned_end_at": "La fin prévue doit être postérieure au début prévu."})
+        return attrs
+
 
 class InterventionAssigneeSummarySerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
@@ -111,6 +135,12 @@ class InterventionManagementResponseSerializer(serializers.ModelSerializer):
             "check_in",
             "check_out",
             "estimated_cost",
+            "planned_start_at",
+            "planned_end_at",
+            "decision",
+            "decided_at",
+            "decided_by",
+            "decision_comment",
             "work_data",
             "final_report",
             "created_at",

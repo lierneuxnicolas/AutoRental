@@ -7,6 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from interventions.models import Intervention, TechnicalInspection, TechnicalPhoto
+from vehicles.models import Vehicle
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,13 @@ def start_assigned_intervention(*, intervention):
             if locked.started_at is None:
                 locked.started_at = timezone.now()
             locked.save(update_fields=["status", "started_at", "updated_at"])
+
+            locked.vehicle.status = (
+                Vehicle.Status.MAINTENANCE
+                if locked.intervention_type == Intervention.Type.MECANIQUE
+                else Vehicle.Status.NETTOYAGE
+            )
+            locked.vehicle.save(update_fields=["status", "updated_at"])
 
         intervention.status = locked.status
         intervention.started_at = locked.started_at
@@ -385,6 +393,15 @@ def check_out_assigned_intervention(
             "new_intervention_needed": new_intervention_needed,
             "final_comment": cleaned_comment,
         }
+        anomaly_type = str(work_payload.get("anomaly_type") or "").strip()
+        anomaly_comment = str(work_payload.get("anomaly_comment") or "").strip()
+        requires_manager_validation = (
+            vehicle_operational is False
+            or vehicle_clean is False
+            or new_intervention_needed
+            or bool(anomaly_type)
+            or bool(anomaly_comment)
+        )
         locked.completed_at = timezone.now()
         locked.status = Intervention.Status.TERMINEE
         locked.report = json.dumps({"final_report": _final_report_payload(
@@ -396,11 +413,14 @@ def check_out_assigned_intervention(
             final_payload=final_payload,
         )}, ensure_ascii=False)
         locked.save(update_fields=["status", "completed_at", "report", "updated_at"])
+        locked.vehicle.status = Vehicle.Status.A_CONTROLER if requires_manager_validation else Vehicle.Status.DISPONIBLE
+        locked.vehicle.save(update_fields=["status", "updated_at"])
 
         intervention.status = locked.status
         intervention.completed_at = locked.completed_at
         intervention.report = locked.report
         intervention.updated_at = locked.updated_at
+        intervention.vehicle.status = locked.vehicle.status
     return intervention
 
 

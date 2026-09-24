@@ -3,12 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { Link, useParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
-import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import Input from '../../components/ui/Input'
 import Select from '../../components/ui/Select'
+import VehicleFormTabs, { type VehicleFormTab } from '../../components/vehicles/VehicleFormTabs'
+import VehicleFormSection from '../../components/vehicles/VehicleFormSection'
 import {
   deleteVehiclePhoto,
   getBrands,
@@ -23,7 +24,6 @@ import { getVehicleById } from '../../services/vehicleService'
 import { resolveMediaUrl } from '../../utils/media'
 import type {
   ManagementVehicleDetailResponse,
-  VehicleManagementStatus,
   VehicleManagementUpdateRequest,
 } from '../../types/managementVehicle'
 import type { PublicVehicle } from '../../types/vehicle'
@@ -31,19 +31,6 @@ import type { PublicVehicle } from '../../types/vehicle'
 interface ManagerVehicleEditPageProps {
   basePath?: string
 }
-
-type ClientVisibleTab = 'features' | 'equipment' | 'conditions'
-
-const statusOptions: Array<{ value: VehicleManagementStatus; label: string }> = [
-  { value: 'DISPONIBLE', label: 'Disponible' },
-  { value: 'RESERVE', label: 'Réservé' },
-  { value: 'LOUE', label: 'Loué' },
-  { value: 'A_CONTROLER', label: 'À contrôler' },
-  { value: 'MAINTENANCE', label: 'Maintenance' },
-  { value: 'NETTOYAGE', label: 'Nettoyage' },
-  { value: 'ACCIDENTE', label: 'Accidenté' },
-  { value: 'INDISPONIBLE', label: 'Indisponible' },
-]
 
 interface BackendValidationErrorPayload {
   detail?: string
@@ -145,7 +132,6 @@ interface FormState {
   doors: string
   mileage: string
   category_daily_rate: string
-  status: VehicleManagementStatus
   is_active: boolean
   description: string
   power_hp: string
@@ -193,7 +179,6 @@ function toFormState(vehicle: ManagementVehicleDetailResponse): FormState {
     doors: String(vehicle.doors),
     mileage: typeof vehicle.mileage === 'number' ? String(vehicle.mileage) : '',
     category_daily_rate: formatCurrency(vehicle.category_daily_rate),
-    status: vehicle.status,
     is_active: vehicle.is_active ?? true,
     description: vehicle.description ?? '',
     power_hp: typeof vehicle.power_hp === 'number' ? String(vehicle.power_hp) : '',
@@ -241,7 +226,6 @@ function toPatchPayload(values: FormState): VehicleManagementUpdateRequest {
     transmission: values.transmission.trim(),
     seats: Number(values.seats),
     doors: Number(values.doors),
-    status: values.status,
     is_active: values.is_active,
     equipment: values.equipment,
   }
@@ -447,8 +431,8 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<VehicleFormFieldErrors>({})
   const [formState, setFormState] = useState<FormState | null>(null)
-  const [photoUploadFile, setPhotoUploadFile] = useState<File | null>(null)
-  const [activeClientTab, setActiveClientTab] = useState<ClientVisibleTab>('features')
+  const [, setPhotoUploadFile] = useState<File | null>(null)
+  const [activeClientTab, setActiveClientTab] = useState<VehicleFormTab>('features')
   const [conditionDraft, setConditionDraft] = useState<ConditionDraftState>(emptyConditionDraft)
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null)
   const [photoDeleteError, setPhotoDeleteError] = useState<string | null>(null)
@@ -491,18 +475,23 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
 
   useEffect(() => {
     if (vehicleQuery.data) {
+      // Form state is initialized when the asynchronous vehicle record arrives.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFormState(toFormState(vehicleQuery.data))
     }
   }, [vehicleQuery.data])
 
+  const selectedCategoryId = formState?.category
   useEffect(() => {
-    if (!formState) {
+    if (!selectedCategoryId) {
       return
     }
 
-    const selectedCategory = (categoriesQuery.data ?? []).find((category) => String(category.id) === formState.category)
+    const selectedCategory = (categoriesQuery.data ?? []).find((category) => String(category.id) === selectedCategoryId)
+    // Conditions are initialized from the selected category and public vehicle policy.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setConditionDraft(buildConditionDraft(selectedCategory?.minimum_deposit, photosQuery.data?.conditions))
-  }, [categoriesQuery.data, formState?.category, photosQuery.data?.conditions])
+  }, [categoriesQuery.data, selectedCategoryId, photosQuery.data?.conditions])
 
   const updateMutation = useMutation({
     mutationFn: ({ targetId, payload }: { targetId: number; payload: VehicleManagementUpdateRequest }) =>
@@ -552,26 +541,6 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
       .catch((error) => {
         setPhotoUploadError(getPhotoUploadErrorMessage(error))
       })
-  }
-
-  const handlePhotoUpload = async () => {
-    if (vehicleId === null) {
-      setPhotoUploadError('Identifiant de vehicule invalide.')
-      return
-    }
-
-    if (!photoUploadFile) {
-      setPhotoUploadError('Le fichier image est obligatoire.')
-      return
-    }
-
-    setPhotoUploadError(null)
-
-    try {
-      await uploadPhotoMutation.mutateAsync({ targetId: vehicleId, file: photoUploadFile, isPrimary: true })
-    } catch (error) {
-      setPhotoUploadError(getPhotoUploadErrorMessage(error))
-    }
   }
 
   const handlePhotoDelete = async (photoId: number) => {
@@ -722,13 +691,10 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
   const selectedCategory = (categoriesQuery.data ?? []).find((category) => String(category.id) === formState.category)
 
   const photoVehicle = photosQuery.data ?? null
-  const gallery = photoVehicle?.photos ?? []
   const mainPhoto = photoVehicle ? getMainPhoto(photoVehicle) : null
   const mainPhotoUrl = resolveMediaUrl(mainPhoto?.file)
-  const conditions = photoVehicle?.conditions
   const clientCategoryLabel = photoVehicle?.category ?? selectedCategory?.name ?? 'Non renseigné'
   const clientVehicleName = photoVehicle ? `${photoVehicle.brand} ${photoVehicle.model_name}` : formState.model_name
-  const clientRecommendedUse = photoVehicle?.recommended_use?.trim() || 'Non renseigné'
 
   const isSaving = updateMutation.isPending
 
@@ -745,9 +711,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
         {apiError ? <Alert variant="danger" title="Enregistrement impossible" message={apiError} /> : null}
         {successMessage ? <Alert variant="success" title="Modifications enregistrées" message={successMessage} /> : null}
 
-        <div className="space-y-5 rounded-3xl border border-[#E5E7EB] bg-[#F8FAFC] p-4 sm:p-6">
-          <h2 className="text-xl font-semibold text-[#0F172A]">Informations internes</h2>
-
+        <VehicleFormSection title="Informations internes">
           <div className="grid gap-5 md:grid-cols-2">
             <Input
               label="Immatriculation"
@@ -763,13 +727,6 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
               onChange={(event) => updateField('parking_space', event.target.value)}
               error={fieldErrors.parking_space}
               disabled={parkingSpacesQuery.isLoading}
-            />
-            <Select
-              label="Statut interne"
-              options={statusOptions}
-              value={formState.status}
-              onChange={(event) => updateField('status', event.target.value as VehicleManagementStatus)}
-              error={fieldErrors.status}
             />
             <Input
               type="text"
@@ -818,11 +775,9 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
               error={fieldErrors.year}
             />
           </div>
-        </div>
+        </VehicleFormSection>
 
-        <div className="space-y-5 rounded-3xl border border-[#E5E7EB] bg-[#F8FAFC] p-4 sm:p-6">
-          <h2 className="text-xl font-semibold text-[#0F172A]">Fiche visible par le client</h2>
-
+        <VehicleFormSection title="Fiche visible par le client">
           <Card>
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.55fr_0.95fr]">
               <div>
@@ -943,30 +898,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-3xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-            <div className="flex flex-wrap gap-2 border-b border-slate-200 bg-slate-50 p-3">
-              {[
-                { id: 'features' as const, label: 'Caractéristiques' },
-                { id: 'equipment' as const, label: 'Équipements' },
-                { id: 'conditions' as const, label: 'Conditions' },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveClientTab(tab.id)}
-                  className={[
-                    'rounded-xl px-4 py-2 text-sm font-medium transition-colors',
-                    activeClientTab === tab.id
-                      ? 'bg-[#2563EB] text-white shadow-sm'
-                      : 'bg-white text-slate-600 hover:bg-slate-100',
-                  ].join(' ')}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="p-5 sm:p-6">
+          <VehicleFormTabs activeTab={activeClientTab} onTabChange={setActiveClientTab}>
               {activeClientTab === 'features' ? (
                 <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
                   <Input
@@ -1143,9 +1075,8 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                   </div>
                 </div>
               ) : null}
-            </div>
-          </div>
-        </div>
+          </VehicleFormTabs>
+        </VehicleFormSection>
 
         <div className="flex justify-end">
           <Button type="submit" disabled={isSaving} className="w-full sm:w-auto">

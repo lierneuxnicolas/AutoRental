@@ -35,6 +35,7 @@ from interventions.services.vehicle_access import (
 from notifications.models import Notification
 from reservations.models import Reservation
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory
+from vehicles.services import is_vehicle_available
 
 
 class VehicleAccessTestDataMixin:
@@ -1210,6 +1211,202 @@ class InterventionManagementApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertIn(self.cleaner_user_1.email, emails)
 		self.assertNotIn(self.manager_user.email, emails)
 
+	def test_manager_decides_return_to_park(self):
+		intervention = self._create_intervention(intervention_type=Intervention.Type.MECANIQUE, status_value=Intervention.Status.TERMINEE, assigned_to=self.mechanic_user_1)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(
+			f"/api/v1/management/interventions/{intervention.id}/decision/",
+			{"decision": "RETURN_TO_PARK"},
+			format="json",
+		)
+
+		intervention.refresh_from_db()
+		intervention.vehicle.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.decision, Intervention.Decision.RETURN_TO_PARK)
+		self.assertEqual(intervention.decided_by_id, self.manager_user.id)
+		self.assertEqual(intervention.vehicle.status, Vehicle.Status.DISPONIBLE)
+
+	def test_manager_decides_unavailable_and_rejects_second_decision(self):
+		intervention = self._create_intervention(intervention_type=Intervention.Type.NETTOYAGE, status_value=Intervention.Status.TERMINEE, assigned_to=self.cleaner_user_1)
+		self.client_api.force_authenticate(self.manager_user)
+		url = f"/api/v1/management/interventions/{intervention.id}/decision/"
+
+		first = self.client_api.post(url, {"decision": "MARK_UNAVAILABLE", "comment": "Anomalie à contrôler"}, format="json")
+		second = self.client_api.post(url, {"decision": "RETURN_TO_PARK"}, format="json")
+
+		intervention.refresh_from_db()
+		intervention.vehicle.refresh_from_db()
+		self.assertEqual(first.status_code, status.HTTP_200_OK)
+		self.assertEqual(second.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(intervention.vehicle.status, Vehicle.Status.INDISPONIBLE)
+		self.assertEqual(intervention.decision_comment, "Anomalie à contrôler")
+
+	def _plan_payload(self, *, intervention_type=Intervention.Type.MECANIQUE, start_at=None, end_at=None, assigned_user_id=None):
+		start = (start_at or timezone.now() + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
+		end = end_at or start + timedelta(hours=3)
+		return {
+			"vehicle_id": self.vehicle_3.id,
+			"type": intervention_type,
+			"assigned_user_id": assigned_user_id or (
+				self.mechanic_user_1.id if intervention_type == Intervention.Type.MECANIQUE else self.cleaner_user_1.id
+			),
+			"planned_start_at": start.isoformat(),
+			"planned_end_at": end.isoformat(),
+			"description": "Intervention planifiée",
+		}
+
+	def test_plan_maintenance_without_reservation_conflict(self):
+		self.client_api.force_authenticate(self.manager_user)
+		response = self.client_api.post("/api/v1/management/interventions/plan/", self._plan_payload(), format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		intervention = Intervention.objects.get(pk=response.data["id"])
+		self.vehicle_3.refresh_from_db()
+		self.assertEqual(intervention.status, Intervention.Status.ATTRIBUEE)
+		self.assertEqual(intervention.assigned_to_id, self.mechanic_user_1.id)
+		self.assertIsNotNone(intervention.planned_start_at)
+		self.assertIsNotNone(intervention.planned_end_at)
+		self.assertEqual(self.vehicle_3.status, Vehicle.Status.DISPONIBLE)
+
+	def test_plan_cleaning_without_reservation_conflict(self):
+		self.client_api.force_authenticate(self.manager_user)
+		response = self.client_api.post(
+			"/api/v1/management/interventions/plan/",
+			self._plan_payload(intervention_type=Intervention.Type.NETTOYAGE),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		intervention = Intervention.objects.get(pk=response.data["id"])
+		self.vehicle_3.refresh_from_db()
+		self.assertEqual(intervention.assigned_to_id, self.cleaner_user_1.id)
+		self.assertEqual(self.vehicle_3.status, Vehicle.Status.DISPONIBLE)
+
+	def test_plan_refuses_overlapping_reservation_without_writes(self):
+		start = (timezone.now() + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
+		end = start + timedelta(hours=3)
+		reservation = self._create_reservation(
+			vehicle=self.vehicle_3,
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start + timedelta(hours=1),
+			end_at=end + timedelta(hours=1),
+		)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(
+			"/api/v1/management/interventions/plan/",
+			self._plan_payload(start_at=start, end_at=end),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "RESERVATION_CONFLICT")
+		self.assertEqual(response.data["reservation"]["id"], reservation.id)
+		self.assertFalse(Intervention.objects.filter(vehicle=self.vehicle_3).exists())
+		self.vehicle_3.refresh_from_db()
+		self.assertEqual(self.vehicle_3.status, Vehicle.Status.DISPONIBLE)
+
+	def test_plan_refuses_overlapping_planned_intervention(self):
+		start = (timezone.now() + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
+		end = start + timedelta(hours=3)
+		existing = self._create_intervention(
+			intervention_type=Intervention.Type.MECANIQUE,
+			status_value=Intervention.Status.ATTRIBUEE,
+			vehicle=self.vehicle_3,
+			assigned_to=self.mechanic_user_1,
+		)
+		existing.planned_start_at = start + timedelta(hours=1)
+		existing.planned_end_at = end + timedelta(hours=1)
+		existing.save(update_fields=["planned_start_at", "planned_end_at", "updated_at"])
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(
+			"/api/v1/management/interventions/plan/",
+			self._plan_payload(start_at=start, end_at=end),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "INTERVENTION_CONFLICT")
+		self.assertEqual(Intervention.objects.filter(vehicle=self.vehicle_3).count(), 1)
+
+	def test_plan_allows_reservation_ending_at_planned_start(self):
+		start = (timezone.now() + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
+		self._create_reservation(
+			vehicle=self.vehicle_3,
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start - timedelta(hours=3),
+			end_at=start,
+		)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(
+			"/api/v1/management/interventions/plan/",
+			self._plan_payload(start_at=start, end_at=start + timedelta(hours=3)),
+			format="json",
+		)
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+	def test_plan_allows_reservation_starting_at_planned_end(self):
+		start = (timezone.now() + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
+		end = start + timedelta(hours=3)
+		self._create_reservation(
+			vehicle=self.vehicle_3,
+			status=Reservation.Status.CONFIRMEE,
+			start_at=end,
+			end_at=end + timedelta(hours=3),
+		)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(
+			"/api/v1/management/interventions/plan/",
+			self._plan_payload(start_at=start, end_at=end),
+			format="json",
+		)
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+	def test_plan_rejects_invalid_period_and_missing_assignee(self):
+		start = timezone.now() + timedelta(days=2)
+		self.client_api.force_authenticate(self.manager_user)
+
+		invalid_period = self.client_api.post(
+			"/api/v1/management/interventions/plan/",
+			self._plan_payload(start_at=start, end_at=start - timedelta(hours=1)),
+			format="json",
+		)
+		payload = self._plan_payload(start_at=start, end_at=start + timedelta(hours=1))
+		payload.pop("assigned_user_id")
+		missing_assignee = self.client_api.post("/api/v1/management/interventions/plan/", payload, format="json")
+
+		self.assertEqual(invalid_period.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("planned_end_at", invalid_period.data)
+		self.assertEqual(missing_assignee.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("assigned_user_id", missing_assignee.data)
+
+	def test_planned_intervention_blocks_central_availability(self):
+		start = timezone.now() + timedelta(days=2)
+		end = start + timedelta(hours=3)
+		intervention = self._create_intervention(
+			intervention_type=Intervention.Type.MECANIQUE,
+			status_value=Intervention.Status.ATTRIBUEE,
+			vehicle=self.vehicle_3,
+			assigned_to=self.mechanic_user_1,
+		)
+		intervention.planned_start_at = start
+		intervention.planned_end_at = end
+		intervention.save(update_fields=["planned_start_at", "planned_end_at", "updated_at"])
+
+		self.assertFalse(is_vehicle_available(vehicle=self.vehicle_3, start=start, end=end))
+		self.assertTrue(
+			is_vehicle_available(
+				vehicle=self.vehicle_3,
+				start=end,
+				end=end + timedelta(hours=2),
+			)
+		)
+
 
 class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 	def setUp(self):
@@ -1262,6 +1459,8 @@ class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(intervention.status, Intervention.Status.EN_COURS)
 		self.assertIsNotNone(intervention.started_at)
+		intervention.vehicle.refresh_from_db()
+		self.assertEqual(intervention.vehicle.status, Vehicle.Status.MAINTENANCE)
 		technical_inspection = intervention.technical_inspections.get()
 		self.assertEqual(technical_inspection.mileage, 1234)
 		self.assertIn("Controle initial mecanicien", technical_inspection.observations)
@@ -1374,8 +1573,12 @@ class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 
 	def test_mechanic_check_out_completes_with_final_inspection(self):
 		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.EN_COURS)
+		planned_start_at = timezone.now() - timedelta(hours=1)
+		planned_end_at = timezone.now() + timedelta(hours=1)
 		intervention.started_at = timezone.now() - timedelta(minutes=30)
-		intervention.save(update_fields=["started_at", "updated_at"])
+		intervention.planned_start_at = planned_start_at
+		intervention.planned_end_at = planned_end_at
+		intervention.save(update_fields=["started_at", "planned_start_at", "planned_end_at", "updated_at"])
 		TechnicalInspection.objects.create(
 			intervention=intervention,
 			vehicle=intervention.vehicle,
@@ -1403,11 +1606,39 @@ class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(intervention.status, Intervention.Status.TERMINEE)
 		self.assertIsNotNone(intervention.completed_at)
-		self.assertNotEqual(intervention.vehicle.status, Vehicle.Status.DISPONIBLE)
+		self.assertEqual(intervention.planned_start_at, planned_start_at)
+		self.assertEqual(intervention.planned_end_at, planned_end_at)
+		self.assertNotEqual(intervention.completed_at, intervention.planned_end_at)
+		self.assertEqual(intervention.vehicle.status, Vehicle.Status.DISPONIBLE)
 		final_inspection = intervention.technical_inspections.get(phase=TechnicalInspection.Phase.FINAL)
 		self.assertEqual(final_inspection.mileage, 1010)
 		self.assertEqual(final_inspection.photos.count(), 1)
 		self.assertIsNotNone(response.data["final_report"])
+
+	def test_mechanic_checkout_problem_marks_vehicle_for_manager_validation(self):
+		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.EN_COURS)
+		TechnicalInspection.objects.create(intervention=intervention, vehicle=intervention.vehicle, phase=TechnicalInspection.Phase.INITIAL, mileage=1000, energy_level_percent=0, observations="Initial ok")
+		self.client_api.force_authenticate(self.mechanic_user_1)
+
+		response = self.client_api.post(
+			f"/api/v1/mechanic/interventions/{intervention.id}/check-out/",
+			{
+				"final_mileage": 1010,
+				"final_vehicle_state": "Doute",
+				"conclusions": "Contrôle nécessaire",
+				"vehicle_operational": False,
+				"new_intervention_needed": False,
+				"final_comment": "Anomalie à vérifier",
+				"photos": [self._image_file("mechanic-problem.gif")],
+			},
+			format="multipart",
+		)
+
+		intervention.refresh_from_db()
+		intervention.vehicle.refresh_from_db()
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(intervention.status, Intervention.Status.TERMINEE)
+		self.assertEqual(intervention.vehicle.status, Vehicle.Status.A_CONTROLER)
 
 	def test_mechanic_check_out_rejects_invalid_final_state(self):
 		intervention = self._assigned_mechanic_intervention(status_value=Intervention.Status.EN_COURS)
@@ -1476,6 +1707,8 @@ class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(intervention.status, Intervention.Status.EN_COURS)
 		self.assertIsNotNone(intervention.started_at)
+		intervention.vehicle.refresh_from_db()
+		self.assertEqual(intervention.vehicle.status, Vehicle.Status.NETTOYAGE)
 		technical_inspection = intervention.technical_inspections.get()
 		self.assertEqual(technical_inspection.mileage, 2234)
 		self.assertIn("Controle initial nettoyage", technical_inspection.observations)
@@ -1571,8 +1804,9 @@ class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		intervention.refresh_from_db()
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(intervention.status, Intervention.Status.TERMINEE)
+		intervention.vehicle.refresh_from_db()
+		self.assertEqual(intervention.vehicle.status, Vehicle.Status.DISPONIBLE)
 		self.assertIsNotNone(intervention.completed_at)
-		self.assertNotEqual(intervention.vehicle.status, Vehicle.Status.DISPONIBLE)
 		final_inspection = intervention.technical_inspections.get(phase=TechnicalInspection.Phase.FINAL)
 		self.assertEqual(final_inspection.mileage, 2005)
 		self.assertEqual(final_inspection.photos.count(), 1)

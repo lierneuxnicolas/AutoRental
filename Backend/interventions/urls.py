@@ -13,6 +13,8 @@ from interventions.views import (
     InterventionManagementAssignView,
     InterventionAssignableUserListView,
     InterventionManagementCreateListView,
+    InterventionManagementPlanView,
+    InterventionManagementDecisionView,
     MechanicInterventionCompleteView,
     MechanicInterventionCheckInView,
     MechanicInterventionCheckOutView,
@@ -32,6 +34,12 @@ urlpatterns = [
         InterventionManagementCreateListView.as_view(),
         name="management-interventions-list-create",
     ),
+    path(
+        "management/interventions/plan/",
+        InterventionManagementPlanView.as_view(),
+        name="management-interventions-plan",
+    ),
+    path("management/interventions/<int:id>/decision/", InterventionManagementDecisionView.as_view(), name="management-interventions-decision"),
     path(
         "management/interventions/assignees/",
         InterventionAssignableUserListView.as_view(),

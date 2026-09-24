@@ -9,30 +9,49 @@ import Card from '../../components/ui/Card'
 import Input from '../../components/ui/Input'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import { getManagementReservations } from '../../services/managementReservationService'
-import type { ManagementReservationStatus, ReservationManagementDetail } from '../../types/managementReservation'
+import type { ManagementReservationListQueryParams, ManagementReservationStatus, ReservationManagementDetail } from '../../types/managementReservation'
+import { resolveMediaUrl } from '../../utils/media'
 
 interface ManagerReservationsPageProps {
   basePath?: string
 }
 
 type ReservationFilter =
-  | 'all'
+  | ''
   | 'BROUILLON'
   | 'CONFIRMEE'
+  | 'REAFFECTATION_REQUIRED'
   | 'EN_COURS'
   | 'A_CONTROLER'
   | 'TERMINEE'
   | 'ANNULEE'
 
 const statusFilters: Array<{ value: ReservationFilter; label: string }> = [
-  { value: 'all', label: 'Toutes' },
+  { value: '', label: 'Tous les statuts' },
   { value: 'BROUILLON', label: 'Brouillon' },
-  { value: 'CONFIRMEE', label: 'Confirmees' },
+  { value: 'CONFIRMEE', label: 'Confirmée' },
+  { value: 'REAFFECTATION_REQUIRED', label: 'À réaffecter' },
   { value: 'EN_COURS', label: 'En cours' },
-  { value: 'A_CONTROLER', label: 'A controler' },
-  { value: 'TERMINEE', label: 'Terminees' },
-  { value: 'ANNULEE', label: 'Annulees' },
+  { value: 'A_CONTROLER', label: 'À contrôler' },
+  { value: 'TERMINEE', label: 'Terminée' },
+  { value: 'ANNULEE', label: 'Annulée' },
 ]
+
+interface ReservationFilters {
+  search: string
+  status: ReservationFilter
+  startDate: string
+  endDate: string
+  vehicleSearch: string
+}
+
+const emptyFilters: ReservationFilters = {
+  search: '',
+  status: '',
+  startDate: '',
+  endDate: '',
+  vehicleSearch: '',
+}
 
 function mapStatusToUi(status: ManagementReservationStatus): { label: string; variant: StatusVariant } {
   switch (status) {
@@ -43,17 +62,19 @@ function mapStatusToUi(status: ManagementReservationStatus): { label: string; va
     case 'EN_ATTENTE_PAIEMENT':
       return { label: 'En attente paiement', variant: 'warning' }
     case 'CONFIRMEE':
-      return { label: 'Confirmee', variant: 'success' }
+      return { label: 'Confirmée', variant: 'success' }
+    case 'REAFFECTATION_REQUIRED':
+      return { label: 'À réaffecter', variant: 'warning' }
     case 'EN_COURS':
       return { label: 'En cours', variant: 'info' }
     case 'A_CONTROLER':
-      return { label: 'A controler', variant: 'warning' }
+      return { label: 'À contrôler', variant: 'warning' }
     case 'TERMINEE':
-      return { label: 'Terminee', variant: 'success' }
+      return { label: 'Terminée', variant: 'success' }
     case 'ANNULEE':
-      return { label: 'Annulee', variant: 'danger' }
+      return { label: 'Annulée', variant: 'danger' }
     case 'PAIEMENT_ECHOUE':
-      return { label: 'Paiement echoue', variant: 'danger' }
+      return { label: 'Paiement échoué', variant: 'danger' }
   }
 }
 
@@ -61,17 +82,9 @@ function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat('fr-FR', {
     day: '2-digit',
     month: '2-digit',
-    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value))
-}
-
-function vehicleLabel(reservation: ReservationManagementDetail): string {
-  const base = `${reservation.vehicle.brand} ${reservation.vehicle.model_name}`
-  return reservation.vehicle.registration_plate
-    ? `${base} (${reservation.vehicle.registration_plate})`
-    : base
+  }).format(new Date(value)).replace(',', '')
 }
 
 function clientLabel(reservation: ReservationManagementDetail): string | null {
@@ -79,7 +92,7 @@ function clientLabel(reservation: ReservationManagementDetail): string | null {
     return null
   }
 
-  const fullName = `${reservation.client_summary.first_name} ${reservation.client_summary.last_name}`.trim()
+  const fullName = `${reservation.client_summary.last_name} ${reservation.client_summary.first_name}`.trim()
 
   if (fullName.length > 0) {
     return fullName
@@ -88,13 +101,56 @@ function clientLabel(reservation: ReservationManagementDetail): string | null {
   return reservation.client_summary.email || null
 }
 
+function VehiclePhoto({ reservation, mobile = false }: { reservation: ReservationManagementDetail; mobile?: boolean }) {
+  const photoUrl = resolveMediaUrl(reservation.vehicle.main_photo?.file)
+  const sizeClass = mobile ? 'h-20 w-28' : 'h-14 w-20'
+
+  if (!photoUrl) {
+    return (
+      <div className={`flex ${sizeClass} shrink-0 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-2 text-center text-xs text-slate-500`}>
+        Sans photo
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src={photoUrl}
+      alt={`${reservation.vehicle.brand} ${reservation.vehicle.model_name}`}
+      className={`${sizeClass} shrink-0 rounded-xl border border-slate-200 object-cover`}
+      loading="lazy"
+    />
+  )
+}
+
+function Period({ reservation }: { reservation: ReservationManagementDetail }) {
+  return (
+    <div className="text-sm leading-5 text-[#1F2937]">
+      <p>{formatDateTime(reservation.start_at)}</p>
+      <p className="text-slate-400">→</p>
+      <p>{formatDateTime(reservation.end_at)}</p>
+    </div>
+  )
+}
+
 export default function ManagerReservationsPage({ basePath = '/manager' }: ManagerReservationsPageProps) {
-  const [search, setSearch] = useState('')
-  const [activeFilter, setActiveFilter] = useState<ReservationFilter>('all')
+  const [draftFilters, setDraftFilters] = useState<ReservationFilters>(emptyFilters)
+  const [appliedFilters, setAppliedFilters] = useState<ReservationFilters>(emptyFilters)
+  const [page, setPage] = useState(1)
+
+  const queryParams = useMemo<ManagementReservationListQueryParams>(() => ({
+    page,
+    search: appliedFilters.search.trim() || undefined,
+    status: appliedFilters.status || undefined,
+    start_at_from: appliedFilters.startDate ? `${appliedFilters.startDate}T00:00:00` : undefined,
+    end_at_to: appliedFilters.endDate ? `${appliedFilters.endDate}T23:59:59` : undefined,
+    vehicle_search: appliedFilters.vehicleSearch.trim() || undefined,
+    ordering: '-created_at',
+  }), [appliedFilters, page])
 
   const reservationsQuery = useQuery({
-    queryKey: ['manager-reservations'],
-    queryFn: () => getManagementReservations(),
+    queryKey: ['manager-reservations', queryParams],
+    queryFn: () => getManagementReservations(queryParams),
   })
 
   const reservations = useMemo(
@@ -102,130 +158,71 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
     [reservationsQuery.data?.results],
   )
 
-  const filteredReservations = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase()
+  const totalPages = Math.max(1, Math.ceil((reservationsQuery.data?.count ?? 0) / 20))
+  const hasAppliedFilters = Object.values(appliedFilters).some((value) => Boolean(value.trim()))
 
-    return reservations.filter((reservation) => {
-      if (activeFilter !== 'all' && reservation.status !== activeFilter) {
-        return false
-      }
+  const updateDraftFilter = <Key extends keyof ReservationFilters>(key: Key, value: ReservationFilters[Key]) => {
+    setDraftFilters((current) => ({ ...current, [key]: value }))
+  }
 
-      if (!normalizedSearch) {
-        return true
-      }
+  const handleFilterSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setPage(1)
+    setAppliedFilters(draftFilters)
+  }
 
-      const parts = [
-        reservation.reference,
-        reservation.client_summary?.first_name,
-        reservation.client_summary?.last_name,
-        reservation.client_summary?.email,
-        reservation.vehicle?.brand,
-        reservation.vehicle?.model_name,
-      ]
-
-      const haystack = parts
-        .filter((part): part is string => Boolean(part))
-        .join(' ')
-        .toLowerCase()
-
-      return haystack.includes(normalizedSearch)
-    })
-  }, [activeFilter, reservations, search])
-
-  const returnsToVerify = useMemo(
-    () => reservations.filter((reservation) => reservation.status === 'A_CONTROLER'),
-    [reservations],
-  )
-
-  const resolveReturnDateTime = (reservation: ReservationManagementDetail): string => {
-    return reservation.return_inspection?.completed_at ?? reservation.end_at
+  const handleReset = () => {
+    setDraftFilters(emptyFilters)
+    setAppliedFilters(emptyFilters)
+    setPage(1)
   }
 
   return (
-    <section className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+    <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div>
-        <h1 className="text-2xl font-bold text-[#0F172A]">Reservations</h1>
-        <p className="mt-1 text-sm text-slate-500">Consultez la liste des reservations clients.</p>
+        <h1 className="text-3xl font-semibold text-[#0F172A]">Gestion des réservations</h1>
       </div>
 
       <Card>
-        <div className="space-y-4">
-          <Input
-            type="search"
-            label="Recherche"
-            placeholder="Reference, client, e-mail, marque ou modele"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-
-          <div className="flex flex-wrap gap-2">
-            {statusFilters.map((filter) => (
-              <Button
-                key={filter.value}
-                variant={activeFilter === filter.value ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => setActiveFilter(filter.value)}
+        <form onSubmit={handleFilterSubmit} className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
+            <Input
+              type="search"
+              label="Recherche"
+              placeholder="Référence, client, véhicule ou immatriculation"
+              value={draftFilters.search}
+              onChange={(event) => updateDraftFilter('search', event.target.value)}
+            />
+            <div className="space-y-2">
+              <label htmlFor="reservation-status-filter" className="block text-sm font-medium text-[#1F2937]">Statut</label>
+              <select
+                id="reservation-status-filter"
+                value={draftFilters.status}
+                onChange={(event) => updateDraftFilter('status', event.target.value as ReservationFilter)}
+                className="block h-12 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-[#1F2937] shadow-sm outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
               >
-                {filter.label}
-              </Button>
-            ))}
+                {statusFilters.map((filter) => <option key={filter.value || 'all'} value={filter.value}>{filter.label}</option>)}
+              </select>
+            </div>
           </div>
-        </div>
-      </Card>
 
-      <Card
-        header={(
-          <div>
-            <h2 className="text-lg font-semibold text-[#0F172A]">Retours a verifier</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Reservations restituees en attente de controle gestionnaire.
-            </p>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Input type="date" label="Date début" value={draftFilters.startDate} onChange={(event) => updateDraftFilter('startDate', event.target.value)} />
+            <Input type="date" label="Date fin" value={draftFilters.endDate} onChange={(event) => updateDraftFilter('endDate', event.target.value)} />
+            <Input
+              type="search"
+              label="Véhicule / immatriculation"
+              placeholder="Renault Rafale ou GAC-RAF-001"
+              value={draftFilters.vehicleSearch}
+              onChange={(event) => updateDraftFilter('vehicleSearch', event.target.value)}
+            />
           </div>
-        )}
-      >
-        {returnsToVerify.length === 0 ? (
-          <EmptyState
-            title="Aucun retour en attente"
-            description="Tous les retours ont ete traites ou aucun vehicule n'a encore ete restitue."
-          />
-        ) : (
-          <div className="space-y-4">
-            {returnsToVerify.map((reservation) => (
-              <article key={reservation.id} className="rounded-3xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
-                <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 lg:grid-cols-5">
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Numero reservation</p>
-                    <p className="mt-1">{reservation.reference}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Client</p>
-                    <p className="mt-1">{clientLabel(reservation) ?? 'Client indisponible'}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Vehicule</p>
-                    <p className="mt-1">{vehicleLabel(reservation)}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Date/heure retour</p>
-                    <p className="mt-1">{formatDateTime(resolveReturnDateTime(reservation))}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Statut</p>
-                    <div className="mt-1">
-                      <StatusBadge variant="warning" label="A verifier" />
-                    </div>
-                  </div>
-                </div>
 
-                <div className="mt-4 flex justify-end">
-                  <Link to={`${basePath}/reservations/${reservation.id}`}>
-                    <Button size="sm">Verifier le retour</Button>
-                  </Link>
-                </div>
-              </article>
-            ))}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={handleReset}>Réinitialiser</Button>
+            <Button type="submit">Rechercher</Button>
           </div>
-        )}
+        </form>
       </Card>
 
       {reservationsQuery.isLoading ? (
@@ -244,87 +241,120 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
 
       {!reservationsQuery.isLoading && !reservationsQuery.isError && reservations.length === 0 ? (
         <EmptyState
-          title="Aucune reservation"
-          description="Il n'y a actuellement aucune reservation a afficher."
+          title={hasAppliedFilters ? 'Aucune réservation correspondante' : 'Aucune réservation'}
+          description={hasAppliedFilters ? 'Aucune réservation ne correspond aux filtres appliqués.' : 'Il n’y a actuellement aucune réservation à afficher.'}
         />
       ) : null}
 
       {!reservationsQuery.isLoading && !reservationsQuery.isError && reservations.length > 0 ? (
         <p className="text-sm text-slate-600">
-          {filteredReservations.length} resultat{filteredReservations.length > 1 ? 's' : ''}
+          {reservationsQuery.data?.count ?? 0} résultat{(reservationsQuery.data?.count ?? 0) > 1 ? 's' : ''}
         </p>
       ) : null}
 
       {!reservationsQuery.isLoading
       && !reservationsQuery.isError
-      && reservations.length > 0
-      && filteredReservations.length === 0 ? (
-        <EmptyState
-          title="Aucune reservation correspondante"
-          description="Aucune reservation correspondante"
-        />
-      ) : null}
-
-      {!reservationsQuery.isLoading
-      && !reservationsQuery.isError
-      && reservations.length > 0
-      && filteredReservations.length > 0 ? (
-        <div className="space-y-4">
-          {filteredReservations.map((reservation) => {
-            const status = mapStatusToUi(reservation.status)
-            const client = clientLabel(reservation)
-
-            return (
-              <Card
-                key={reservation.id}
-                header={
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Reference</p>
-                      <p className="text-base font-semibold text-[#0F172A]">{reservation.reference}</p>
+      && reservations.length > 0 ? (
+        <>
+          <div className="space-y-4 lg:hidden">
+            {reservations.map((reservation) => {
+              const status = mapStatusToUi(reservation.status)
+              return (
+                <Card key={reservation.id}>
+                  <div className="space-y-4">
+                    <div className="flex items-start gap-4">
+                      <VehiclePhoto reservation={reservation} mobile />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-[#0F172A]">{reservation.reference}</p>
+                        <p className="mt-1 text-sm font-medium text-[#1F2937]">{reservation.vehicle.brand} {reservation.vehicle.model_name}</p>
+                        <p className="text-xs text-slate-500">{reservation.vehicle.registration_plate || '—'}</p>
+                        <div className="mt-2"><StatusBadge variant={status.variant} label={status.label} /></div>
+                      </div>
                     </div>
-                    <StatusBadge variant={status.variant} label={status.label} />
-                  </div>
-                }
-              >
-                <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 lg:grid-cols-3">
-                  {client ? (
-                    <div>
-                      <p className="font-medium text-[#1F2937]">Client</p>
-                      <p className="mt-1">{client}</p>
-                    </div>
-                  ) : null}
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Vehicule</p>
-                    <p className="mt-1">{vehicleLabel(reservation)}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Debut</p>
-                    <p className="mt-1">{formatDateTime(reservation.start_at)}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Fin</p>
-                    <p className="mt-1">{formatDateTime(reservation.end_at)}</p>
-                  </div>
-                  {reservation.rental_amount ? (
-                    <div>
-                      <p className="font-medium text-[#1F2937]">Montant location</p>
-                      <p className="mt-1">{reservation.rental_amount} EUR</p>
-                    </div>
-                  ) : null}
-                </div>
 
-                <div className="mt-5 flex justify-end">
-                  <Link to={`${basePath}/reservations/${reservation.id}`}>
-                    <Button variant="secondary" size="sm">
-                      {reservation.status === 'A_CONTROLER' ? 'Verifier le retour' : 'Voir le detail'}
-                    </Button>
-                  </Link>
-                </div>
-              </Card>
-            )
-          })}
-        </div>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-xs text-slate-500">Client</p>
+                        <p className="mt-1 font-medium text-[#1F2937]">{clientLabel(reservation) ?? '—'}</p>
+                        {reservation.client_summary?.email ? <p className="break-all text-xs text-slate-500">{reservation.client_summary.email}</p> : null}
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Période</p>
+                        <div className="mt-1"><Period reservation={reservation} /></div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Link to={`${basePath}/reservations/${reservation.id}`}>
+                        <Button variant="secondary" size="sm">Voir détail</Button>
+                      </Link>
+                      {reservation.status === 'REAFFECTATION_REQUIRED' ? (
+                        <Link to={`${basePath}/reservations/${reservation.id}?action=reassign`}>
+                          <Button size="sm">Réaffecter</Button>
+                        </Link>
+                      ) : null}
+                    </div>
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+
+          <div className="hidden overflow-hidden rounded-3xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)] lg:block">
+            <table className="w-full border-collapse text-left">
+              <thead className="border-b border-[#E5E7EB] bg-[#F8FAFC]">
+                <tr>
+                  {['Photo', 'Référence', 'Client', 'Véhicule', 'Période', 'Statut', 'Actions'].map((heading) => (
+                    <th key={heading} className="px-3 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{heading}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {reservations.map((reservation) => {
+                  const status = mapStatusToUi(reservation.status)
+                  return (
+                    <tr key={reservation.id} className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F9FAFB]">
+                      <td className="px-3 py-3"><VehiclePhoto reservation={reservation} /></td>
+                      <td className="px-3 py-3 text-sm font-semibold text-[#0F172A]">{reservation.reference}</td>
+                      <td className="max-w-44 px-3 py-3 text-sm">
+                        <p className="font-medium text-[#1F2937]">{clientLabel(reservation) ?? '—'}</p>
+                        {reservation.client_summary?.email ? <p className="truncate text-xs text-slate-500">{reservation.client_summary.email}</p> : null}
+                      </td>
+                      <td className="px-3 py-3 text-sm">
+                        <p className="font-medium text-[#1F2937]">{reservation.vehicle.brand} {reservation.vehicle.model_name}</p>
+                        <p className="text-xs text-slate-500">{reservation.vehicle.registration_plate || '—'}</p>
+                      </td>
+                      <td className="px-3 py-3"><Period reservation={reservation} /></td>
+                      <td className="px-3 py-3"><StatusBadge variant={status.variant} label={status.label} /></td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <Link to={`${basePath}/reservations/${reservation.id}`}>
+                            <Button variant="secondary" size="sm">Voir détail</Button>
+                          </Link>
+                          {reservation.status === 'REAFFECTATION_REQUIRED' ? (
+                            <Link to={`${basePath}/reservations/${reservation.id}?action=reassign`}>
+                              <Button size="sm">Réaffecter</Button>
+                            </Link>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {totalPages > 1 ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
+              <p className="text-sm text-slate-600">Page {page} / {totalPages}</p>
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" size="sm" disabled={!reservationsQuery.data?.previous || page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Précédent</Button>
+                <Button type="button" variant="secondary" size="sm" disabled={!reservationsQuery.data?.next || page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Suivant</Button>
+              </div>
+            </div>
+          ) : null}
+        </>
       ) : null}
     </section>
   )

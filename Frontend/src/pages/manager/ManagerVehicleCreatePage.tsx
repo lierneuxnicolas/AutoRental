@@ -1,12 +1,11 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { Link, useNavigate } from 'react-router-dom'
-import Alert from '../../components/feedback/Alert'
 import Button from '../../components/ui/Button'
 import VehicleManagementForm from '../../components/vehicles/VehicleManagementForm'
-import { createVehicle, uploadVehiclePhoto } from '../../services/managementVehicleService'
-import type { VehicleManagementCreateRequest, VehicleManagementStatus } from '../../types/managementVehicle'
+import { createVehicle, getBrands, getParkingSpaceOptions, getVehicleCategoryOptions, getVehicleEquipmentCatalog, uploadVehiclePhoto } from '../../services/managementVehicleService'
+import type { VehicleManagementCreateRequest } from '../../types/managementVehicle'
 
 interface ManagerVehicleCreatePageProps {
   basePath?: string
@@ -117,6 +116,11 @@ export default function ManagerVehicleCreatePage({ basePath = '/manager' }: Mana
   const [fieldErrors, setFieldErrors] = useState<VehicleFormFieldErrors>({})
   const [selectedPhotos, setSelectedPhotos] = useState<File[]>([])
 
+  const brandsQuery = useQuery({ queryKey: ['vehicle-brands'], queryFn: getBrands })
+  const categoriesQuery = useQuery({ queryKey: ['vehicle-categories'], queryFn: getVehicleCategoryOptions })
+  const parkingSpacesQuery = useQuery({ queryKey: ['manager-vehicle-parking-spaces'], queryFn: getParkingSpaceOptions })
+  const equipmentQuery = useQuery({ queryKey: ['manager-vehicle-equipment-catalog'], queryFn: getVehicleEquipmentCatalog })
+
   const createMutation = useMutation({
     mutationFn: (payload: VehicleManagementCreateRequest) => createVehicle(payload),
   })
@@ -127,7 +131,7 @@ export default function ManagerVehicleCreatePage({ basePath = '/manager' }: Mana
 
     const normalizedPayload: VehicleManagementCreateRequest = {
       ...payload,
-      status: 'DISPONIBLE' as VehicleManagementStatus,
+      status: 'DISPONIBLE',
     }
 
     try {
@@ -153,16 +157,8 @@ export default function ManagerVehicleCreatePage({ basePath = '/manager' }: Mana
       setSelectedPhotos([])
       await queryClient.invalidateQueries({ queryKey: ['manager-vehicles'] })
 
-      const successMessage =
-        selectedPhotos.length > 0
-          ? uploadedPhotos === selectedPhotos.length
-            ? 'Le vehicule et ses photos ont ete ajoutes avec succes.'
-            : `Le vehicule a ete ajoute. Photos importees: ${uploadedPhotos}/${selectedPhotos.length}.`
-          : 'Le vehicule a ete ajoute avec succes.'
-
-      navigate(`${basePath}/vehicles`, {
-        state: { successMessage },
-      })
+      void uploadedPhotos
+      navigate(`${basePath}/vehicles`)
     } catch (error) {
       if (!axios.isAxiosError(error)) {
         setApiError('Une erreur inattendue est survenue.')
@@ -193,21 +189,11 @@ export default function ManagerVehicleCreatePage({ basePath = '/manager' }: Mana
 
   return (
     <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-      <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Gestion vehicules</p>
-        <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Ajouter un vehicule</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Saisissez les informations du vehicule selon le contrat API de creation.
-        </p>
-      </div>
-
-      <Alert
-        variant="info"
-        title="Important"
-        message="Le statut est force a DISPONIBLE a la creation dans cette etape."
-      />
-
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold text-[#0F172A]">Ajouter un véhicule</h1>
+          <p className="mt-2 text-sm text-slate-500">Le véhicule sera créé avec le statut Disponible.</p>
+        </div>
         <Link to={`${basePath}/vehicles`}>
           <Button type="button" variant="secondary">Annuler</Button>
         </Link>
@@ -222,6 +208,17 @@ export default function ManagerVehicleCreatePage({ basePath = '/manager' }: Mana
         enablePhotoUpload
         selectedPhotos={selectedPhotos}
         onPhotosChange={setSelectedPhotos}
+        brandOptions={(brandsQuery.data ?? []).map((brand) => ({ value: String(brand.id), label: brand.name }))}
+        categoryOptions={(categoriesQuery.data ?? []).map((category) => ({
+          value: String(category.id),
+          label: category.name,
+          dailyRate: category.daily_rate,
+        }))}
+        parkingSpaceOptions={(parkingSpacesQuery.data ?? [])
+          .filter((space) => space.occupied_by_vehicle_id === null)
+          .map((space) => ({ value: String(space.id), label: `${space.parking_name} - ${space.number}` }))}
+        equipmentOptions={(equipmentQuery.data ?? []).map((equipment) => ({ value: equipment.id, label: equipment.label }))}
+        isLoadingOptions={brandsQuery.isLoading || categoriesQuery.isLoading || parkingSpacesQuery.isLoading || equipmentQuery.isLoading}
       />
     </section>
   )

@@ -18,6 +18,7 @@ from rest_framework.test import APIClient
 from accounts.models import ClientProfile, Role
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment, VehiclePhoto
 from interventions.models import Intervention
+from notifications.models import Notification
 from vehicles.services import (
 	AvailabilityValidationError,
 	calculate_duration_hours,
@@ -426,6 +427,25 @@ class VehiclePublicCatalogTests(VehicleTestDataMixin, TestCase):
 class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 	def setUp(self):
 		self.client_api = APIClient()
+		self.client_profile, _ = ClientProfile.objects.get_or_create(
+			user=self.client_user,
+			defaults={"profile_status": ClientProfile.ProfileStatus.VALIDE},
+		)
+
+	def _create_future_reservation(self, status_value):
+		start_at = timezone.now() + timedelta(days=2)
+		return Reservation.objects.create(
+			client=self.client_profile,
+			vehicle=self.vehicle_active,
+			start_at=start_at,
+			end_at=start_at + timedelta(days=2),
+			status=status_value,
+			rental_amount="100.00",
+			deposit_amount="200.00",
+			confirmed_at=timezone.now() if status_value in Reservation.CONFIRMED_STATUSES else None,
+			cancelled_at=timezone.now() if status_value == Reservation.Status.ANNULEE else None,
+			cancellation_reason="Annulee" if status_value == Reservation.Status.ANNULEE else "",
+		)
 
 	def _payload(self, **kwargs):
 		base = {
@@ -457,6 +477,58 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 			format="json",
 		)
 		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+	def test_create_forces_available_status(self):
+		space = ParkingSpace.objects.create(parking=self.parking_active, number="A5-STATUS", is_active=True)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(
+			"/api/v1/management/vehicles/",
+			self._payload(
+				parking_space=space.id,
+				registration_number="STATUS-001",
+				status=Vehicle.Status.MAINTENANCE,
+			),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		vehicle = Vehicle.objects.get(registration_number="STATUS-001")
+		self.assertEqual(vehicle.status, Vehicle.Status.DISPONIBLE)
+
+	def test_create_requires_parking_space(self):
+		self.client_api.force_authenticate(self.manager_user)
+		payload = self._payload(registration_number="NOPARK-001")
+		payload.pop("parking_space")
+
+		response = self.client_api.post("/api/v1/management/vehicles/", payload, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("parking_space", response.data)
+
+	def test_create_rejects_negative_mileage(self):
+		space = ParkingSpace.objects.create(parking=self.parking_active, number="A5-MILEAGE", is_active=True)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(
+			"/api/v1/management/vehicles/",
+			self._payload(parking_space=space.id, registration_number="MILEAGE-001", mileage=-1),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("mileage", response.data)
+
+	def test_manager_list_exposes_registration_and_assigned_parking(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.get("/api/v1/management/vehicles/")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		item = next(row for row in response.data["results"] if row["id"] == self.vehicle_active.id)
+		self.assertEqual(item["registration_number"], self.vehicle_active.registration_number)
+		self.assertEqual(item["parking_name"], self.parking_active.name)
+		self.assertEqual(item["parking_space_number"], self.space_a1.number)
 
 	def test_admin_can_create_vehicle(self):
 		space = ParkingSpace.objects.create(parking=self.parking_active, number="A6", is_active=True)
@@ -533,6 +605,69 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.vehicle_active.refresh_from_db()
 		self.assertEqual(self.vehicle_active.status, Vehicle.Status.RESERVE)
+
+	def test_maintenance_flags_future_confirmed_reservation_for_reassignment(self):
+		reservation = self._create_future_reservation(Reservation.Status.CONFIRMEE)
+		self.client_api.force_authenticate(self.manager_user)
+
+		with self.captureOnCommitCallbacks(execute=True):
+			response = self.client_api.patch(
+				f"/api/v1/management/vehicles/{self.vehicle_active.id}/status/",
+				{"status": Vehicle.Status.MAINTENANCE},
+				format="json",
+			)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.REAFFECTATION_REQUIRED)
+		self.assertTrue(Notification.objects.filter(
+			notification_type=Notification.NotificationType.RESERVATION_REASSIGNMENT_REQUIRED,
+			related_object_type="reservation",
+			related_object_id=reservation.id,
+			user=self.manager_user,
+		).exists())
+
+	def test_unavailable_flags_future_confirmed_reservation_for_reassignment(self):
+		reservation = self._create_future_reservation(Reservation.Status.CONFIRMEE)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.patch(
+			f"/api/v1/management/vehicles/{self.vehicle_active.id}/status/",
+			{"status": Vehicle.Status.INDISPONIBLE},
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.REAFFECTATION_REQUIRED)
+
+	def test_unavailable_vehicle_does_not_change_cancelled_reservation(self):
+		reservation = self._create_future_reservation(Reservation.Status.ANNULEE)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.patch(
+			f"/api/v1/management/vehicles/{self.vehicle_active.id}/status/",
+			{"status": Vehicle.Status.INDISPONIBLE},
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
+
+	def test_unavailable_vehicle_does_not_change_completed_reservation(self):
+		reservation = self._create_future_reservation(Reservation.Status.TERMINEE)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.patch(
+			f"/api/v1/management/vehicles/{self.vehicle_active.id}/status/",
+			{"status": Vehicle.Status.INDISPONIBLE},
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.TERMINEE)
 
 	def test_status_update_maintenance_to_available_after_completed_mechanical_intervention(self):
 		self.vehicle_active.status = Vehicle.Status.MAINTENANCE

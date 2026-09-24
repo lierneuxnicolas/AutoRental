@@ -146,6 +146,19 @@ export interface ManagementVehicleResponse {
   description?: string
 }
 
+export interface ManagementVehicleListItem {
+  id: number
+  brand: string
+  model_name: string
+  category: string
+  registration_number: string
+  is_active: boolean
+  public_status: string
+  parking_name: string | null
+  parking_space_number: string | null
+  main_photo: VehiclePhotoPublic | null
+}
+
 export interface BrandOption {
   id: number
   name: string

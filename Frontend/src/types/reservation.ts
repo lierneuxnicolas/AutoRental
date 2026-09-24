@@ -19,6 +19,7 @@ export type ReservationStatus =
   | 'EN_ATTENTE_CAUTION'
   | 'EN_ATTENTE_PAIEMENT'
   | 'CONFIRMEE'
+  | 'REAFFECTATION_REQUIRED'
   | 'EN_COURS'
   | 'A_CONTROLER'
   | 'TERMINEE'

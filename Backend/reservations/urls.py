@@ -14,6 +14,9 @@ from reservations.views import (
     ReservationManagementCompleteView,
     ReservationManagementIssueView,
     ReservationManagementListView,
+    ReservationReassignView,
+    ReservationReplacementVehicleListView,
+    ReservationUnavailableCancellationView,
     ReservationUnlockView,
 )
 
@@ -42,6 +45,21 @@ urlpatterns = [
     # Management endpoints (point 39F)
     path("management/reservations/", ReservationManagementListView.as_view(), name="management-reservation-list"),
     path("management/reservations/<int:pk>/", ReservationManagementDetailView.as_view(), name="management-reservation-detail"),
+    path(
+        "management/reservations/<int:pk>/replacement-vehicles/",
+        ReservationReplacementVehicleListView.as_view(),
+        name="management-reservation-replacement-vehicles",
+    ),
+    path(
+        "management/reservations/<int:pk>/reassign/",
+        ReservationReassignView.as_view(),
+        name="management-reservation-reassign",
+    ),
+    path(
+        "management/reservations/<int:pk>/cancel-unavailable/",
+        ReservationUnavailableCancellationView.as_view(),
+        name="management-reservation-cancel-unavailable",
+    ),
     path(
         "management/reservations/<int:pk>/complete/",
         ReservationManagementCompleteView.as_view(),

@@ -7,6 +7,7 @@ export type ManagementReservationStatus =
   | 'EN_ATTENTE_CAUTION'
   | 'EN_ATTENTE_PAIEMENT'
   | 'CONFIRMEE'
+  | 'REAFFECTATION_REQUIRED'
   | 'EN_COURS'
   | 'A_CONTROLER'
   | 'TERMINEE'
@@ -35,6 +36,15 @@ export interface ReservationManagementVehicleSummary {
   transmission: string
   seats: number
   doors: number
+  status: string
+  parking_name: string | null
+  parking_space_number: string | null
+  main_photo: {
+    id: number
+    file: string | null
+    caption: string
+    position: number
+  } | null
 }
 
 export type ManagementDepositStatus =
@@ -101,6 +111,7 @@ export interface ManagementReservationListQueryParams {
   start_at_to?: string
   status?: string
   vehicle?: number
+  vehicle_search?: string
   vehicle_registration_plate?: string
 }
 
@@ -115,6 +126,29 @@ export interface ManagementReservationValidationRequest {
 export interface ManagementReservationValidationResponse {
   message: string
   reservation: ReservationManagementDetail
+}
+
+export interface ReservationReplacementVehicle {
+  id: number
+  brand: string
+  model_name: string
+  registration_number: string
+  category: string
+  category_daily_rate: string
+  parking_name: string | null
+  parking_space_number: string | null
+  main_photo: ReservationManagementVehicleSummary['main_photo']
+}
+
+export interface ReservationReassignmentResponse {
+  message: string
+  reservation: ReservationManagementDetail
+}
+
+export interface ReservationUnavailableCancellationResponse {
+  message: string
+  reservation: ReservationManagementDetail
+  refund_initiated: boolean
 }
 
 export type ManagementIssueAnomalyType = 'MECANIQUE' | 'ACCIDENT' | 'NETTOYAGE' | 'AUTRE'
