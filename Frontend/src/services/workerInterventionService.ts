@@ -70,7 +70,10 @@ export async function checkInIntervention(
 ): Promise<WorkerInterventionResponse> {
   const formData = new FormData()
   formData.append('mileage', String(payload.mileage))
-  formData.append('observations', payload.observations)
+  formData.append('energy_level_percent', String(payload.energy_level_percent))
+  formData.append('anomaly_present', String(payload.anomaly_present))
+  if (payload.anomaly_description) formData.append('anomaly_description', payload.anomaly_description)
+  if (payload.anomaly_severity) formData.append('anomaly_severity', payload.anomaly_severity)
 
   if (payload.vehicle_condition) {
     formData.append('vehicle_condition', payload.vehicle_condition)
@@ -163,12 +166,10 @@ export async function checkOutIntervention(
 ): Promise<WorkerInterventionResponse> {
   const formData = new FormData()
   formData.append('final_mileage', String(payload.final_mileage))
-  formData.append('final_vehicle_state', payload.final_vehicle_state)
-  formData.append('conclusions', payload.conclusions)
-  if (payload.new_intervention_needed !== undefined) formData.append('new_intervention_needed', String(payload.new_intervention_needed))
-  if (payload.vehicle_operational !== undefined) formData.append('vehicle_operational', String(payload.vehicle_operational))
-  if (payload.vehicle_clean !== undefined) formData.append('vehicle_clean', String(payload.vehicle_clean))
-  if (payload.final_comment) formData.append('final_comment', payload.final_comment)
+  formData.append('final_energy_level_percent', String(payload.final_energy_level_percent))
+  formData.append('anomaly_present', String(payload.anomaly_present))
+  if (payload.anomaly_description) formData.append('anomaly_description', payload.anomaly_description)
+  if (payload.anomaly_severity) formData.append('anomaly_severity', payload.anomaly_severity)
   payload.photos.forEach((photo) => formData.append('photos', photo))
   const { data } = await api.post<WorkerInterventionResponse>(`${getBasePath(role)}/${id}/check-out/`, formData, { headers: { 'Content-Type': 'multipart/form-data' } })
   return data

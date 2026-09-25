@@ -62,7 +62,11 @@ InterventionWorkerCheckInRequestSerializer = inline_serializer(
 	name="InterventionWorkerCheckInRequest",
 	fields={
 		"mileage": serializers.IntegerField(required=True, min_value=0),
+		"energy_level_percent": serializers.IntegerField(required=False, min_value=0, max_value=100, default=0),
 		"observations": serializers.CharField(required=True, allow_blank=False),
+		"anomaly_present": serializers.BooleanField(required=False, default=False),
+		"anomaly_description": serializers.CharField(required=False, allow_blank=True),
+		"anomaly_severity": serializers.ChoiceField(choices=["ACCEPTABLE", "GRAVE"], required=False, allow_blank=True),
 		"vehicle_condition": serializers.CharField(required=False, allow_blank=True),
 		"cleanliness_state": serializers.CharField(required=False, allow_blank=True),
 		"cleanliness_notes": serializers.CharField(required=False, allow_blank=True),
@@ -413,7 +417,11 @@ class _InterventionWorkerCheckInView(_InterventionWorkerBaseView):
 			updated = check_in_assigned_intervention(
 				intervention=intervention,
 				mileage=serializer.validated_data["mileage"],
+				energy_level_percent=serializer.validated_data["energy_level_percent"],
 				observations=serializer.validated_data["observations"],
+				anomaly_present=serializer.validated_data["anomaly_present"],
+				anomaly_description=serializer.validated_data.get("anomaly_description", ""),
+				anomaly_severity=serializer.validated_data.get("anomaly_severity", ""),
 				vehicle_condition=serializer.validated_data.get("vehicle_condition", ""),
 				cleanliness_state=serializer.validated_data.get("cleanliness_state", ""),
 				cleanliness_notes=serializer.validated_data.get("cleanliness_notes", ""),
@@ -583,6 +591,10 @@ class _InterventionWorkerCheckOutView(_InterventionWorkerBaseView):
 				new_intervention_needed=serializer.validated_data["new_intervention_needed"],
 				final_comment=serializer.validated_data.get("final_comment", ""),
 				photos=request.FILES.getlist("photos"),
+				final_energy_level_percent=serializer.validated_data["final_energy_level_percent"],
+				anomaly_present=serializer.validated_data["anomaly_present"],
+				anomaly_description=serializer.validated_data.get("anomaly_description", ""),
+				anomaly_severity=serializer.validated_data.get("anomaly_severity", ""),
 			)
 		except InterventionWorkflowError as exc:
 			return Response({"code": exc.code, "detail": exc.message}, status=self._map_workflow_error_status(exc))

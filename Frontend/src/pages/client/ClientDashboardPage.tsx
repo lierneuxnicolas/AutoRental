@@ -109,6 +109,8 @@ function getReservationState(status: ReservationStatus | undefined): DashboardRe
       return { label: 'A controler', variant: 'warning' }
     case 'TERMINEE':
       return { label: 'Terminee', variant: 'success' }
+    case 'NON_UTILISEE':
+      return { label: 'Non utilisée', variant: 'neutral' }
     case 'ANNULEE':
       return { label: 'Annulee', variant: 'danger' }
     case 'PAIEMENT_ECHOUE':

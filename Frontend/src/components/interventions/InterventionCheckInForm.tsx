@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import Alert from '../feedback/Alert'
 import LoadingSpinner from '../feedback/LoadingSpinner'
 import Button from '../ui/Button'
 import Card from '../ui/Card'
 import Input from '../ui/Input'
 import InspectionPhotoSlot from '../inspections/InspectionPhotoSlot'
-import type { WorkerInterventionCheckInValues, WorkerInterventionInterruptValues, WorkerInterventionRole } from '../../types/workerIntervention'
-import type { PhotoType } from '../../types/inspection'
+import InspectionVehicleStateCard from '../inspections/InspectionVehicleStateCard'
+import { validateInspectionVehicleState, type WorkflowAnomalySeverity } from '../inspections/inspectionVehicleState'
+import StandardInspectionPhotoGrid from '../inspections/StandardInspectionPhotoGrid'
+import { STANDARD_INSPECTION_PHOTO_SLOTS } from '../inspections/standardInspectionPhotos'
+import type { WorkerInterventionCheckInValues, WorkerInterventionInterruptValues } from '../../types/workerIntervention'
 
 interface InterventionCheckInFormProps {
-  role: WorkerInterventionRole
   initialMileage?: number | null
   embedded?: boolean
   disabled?: boolean
@@ -18,35 +20,14 @@ interface InterventionCheckInFormProps {
   onInterrupt?: (values: WorkerInterventionInterruptValues) => void
 }
 
-type WorkerPhotoSlot = {
-  key: string
-  label: string
-  photoType: PhotoType
-}
-
-const exteriorSlots: WorkerPhotoSlot[] = [
-  { key: 'front_left', label: 'Avant gauche', photoType: 'AVANT' },
-  { key: 'front_right', label: 'Avant droit', photoType: 'COTE_DROIT' },
-  { key: 'rear_left', label: 'Arrière gauche', photoType: 'COTE_GAUCHE' },
-  { key: 'rear_right', label: 'Arrière droit', photoType: 'ARRIERE' },
-]
-
-const interiorSlots: WorkerPhotoSlot[] = [
-  { key: 'dashboard', label: 'Tableau de bord', photoType: 'TABLEAU_DE_BORD' },
-  { key: 'front_seats', label: 'Sièges avant', photoType: 'INTERIEUR' },
-  { key: 'rear_seats', label: 'Sièges arrière', photoType: 'INTERIEUR' },
-  { key: 'trunk', label: 'Coffre', photoType: 'AUTRE' },
-]
-
 function buildEmptyPhotoState() {
-  return [...exteriorSlots, ...interiorSlots].reduce<Record<string, { file: File | null; previewUrl: string | null }>>((state, slot) => {
+  return [...STANDARD_INSPECTION_PHOTO_SLOTS, { key: 'anomaly_1' }, { key: 'anomaly_2' }].reduce<Record<string, { file: File | null; previewUrl: string | null }>>((state, slot) => {
     state[slot.key] = { file: null, previewUrl: null }
     return state
   }, {})
 }
 
 export default function InterventionCheckInForm({
-  role,
   initialMileage,
   embedded = false,
   disabled = false,
@@ -55,10 +36,10 @@ export default function InterventionCheckInForm({
   onInterrupt,
 }: InterventionCheckInFormProps) {
   const [mileage, setMileage] = useState(initialMileage !== null && initialMileage !== undefined ? String(initialMileage) : '')
-  const [observations, setObservations] = useState('')
-  const [vehicleCondition, setVehicleCondition] = useState('')
-  const [cleanlinessState, setCleanlinessState] = useState('')
-  const [cleanlinessNotes, setCleanlinessNotes] = useState('')
+  const [energyLevel, setEnergyLevel] = useState('')
+  const [anomalyPresent, setAnomalyPresent] = useState<boolean | null>(null)
+  const [anomalyDescription, setAnomalyDescription] = useState('')
+  const [anomalySeverity, setAnomalySeverity] = useState<WorkflowAnomalySeverity>('')
   const [isUnlocked, setIsUnlocked] = useState(false)
   const [photoState, setPhotoState] = useState(buildEmptyPhotoState)
   const [localError, setLocalError] = useState<string | null>(null)
@@ -66,19 +47,18 @@ export default function InterventionCheckInForm({
   const [interruptReasonType, setInterruptReasonType] = useState<WorkerInterventionInterruptValues['reason_type']>('vehicule_inaccessible')
   const [interruptReasonDetail, setInterruptReasonDetail] = useState('')
   const [interruptPhoto, setInterruptPhoto] = useState<File | null>(null)
+  const previewUrlsRef = useRef(new Set<string>())
 
-  useEffect(() => {
-    return () => {
-      Object.values(photoState).forEach((slot) => {
-        if (slot.previewUrl) {
-          URL.revokeObjectURL(slot.previewUrl)
-        }
-      })
-    }
-  }, [photoState])
+  useEffect(() => () => {
+    previewUrlsRef.current.forEach((previewUrl) => URL.revokeObjectURL(previewUrl))
+  }, [])
 
-  const selectedPhotos = useMemo(
-    () => Object.values(photoState).map((slot) => slot.file).filter((file): file is File => file !== null),
+  const standardPhotos = useMemo(
+    () => STANDARD_INSPECTION_PHOTO_SLOTS.map((slot) => photoState[slot.key].file).filter((file): file is File => file !== null),
+    [photoState],
+  )
+  const anomalyPhotos = useMemo(
+    () => [photoState.anomaly_1.file, photoState.anomaly_2.file].filter((file): file is File => file !== null),
     [photoState],
   )
 
@@ -87,13 +67,17 @@ export default function InterventionCheckInForm({
       const currentSlot = current[slotKey]
       if (currentSlot?.previewUrl) {
         URL.revokeObjectURL(currentSlot.previewUrl)
+        previewUrlsRef.current.delete(currentSlot.previewUrl)
       }
+
+      const previewUrl = file ? URL.createObjectURL(file) : null
+      if (previewUrl) previewUrlsRef.current.add(previewUrl)
 
       return {
         ...current,
         [slotKey]: {
           file,
-          previewUrl: file ? URL.createObjectURL(file) : null,
+          previewUrl,
         },
       }
     })
@@ -106,30 +90,24 @@ export default function InterventionCheckInForm({
       return
     }
 
-    const parsedMileage = Number(mileage)
-    if (!Number.isInteger(parsedMileage) || parsedMileage < 0) {
-      setLocalError('Le kilométrage doit être un nombre positif ou nul.')
+    const validation = validateInspectionVehicleState({ mileage, energy: energyLevel, anomalyPresent, anomalyDescription, anomalySeverity })
+    if (validation.error) {
+      setLocalError(validation.error)
       return
     }
-
-    if (!observations.trim()) {
-      setLocalError('Les observations sont obligatoires.')
-      return
-    }
-
-    if (selectedPhotos.length === 0) {
-      setLocalError('Ajoutez au moins une photo avant intervention.')
+    if (standardPhotos.length !== STANDARD_INSPECTION_PHOTO_SLOTS.length) {
+      setLocalError('Les 8 photos standard sont obligatoires.')
       return
     }
 
     setLocalError(null)
     onSubmit({
-      mileage: parsedMileage,
-      observations: observations.trim(),
-      vehicle_condition: vehicleCondition.trim() || undefined,
-      cleanliness_state: cleanlinessState.trim() || undefined,
-      cleanliness_notes: cleanlinessNotes.trim() || undefined,
-      photos: selectedPhotos,
+      mileage: validation.data.mileage,
+      energy_level_percent: validation.data.energy,
+      anomaly_present: validation.data.anomalyPresent,
+      anomaly_description: validation.data.anomalyDescription,
+      anomaly_severity: validation.data.anomalySeverity,
+      photos: [...standardPhotos, ...anomalyPhotos],
     })
   }
 
@@ -184,72 +162,43 @@ export default function InterventionCheckInForm({
 
         {isUnlocked ? (
           <>
-          <div className="grid gap-4 md:grid-cols-2">
-          <Input
-            type="text"
-            inputMode="numeric"
-            label="Kilométrage initial"
-            value={mileage}
-            onChange={(event) => setMileage(event.target.value)}
+          <InspectionVehicleStateCard
+            mileageLabel="Kilométrage actuel"
+            mileage={mileage}
+            onMileageChange={setMileage}
+            energy={energyLevel}
+            onEnergyChange={setEnergyLevel}
+            anomalyPresent={anomalyPresent}
+            onAnomalyPresentChange={setAnomalyPresent}
+            anomalyDescription={anomalyDescription}
+            onAnomalyDescriptionChange={setAnomalyDescription}
+            anomalySeverity={anomalySeverity}
+            onAnomalySeverityChange={setAnomalySeverity}
             disabled={disabled || isSubmitting}
+            anomalyPhotos={(
+              <div className="grid gap-4 sm:grid-cols-2">
+                {[1, 2].map((position) => (
+                  <InspectionPhotoSlot
+                    key={position}
+                    photoType="DOMMAGE"
+                    label={`Photo de l’anomalie ${position}`}
+                    previewUrl={photoState[`anomaly_${position}`]?.previewUrl ?? null}
+                    uploadedUrl={photoState[`anomaly_${position}`]?.previewUrl ?? null}
+                    isUploading={false}
+                    errorMessage={null}
+                    onFileChange={(file) => setSlotFile(`anomaly_${position}`, file)}
+                  />
+                ))}
+              </div>
+            )}
           />
-          {role === 'mechanic' ? (
-            <Input
-              label="État général du véhicule"
-              value={vehicleCondition}
-              onChange={(event) => setVehicleCondition(event.target.value)}
-              disabled={disabled || isSubmitting}
-            />
-          ) : (
-            <>
-              <Input
-                label="État de propreté"
-                value={cleanlinessState}
-                onChange={(event) => setCleanlinessState(event.target.value)}
-                disabled={disabled || isSubmitting}
-              />
-              <Input
-                label="Salissures / odeurs / déchets"
-                value={cleanlinessNotes}
-                onChange={(event) => setCleanlinessNotes(event.target.value)}
-                disabled={disabled || isSubmitting}
-                className="md:col-span-2"
-              />
-            </>
-          )}
-          </div>
 
-          <div className="space-y-2">
-          <label htmlFor={`check-in-observations-${role}`} className="block text-sm font-medium text-[#1F2937]">
-            Observations
-          </label>
-          <textarea
-            id={`check-in-observations-${role}`}
-            value={observations}
-            onChange={(event) => setObservations(event.target.value)}
+          <StandardInspectionPhotoGrid
+            title="Photos de check-in"
+            photoState={photoState}
             disabled={disabled || isSubmitting}
-            rows={4}
-            className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-[#F5F5F5]"
+            onFileChange={setSlotFile}
           />
-          </div>
-
-          <div className="space-y-3">
-            <p className="text-sm font-medium text-[#1F2937]">Photos de check-in</p>
-          <div className="grid gap-4 md:grid-cols-2">
-            {[...exteriorSlots, ...interiorSlots].map((slot) => (
-              <InspectionPhotoSlot
-                key={slot.key}
-                photoType={slot.photoType}
-                label={slot.label}
-                previewUrl={photoState[slot.key]?.previewUrl ?? null}
-                uploadedUrl={photoState[slot.key]?.previewUrl ?? null}
-                isUploading={false}
-                errorMessage={null}
-                onFileChange={(file) => setSlotFile(slot.key, file)}
-              />
-            ))}
-          </div>
-          </div>
           </>
         ) : null}
 

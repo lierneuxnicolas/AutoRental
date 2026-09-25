@@ -5,7 +5,7 @@ from reservations.services.expiration import expire_missed_reservations, expire_
 
 class Command(BaseCommand):
     help = (
-        "Annule automatiquement les reservations CONFIRMEE dont la fenetre de depart est depassee sans "
+        "Marque NON_UTILISEE les reservations CONFIRMEE dont la periode est terminee sans "
         "inspection INITIAL, et les reservations BROUILLON dont le delai de 15 minutes est depasse."
     )
 
@@ -13,9 +13,9 @@ class Command(BaseCommand):
         missed_stats = expire_missed_reservations()
         self.stdout.write(
             self.style.SUCCESS(
-                "Reservations manquees: analysees={analyzed} annulees={cancelled} ignorees={ignored} erreurs={errors}".format(
+                "Reservations manquees: analysees={analyzed} non_utilisees={non_utilized} ignorees={ignored} erreurs={errors}".format(
                     analyzed=missed_stats.analyzed,
-                    cancelled=missed_stats.cancelled,
+                    non_utilized=missed_stats.non_utilized,
                     ignored=missed_stats.ignored,
                     errors=missed_stats.errors,
                 )

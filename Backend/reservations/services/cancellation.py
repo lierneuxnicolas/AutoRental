@@ -430,6 +430,7 @@ def cancel_reservation(
     allow_reassignment_required: bool = False,
     vehicle_unavailable: bool = False,
     critical_checkin_anomaly: bool = False,
+    cancellation_source: str = Reservation.CancellationSource.CLIENT,
 ) -> Reservation:
     """
     Annule une réservation.
@@ -481,7 +482,24 @@ def cancel_reservation(
             "Le client n'a pas d'utilisateur associé.",
         )
 
-    if owner != requested_by and not (allow_reassignment_required or vehicle_unavailable):
+    valid_sources = {choice for choice, _ in Reservation.CancellationSource.choices}
+    if cancellation_source not in valid_sources:
+        _raise_cancellation_error("INVALID_SOURCE", "La source d'annulation est invalide.")
+
+    is_manager_cancellation = cancellation_source == Reservation.CancellationSource.MANAGER
+    requester_role = getattr(getattr(requested_by, "role", None), "code", None)
+    manager_allowed = is_manager_cancellation and (
+        getattr(requested_by, "is_superuser", False)
+        or requester_role in {Role.Code.GESTIONNAIRE_COMPTABLE, Role.Code.ADMINISTRATEUR}
+    )
+
+    if is_manager_cancellation and not manager_allowed:
+        _raise_cancellation_error(
+            "FORBIDDEN",
+            "Seul un gestionnaire peut enregistrer une annulation gestionnaire.",
+        )
+
+    if owner != requested_by and not (manager_allowed or allow_reassignment_required or vehicle_unavailable):
         _raise_cancellation_error(
             "FORBIDDEN",
             "Vous ne pouvez annuler que vos propres réservations.",
@@ -556,7 +574,12 @@ def cancel_reservation(
             )
 
         financials = calculate_cancellation_financials(reservation=reservation_locked)
-        if is_management_reassignment_cancellation or is_vehicle_unavailability_cancellation or is_critical_checkin_cancellation:
+        if (
+            is_manager_cancellation
+            or is_management_reassignment_cancellation
+            or is_vehicle_unavailability_cancellation
+            or is_critical_checkin_cancellation
+        ):
             financials = CancellationFinancialBreakdown(
                 amount_paid=financials.amount_paid,
                 cancellation_fee=Decimal("0.00"),
@@ -574,9 +597,10 @@ def cancel_reservation(
         reservation_locked.status = Reservation.Status.ANNULEE
         reservation_locked.cancelled_at = cancelled_at
         reservation_locked.cancellation_reason = reason_stripped
+        reservation_locked.cancellation_source = cancellation_source
 
         # Sauvegarder uniquement les champs concernés
-        reservation_locked.save(update_fields=["status", "cancelled_at", "cancellation_reason", "updated_at"])
+        reservation_locked.save(update_fields=["status", "cancelled_at", "cancellation_reason", "cancellation_source", "updated_at"])
 
         _sync_cancellation_financial_document(
             reservation=reservation_locked,

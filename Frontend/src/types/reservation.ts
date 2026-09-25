@@ -23,6 +23,7 @@ export type ReservationStatus =
   | 'EN_COURS'
   | 'A_CONTROLER'
   | 'TERMINEE'
+  | 'NON_UTILISEE'
   | 'ANNULEE'
   | 'PAIEMENT_ECHOUE'
 

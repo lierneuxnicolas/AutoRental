@@ -52,6 +52,15 @@ export async function reassignManagementReservation(
   return data
 }
 
+export async function cancelManagementReservation(
+  id: number | string,
+): Promise<ReservationUnavailableCancellationResponse> {
+  const { data } = await api.post<ReservationUnavailableCancellationResponse>(
+    `/management/reservations/${id}/cancel/`,
+  )
+  return data
+}
+
 export async function cancelUnavailableManagementReservation(
   id: number | string,
 ): Promise<ReservationUnavailableCancellationResponse> {

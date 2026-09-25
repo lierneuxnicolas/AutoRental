@@ -4,10 +4,11 @@ import { Link } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
-import Card from '../../components/ui/Card'
-import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
+import PersonnelInterventionCard from '../../components/interventions/PersonnelInterventionCard'
+import Button from '../../components/ui/Button'
+import type { StatusVariant } from '../../components/ui/StatusBadge'
 import { getInterventions } from '../../services/workerInterventionService'
-import type { WorkerInterventionResponse, WorkerInterventionStatus } from '../../types/workerIntervention'
+import type { WorkerInterventionStatus } from '../../types/workerIntervention'
 
 function mapStatusToBadge(status: WorkerInterventionStatus): { label: string; variant: StatusVariant } {
   switch (status) {
@@ -28,29 +29,6 @@ function mapStatusToBadge(status: WorkerInterventionStatus): { label: string; va
     default:
       return { label: status, variant: 'neutral' }
   }
-}
-
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value))
-}
-
-function getPersonLabel(assignedTo: WorkerInterventionResponse['assigned_to']): string {
-  if (!assignedTo) {
-    return 'Non renseigné'
-  }
-
-  const fullName = `${assignedTo.first_name} ${assignedTo.last_name}`.trim()
-  return fullName.length > 0 ? fullName : assignedTo.email
-}
-
-function getVehicleLabel(intervention: WorkerInterventionResponse): string {
-  return `${intervention.vehicle.brand} ${intervention.vehicle.model_name}`
 }
 
 export default function CleaningInterventionsPage() {
@@ -107,9 +85,6 @@ export default function CleaningInterventionsPage() {
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6 flex flex-col gap-2">
         <h1 className="text-2xl font-semibold text-[#1F2937]">Mes interventions</h1>
-        <p className="text-sm text-slate-600">
-          Consultez les interventions de nettoyage qui vous ont été assignées.
-        </p>
       </div>
 
       <div className="grid gap-4">
@@ -117,70 +92,24 @@ export default function CleaningInterventionsPage() {
           const statusBadge = mapStatusToBadge(intervention.status)
 
           return (
-            <Card
+            <PersonnelInterventionCard
               key={intervention.id}
-              className="border-slate-200"
-              header={
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-[#2563EB]">
-                      {intervention.reference || `#${intervention.id}`}
-                    </p>
-                    <p className="text-sm text-slate-600">{intervention.intervention_type}</p>
-                  </div>
-                  <StatusBadge label={statusBadge.label} variant={statusBadge.variant} />
-                </div>
-              }
-            >
-              <div className="grid gap-4 md:grid-cols-[1.3fr_0.7fr]">
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Description</p>
-                    <p className="mt-1 text-sm text-slate-700">
-                      {intervention.description?.trim() ? intervention.description : 'Aucune description fournie.'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Véhicule</p>
-                    <p className="mt-1 text-sm text-[#1F2937]">{getVehicleLabel(intervention)}</p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Immatriculation</p>
-                    <p className="mt-1 text-sm text-[#1F2937]">{intervention.vehicle.registration_number || 'Non renseignée'}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Réservation liée</p>
-                    <p className="mt-1 text-sm text-slate-700">
-                      {intervention.reservation ? intervention.reservation.reference : 'Aucune réservation liée'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Date de création</p>
-                    <p className="mt-1 text-sm text-slate-700">{formatDateTime(intervention.created_at)}</p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Assigné à</p>
-                    <p className="mt-1 text-sm text-slate-700">{getPersonLabel(intervention.assigned_to)}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-5 flex justify-end">
-                <Link
-                  to={`/cleaning/interventions/${intervention.id}`}
-                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-4 py-2 text-sm font-medium text-[#2563EB] transition hover:border-[#2563EB] hover:bg-slate-50"
-                >
-                  Voir le détail
+              intervention={intervention}
+              statusBadge={statusBadge}
+              action={(
+                <Link to={`/cleaning/interventions/${intervention.id}`}>
+                  <Button variant={intervention.status === 'PLANIFIEE' ? 'primary' : 'secondary'} className="min-w-[11rem]">
+                    {intervention.status === 'PLANIFIEE'
+                      ? 'Commencer'
+                      : intervention.status === 'TERMINEE'
+                        ? 'Voir le rapport'
+                        : intervention.status === 'EN_COURS'
+                          ? 'Voir l’intervention'
+                          : 'Voir le détail'}
+                  </Button>
                 </Link>
-              </div>
-            </Card>
+              )}
+            />
           )
         })}
       </div>

@@ -9,19 +9,12 @@ from django.utils import timezone
 from common.models import SystemLog
 from common.services import create_system_log
 from inspections.models import Inspection
-from inspections.services.departure import is_departure_window_expired
-from payments.models import Payment
-from payments.services.deposits import (
-    DepositReleaseError,
-    mark_authorized_deposit_for_verification,
-    release_authorized_deposit,
-)
+from interventions.models import Intervention, VehicleAccess
 from reservations.models import Reservation
 from vehicles.models import Vehicle
 from vehicles.services import get_blocking_reservation_filter
 
 
-SYSTEM_CANCELLATION_REASON = "Reservation annulee automatiquement : delai de prise en charge depasse."
 DRAFT_CANCELLATION_REASON = "Paiement non finalisé dans le délai imparti"
 
 
@@ -29,14 +22,23 @@ DRAFT_CANCELLATION_REASON = "Paiement non finalisé dans le délai imparti"
 class ExpireMissedReservationsStats:
     analyzed: int = 0
     cancelled: int = 0
+    non_utilized: int = 0
     ignored: int = 0
     errors: int = 0
 
 
-def _has_initial_inspection(*, reservation_id: int) -> bool:
+def _has_completed_initial_inspection(*, reservation_id: int) -> bool:
     return Inspection.objects.filter(
         reservation_id=reservation_id,
         inspection_type=Inspection.Type.INITIAL,
+        status=Inspection.Status.TERMINE,
+    ).exists()
+
+
+def _has_actual_pickup(*, reservation_id: int) -> bool:
+    return VehicleAccess.objects.filter(
+        reservation_id=reservation_id,
+        last_unlocked_at__isnull=False,
     ).exists()
 
 
@@ -48,19 +50,17 @@ def _has_other_blocking_reservations(*, reservation: Reservation, reference_time
     ).exclude(pk=reservation.pk).exists()
 
 
-def _release_deposit_if_possible(*, reservation: Reservation) -> tuple[bool, str | None]:
-    try:
-        moved_to_review = mark_authorized_deposit_for_verification(reservation=reservation)
-        if moved_to_review is None:
-            return False, None
-
-        released = release_authorized_deposit(reservation=reservation)
-        if released is None:
-            return False, "caution a verifier mais non liberee"
-
-        return True, None
-    except DepositReleaseError as exc:
-        return False, exc.message
+def _has_blocking_intervention(*, vehicle_id: int) -> bool:
+    return Intervention.objects.filter(
+        vehicle_id=vehicle_id,
+        status__in=(
+            Intervention.Status.A_ATTRIBUER,
+            Intervention.Status.ATTRIBUEE,
+            Intervention.Status.PLANIFIEE,
+            Intervention.Status.EN_COURS,
+            Intervention.Status.EN_PAUSE,
+        ),
+    ).exists()
 
 
 def _expire_single_reservation(*, reservation_id: int, reference_time) -> bool:
@@ -75,48 +75,35 @@ def _expire_single_reservation(*, reservation_id: int, reference_time) -> bool:
         if reservation.status != Reservation.Status.CONFIRMEE:
             return False
 
-        if _has_initial_inspection(reservation_id=reservation.id):
+        if _has_completed_initial_inspection(reservation_id=reservation.id):
             return False
 
-        if not is_departure_window_expired(reservation=reservation, reference_time=reference_time):
+        if _has_actual_pickup(reservation_id=reservation.id):
             return False
 
-        reservation.status = Reservation.Status.ANNULEE
-        reservation.cancelled_at = reference_time
-        reservation.cancellation_reason = SYSTEM_CANCELLATION_REASON
-        reservation.save(update_fields=["status", "cancelled_at", "cancellation_reason", "updated_at"])
+        if reference_time <= reservation.end_at:
+            return False
+
+        reservation.status = Reservation.Status.NON_UTILISEE
+        reservation.save(update_fields=["status", "updated_at"])
 
         vehicle_unblocked = False
-        if vehicle.status == Vehicle.Status.RESERVE and not _has_other_blocking_reservations(
-            reservation=reservation,
-            reference_time=reference_time,
+        if (
+            vehicle.status == Vehicle.Status.RESERVE
+            and not vehicle.has_urgent_checkin_anomaly
+            and not _has_other_blocking_reservations(reservation=reservation, reference_time=reference_time)
+            and not _has_blocking_intervention(vehicle_id=vehicle.id)
         ):
             vehicle.status = Vehicle.Status.DISPONIBLE
             vehicle.save(update_fields=["status", "updated_at"])
             vehicle_unblocked = True
 
-        payment_success_exists = Payment.objects.filter(
-            reservation=reservation,
-            status=Payment.Status.REUSSI,
-        ).exists()
-
-        deposit_released, deposit_error = _release_deposit_if_possible(reservation=reservation)
-
-        financial_note = (
-            "paiement reussi detecte: traitement financier manuel requis"
-            if payment_success_exists
-            else "aucun paiement reussi"
-        )
-        deposit_note = "caution liberee" if deposit_released else "caution inchangee"
-        if deposit_error:
-            deposit_note = f"{deposit_note} ({deposit_error})"
-
         create_system_log(
-            action="MISSED_RESERVATION_EXPIRED",
+            action="RESERVATION_MARKED_UNUSED",
             message=(
-                f"Reservation {reservation.reference} (id={reservation.id}) annulee automatiquement apres depassement de la fenetre de depart. "
-                f"Vehicle id={vehicle.id}, status={vehicle.status}, unblocked={vehicle_unblocked}. "
-                f"{financial_note}. {deposit_note}."
+                f"Reservation {reservation.reference} (id={reservation.id}) marquee NON_UTILISEE apres la fin prevue, "
+                f"sans depart termine ni prise en charge reelle. Vehicle id={vehicle.id}, "
+                f"status={vehicle.status}, unblocked={vehicle_unblocked}. Paiement, facture et caution inchanges."
             ),
             level=SystemLog.Level.WARNING,
             user=None,
@@ -138,7 +125,7 @@ def expire_missed_reservations(*, reference_time=None) -> ExpireMissedReservatio
     for reservation_id in reservation_ids:
         stats.analyzed += 1
         try:
-            cancelled = _expire_single_reservation(reservation_id=reservation_id, reference_time=now)
+            transitioned = _expire_single_reservation(reservation_id=reservation_id, reference_time=now)
         except Exception as exc:
             stats.errors += 1
             create_system_log(
@@ -149,8 +136,8 @@ def expire_missed_reservations(*, reference_time=None) -> ExpireMissedReservatio
             )
             continue
 
-        if cancelled:
-            stats.cancelled += 1
+        if transitioned:
+            stats.non_utilized += 1
         else:
             stats.ignored += 1
 
@@ -174,7 +161,8 @@ def _apply_draft_expiration(*, reservation: Reservation, vehicle: Vehicle, refer
     reservation.status = Reservation.Status.ANNULEE
     reservation.cancelled_at = reference_time
     reservation.cancellation_reason = DRAFT_CANCELLATION_REASON
-    reservation.save(update_fields=["status", "cancelled_at", "cancellation_reason", "updated_at"])
+    reservation.cancellation_source = Reservation.CancellationSource.SYSTEM
+    reservation.save(update_fields=["status", "cancelled_at", "cancellation_reason", "cancellation_source", "updated_at"])
 
     vehicle_unblocked = False
     if vehicle.status == Vehicle.Status.RESERVE and not _has_other_blocking_reservations(

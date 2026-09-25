@@ -16,6 +16,11 @@ REFERENCE_GENERATION_MAX_ATTEMPTS = 10
 
 
 class Reservation(models.Model):
+	class CancellationSource(models.TextChoices):
+		CLIENT = "CLIENT", "Client"
+		MANAGER = "GESTIONNAIRE", "Gestionnaire"
+		SYSTEM = "SYSTEME", "Systeme"
+
 	class InsuranceType(models.TextChoices):
 		STANDARD = "STANDARD", "Standard"
 		DUO = "DUO", "Duo"
@@ -30,6 +35,7 @@ class Reservation(models.Model):
 		EN_COURS = "EN_COURS", "En cours"
 		A_CONTROLER = "A_CONTROLER", "A controler"
 		TERMINEE = "TERMINEE", "Terminee"
+		NON_UTILISEE = "NON_UTILISEE", "Non utilisee"
 		ANNULEE = "ANNULEE", "Annulee"
 		PAIEMENT_ECHOUE = "PAIEMENT_ECHOUE", "Paiement echoue"
 
@@ -94,6 +100,12 @@ class Reservation(models.Model):
 	confirmed_at = models.DateTimeField(null=True, blank=True)
 	cancelled_at = models.DateTimeField(null=True, blank=True)
 	cancellation_reason = models.TextField(blank=True)
+	cancellation_source = models.CharField(
+		max_length=20,
+		choices=CancellationSource.choices,
+		null=True,
+		blank=True,
+	)
 	review_resolved_at = models.DateTimeField(
 		null=True,
 		blank=True,

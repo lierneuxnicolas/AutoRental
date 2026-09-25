@@ -36,7 +36,7 @@ from reservations.serializers.reservation import (
 )
 from reservations.services import ReservationCreationError, create_draft_reservation
 from reservations.services.cancellation import CancellationError, build_cancellation_preview, cancel_reservation
-from reservations.services.expiration import expire_stale_draft_reservations
+from reservations.services.expiration import expire_missed_reservations, expire_stale_draft_reservations
 from vehicles.models import Vehicle
 
 
@@ -106,6 +106,7 @@ class ReservationClientListCreateView(generics.ListCreateAPIView):
             return Reservation.objects.none()
 
         expire_stale_draft_reservations()
+        expire_missed_reservations()
 
         return (
             Reservation.objects.filter(client__user=self.request.user)
@@ -226,6 +227,7 @@ class ReservationClientDetailView(generics.RetrieveAPIView):
             return Reservation.objects.none()
 
         expire_stale_draft_reservations()
+        expire_missed_reservations()
 
         return Reservation.objects.filter(client__user=self.request.user).select_related(
             "client",

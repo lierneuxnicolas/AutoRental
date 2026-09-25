@@ -4,6 +4,8 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
+import InspectionVehicleStateCard from '../../components/inspections/InspectionVehicleStateCard'
+import { validateInspectionVehicleState } from '../../components/inspections/inspectionVehicleState'
 import ReservationProgressBanner from '../../components/reservations/ReservationProgressBanner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
@@ -19,11 +21,6 @@ type ApiErrorPayload = {
   non_field_errors?: string[]
   [key: string]: unknown
 }
-
-const SEVERITY_OPTIONS: Array<{ value: Severity; label: string }> = [
-  { value: 'ACCEPTABLE', label: 'Acceptable' },
-  { value: 'GRAVE', label: 'Grave' },
-]
 
 const ANOMALY_PHOTO_SLOTS = [
   { key: 'slot1', label: "Photo de l'anomalie 1", position: 1 },
@@ -170,15 +167,14 @@ export default function DepartureInspectionVehicleStatePage() {
     if (!inspection) {
       return false
     }
-    if (parsedMileage === null || parsedEnergy === null || anomalyPresent === null) {
-      return false
-    }
-    if (!anomalyPresent) {
-      return true
-    }
-
-    return anomalyDescription.trim().length > 0 && anomalySeverity !== ''
-  }, [anomalyDescription, anomalyPresent, anomalySeverity, inspection, parsedEnergy, parsedMileage])
+    return validateInspectionVehicleState({
+      mileage: mileageInput,
+      energy: energyInput,
+      anomalyPresent,
+      anomalyDescription,
+      anomalySeverity: anomalySeverity === 'ACCEPTABLE' || anomalySeverity === 'GRAVE' ? anomalySeverity : '',
+    }).error === null
+  }, [anomalyDescription, anomalyPresent, anomalySeverity, energyInput, inspection, mileageInput])
 
   const uploadedAnomalyPhotoIds = useMemo(
     () => Object.values(anomalyPhotoState).map((slot) => slot.photoId).filter((photoId): photoId is number => photoId !== null),
@@ -304,6 +300,49 @@ export default function DepartureInspectionVehicleStatePage() {
   }
 
   const reservation = reservationQuery.data
+  const anomalyPhotoFields = (
+    <div className="space-y-2">
+      <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie (optionnel)</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {ANOMALY_PHOTO_SLOTS.map((slot) => {
+          const slotState = anomalyPhotoState[slot.key]
+          return (
+            <Card key={slot.key} className="h-full">
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-[#1F2937]">{slot.label}</p>
+                <input
+                  ref={(input) => { anomalyPhotoInputRefs.current[slot.key] = input }}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  disabled={slotState.isUploading}
+                  className="hidden"
+                  onChange={(event) => {
+                    const selectedFile = event.target.files?.[0] ?? null
+                    if (selectedFile) void uploadAnomalyPhoto(slot.key, selectedFile)
+                  }}
+                />
+                {slotState.previewUrl ? (
+                  <div className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC]">
+                    <img src={slotState.previewUrl} alt={slot.label} className="h-44 w-full object-cover" />
+                  </div>
+                ) : (
+                  <div className="flex h-44 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-sm text-slate-500">Emplacement vide</div>
+                )}
+                {slotState.errorMessage ? <Alert variant="danger" message={slotState.errorMessage} /> : null}
+                <div className="flex flex-col gap-2">
+                  <Button className="w-full" disabled={slotState.isUploading} onClick={() => anomalyPhotoInputRefs.current[slot.key]?.click()}>
+                    {slotState.isUploading ? 'Envoi en cours...' : slotState.photoId ? 'Remplacer la photo' : 'Ajouter une photo'}
+                  </Button>
+                  {slotState.photoId ? <Button variant="secondary" className="w-full" onClick={() => removeAnomalyPhoto(slot.key)}>Supprimer la photo</Button> : null}
+                </div>
+              </div>
+            </Card>
+          )
+        })}
+      </div>
+    </div>
+  )
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
@@ -327,195 +366,31 @@ export default function DepartureInspectionVehicleStatePage() {
           </div>
         </Card>
       ) : (
-        <Card
-          header={
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat du vehicule</h2>
-              <Link to={`/client/reservations?highlight=${reservationId}`}>
-                <Button variant="secondary">Retour a la reservation</Button>
-              </Link>
-            </div>
-          }
-        >
-          <div className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <label htmlFor="vehicle-state-mileage" className="block text-sm font-medium text-[#1F2937]">
-                  Kilometrage actuel
-                </label>
-                <input
-                  id="vehicle-state-mileage"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={mileageInput}
-                  onChange={(event) => setMileageInput(event.target.value)}
-                  className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                  placeholder={inspection.mileage != null ? String(inspection.mileage) : 'Ex: 24510'}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label htmlFor="vehicle-state-energy" className="block text-sm font-medium text-[#1F2937]">
-                  Niveau carburant / batterie (%)
-                </label>
-                <input
-                  id="vehicle-state-energy"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={energyInput}
-                  onChange={(event) => setEnergyInput(event.target.value)}
-                  className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                  placeholder={inspection.energy_level_percent != null ? String(inspection.energy_level_percent) : 'Ex: 75'}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-[#1F2937]">Avez-vous constate une anomalie ?</p>
-              <div className="flex flex-wrap gap-3">
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="radio"
-                    name="vehicle-anomaly-present"
-                    checked={anomalyPresent === true}
-                    onChange={() => setAnomalyPresent(true)}
-                  />
-                  Oui
-                </label>
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="radio"
-                    name="vehicle-anomaly-present"
-                    checked={anomalyPresent === false}
-                    onChange={() => {
-                      setAnomalyPresent(false)
-                      setAnomalyDescription('')
-                      setAnomalySeverity('')
-                      setAnomalyPhotoState((current) => {
-                        Object.values(current).forEach((slot) => revokePreviewUrl(slot.previewUrl))
-                        return buildInitialAnomalyPhotoState()
-                      })
-                    }}
-                  />
-                  Non
-                </label>
-              </div>
-            </div>
-
-            {anomalyPresent ? (
-              <>
-                <div className="space-y-2">
-                  <label htmlFor="vehicle-anomaly-description" className="block text-sm font-medium text-[#1F2937]">
-                    Description de l'anomalie
-                  </label>
-                  <textarea
-                    id="vehicle-anomaly-description"
-                    value={anomalyDescription}
-                    onChange={(event) => setAnomalyDescription(event.target.value)}
-                    rows={4}
-                    className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                    placeholder="Decrivez precisement l'anomalie constatee"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label htmlFor="vehicle-anomaly-severity" className="block text-sm font-medium text-[#1F2937]">
-                    Gravite
-                  </label>
-                  <select
-                    id="vehicle-anomaly-severity"
-                    value={anomalySeverity}
-                    onChange={(event) => setAnomalySeverity(event.target.value as Severity)}
-                    className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="">Selectionner une gravite</option>
-                    {SEVERITY_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie (optionnel)</p>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {ANOMALY_PHOTO_SLOTS.map((slot) => {
-                      const slotState = anomalyPhotoState[slot.key]
-                      return (
-                        <Card key={slot.key} className="h-full">
-                          <div className="space-y-3">
-                            <p className="text-sm font-semibold text-[#1F2937]">{slot.label}</p>
-
-                            <input
-                              ref={(input) => {
-                                anomalyPhotoInputRefs.current[slot.key] = input
-                              }}
-                              type="file"
-                              accept="image/*"
-                              capture="environment"
-                              disabled={slotState.isUploading}
-                              className="hidden"
-                              onChange={(event) => {
-                                const selectedFile = event.target.files?.[0] ?? null
-                                if (selectedFile) {
-                                  void uploadAnomalyPhoto(slot.key, selectedFile)
-                                }
-                              }}
-                            />
-
-                            {slotState.previewUrl ? (
-                              <div className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC]">
-                                <img src={slotState.previewUrl} alt={slot.label} className="h-44 w-full object-cover" />
-                              </div>
-                            ) : (
-                              <div className="flex h-44 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-sm text-slate-500">
-                                Emplacement vide
-                              </div>
-                            )}
-
-                            {slotState.errorMessage ? <Alert variant="danger" message={slotState.errorMessage} /> : null}
-
-                            <div className="flex flex-col gap-2">
-                              <Button
-                                className="w-full"
-                                disabled={slotState.isUploading}
-                                onClick={() => anomalyPhotoInputRefs.current[slot.key]?.click()}
-                              >
-                                {slotState.isUploading ? (
-                                  <span className="flex items-center gap-2">
-                                    <LoadingSpinner size="sm" aria-label="Envoi de photo" />
-                                    Envoi en cours...
-                                  </span>
-                                ) : slotState.photoId ? (
-                                  'Remplacer la photo'
-                                ) : (
-                                  'Ajouter une photo'
-                                )}
-                              </Button>
-
-                              {slotState.photoId ? (
-                                <Button
-                                  variant="secondary"
-                                  className="w-full"
-                                  disabled={slotState.isUploading}
-                                  onClick={() => removeAnomalyPhoto(slot.key)}
-                                >
-                                  Supprimer la photo
-                                </Button>
-                              ) : null}
-                            </div>
-                          </div>
-                        </Card>
-                      )
-                    })}
-                  </div>
-                </div>
-              </>
-            ) : null}
+        <div className="space-y-4">
+          <InspectionVehicleStateCard
+            mileageLabel="Kilométrage actuel"
+            mileage={mileageInput}
+            onMileageChange={setMileageInput}
+            energy={energyInput}
+            onEnergyChange={setEnergyInput}
+            anomalyPresent={anomalyPresent}
+            onAnomalyPresentChange={(value) => {
+              setAnomalyPresent(value)
+              if (!value) {
+                setAnomalyDescription('')
+                setAnomalySeverity('')
+                setAnomalyPhotoState((current) => {
+                  Object.values(current).forEach((slot) => revokePreviewUrl(slot.previewUrl))
+                  return buildInitialAnomalyPhotoState()
+                })
+              }
+            }}
+            anomalyDescription={anomalyDescription}
+            onAnomalyDescriptionChange={setAnomalyDescription}
+            anomalySeverity={anomalySeverity === 'ACCEPTABLE' || anomalySeverity === 'GRAVE' ? anomalySeverity : ''}
+            onAnomalySeverityChange={(value) => setAnomalySeverity(value as Severity | '')}
+            anomalyPhotos={anomalyPhotoFields}
+          />
 
             {isCriticalIssue(inspection) || isCriticalSaved ? (
               <div className="space-y-4">
@@ -614,8 +489,7 @@ export default function DepartureInspectionVehicleStatePage() {
 
             </div>
             )}
-          </div>
-        </Card>
+        </div>
       )}
 
       {reservationQuery.isLoading ? (

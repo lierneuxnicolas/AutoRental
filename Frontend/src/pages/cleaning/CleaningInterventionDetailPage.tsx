@@ -6,10 +6,13 @@ import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import InterventionCheckInForm from '../../components/interventions/InterventionCheckInForm'
 import InterventionCheckOutForm from '../../components/interventions/InterventionCheckOutForm'
+import PersonnelInterventionReport from '../../components/interventions/PersonnelInterventionReport'
+import InterventionWorkflowProgress from '../../components/interventions/InterventionWorkflowProgress'
 import InterventionWorkForm from '../../components/interventions/InterventionWorkForm'
+import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
-import { checkInIntervention, checkOutIntervention, getInterventionById, interruptIntervention, saveInterventionWork } from '../../services/workerInterventionService'
+import { checkInIntervention, checkOutIntervention, getInterventionById, interruptIntervention, pauseIntervention, resumeIntervention, saveInterventionWork } from '../../services/workerInterventionService'
 import type {
   WorkerInterventionResponse,
   WorkerInterventionStatus,
@@ -191,13 +194,10 @@ export default function CleaningInterventionDetailPage() {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
   const [checkInError, setCheckInError] = useState<string | null>(null)
-  const [checkInSuccessMessage, setCheckInSuccessMessage] = useState<string | null>(null)
   const [completeError, setCompleteError] = useState<string | null>(null)
-  const [completeSuccessMessage, setCompleteSuccessMessage] = useState<string | null>(null)
   const [workError, setWorkError] = useState<string | null>(null)
-  const [workSuccessMessage, setWorkSuccessMessage] = useState<string | null>(null)
   const [interruptError, setInterruptError] = useState<string | null>(null)
-  const [interruptSuccessMessage, setInterruptSuccessMessage] = useState<string | null>(null)
+  const [statusActionError, setStatusActionError] = useState<string | null>(null)
 
   const interventionId = useMemo(() => {
     if (!id) {
@@ -219,13 +219,11 @@ export default function CleaningInterventionDetailPage() {
     mutationFn: (payload: Parameters<typeof checkInIntervention>[2]) => checkInIntervention('cleaning', interventionId as number, payload),
     onSuccess: async () => {
       setCheckInError(null)
-      setCheckInSuccessMessage('Check-in enregistré. Intervention de nettoyage démarrée')
       await queryClient.invalidateQueries({ queryKey: ['cleaning-intervention', interventionId] })
       await queryClient.invalidateQueries({ queryKey: ['cleaning-interventions'] })
       await queryClient.refetchQueries({ queryKey: ['cleaning-intervention', interventionId] })
     },
     onError: (error) => {
-      setCheckInSuccessMessage(null)
       setCheckInError(extractStartErrorMessage(error))
     },
   })
@@ -234,13 +232,11 @@ export default function CleaningInterventionDetailPage() {
     mutationFn: (payload: Parameters<typeof checkOutIntervention>[2]) => checkOutIntervention('cleaning', interventionId as number, payload),
     onSuccess: async () => {
       setCompleteError(null)
-      setCompleteSuccessMessage('Intervention de nettoyage terminée')
       await queryClient.invalidateQueries({ queryKey: ['cleaning-intervention', interventionId] })
       await queryClient.invalidateQueries({ queryKey: ['cleaning-interventions'] })
       await queryClient.refetchQueries({ queryKey: ['cleaning-intervention', interventionId] })
     },
     onError: (error) => {
-      setCompleteSuccessMessage(null)
       setCompleteError(extractCompleteErrorMessage(error))
     },
   })
@@ -249,28 +245,38 @@ export default function CleaningInterventionDetailPage() {
     mutationFn: (payload: Parameters<typeof saveInterventionWork>[2]) => saveInterventionWork('cleaning', interventionId as number, payload),
     onSuccess: async () => {
       setWorkError(null)
-      setWorkSuccessMessage('Travail enregistré')
       await queryClient.invalidateQueries({ queryKey: ['cleaning-intervention', interventionId] })
       await queryClient.invalidateQueries({ queryKey: ['cleaning-interventions'] })
       await queryClient.refetchQueries({ queryKey: ['cleaning-intervention', interventionId] })
     },
     onError: (error) => {
-      setWorkSuccessMessage(null)
       setWorkError(extractCompleteErrorMessage(error))
     },
+  })
+
+  const statusMutation = useMutation({
+    mutationFn: (action: 'pause' | 'resume') => (
+      action === 'pause'
+        ? pauseIntervention('cleaning', interventionId as number)
+        : resumeIntervention('cleaning', interventionId as number)
+    ),
+    onSuccess: async () => {
+      setStatusActionError(null)
+      await queryClient.invalidateQueries({ queryKey: ['cleaning-intervention', interventionId] })
+      await queryClient.refetchQueries({ queryKey: ['cleaning-intervention', interventionId] })
+    },
+    onError: (error) => setStatusActionError(extractCompleteErrorMessage(error)),
   })
 
   const interruptMutation = useMutation({
     mutationFn: (payload: Parameters<typeof interruptIntervention>[2]) => interruptIntervention('cleaning', interventionId as number, payload),
     onSuccess: async () => {
       setInterruptError(null)
-      setInterruptSuccessMessage('Intervention interrompue. Le gestionnaire peut consulter le motif.')
       await queryClient.invalidateQueries({ queryKey: ['cleaning-intervention', interventionId] })
       await queryClient.invalidateQueries({ queryKey: ['cleaning-interventions'] })
       await queryClient.refetchQueries({ queryKey: ['cleaning-intervention', interventionId] })
     },
     onError: (error) => {
-      setInterruptSuccessMessage(null)
       setInterruptError(extractStartErrorMessage(error))
     },
   })
@@ -332,7 +338,7 @@ export default function CleaningInterventionDetailPage() {
         : 'checkout'
   const stepItems = [
     { id: 'checkin', label: 'Check-in', done: Boolean(intervention.check_in) || intervention.status === 'TERMINEE' },
-    { id: 'work', label: 'Intervention', done: Boolean(intervention.work_data) || intervention.status === 'TERMINEE' },
+    { id: 'work', label: 'Nettoyage', done: Boolean(intervention.work_data) || intervention.status === 'TERMINEE' },
     { id: 'checkout', label: 'Check-out', done: Boolean(intervention.check_out) || intervention.status === 'TERMINEE' },
   ]
 
@@ -350,8 +356,11 @@ export default function CleaningInterventionDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {activeStep === 'done' ? (
+          <div><h1 className="text-2xl font-semibold text-[#1F2937]">Rapport d’intervention</h1></div>
+        ) : (
         <div>
           <h1 className="text-2xl font-semibold text-[#1F2937]">{intervention.vehicle.brand} {intervention.vehicle.model_name}</h1>
           <p className="text-sm text-slate-600">
@@ -363,17 +372,20 @@ export default function CleaningInterventionDetailPage() {
             </p>
           ) : null}
         </div>
-        <Link
-          to="/cleaning/interventions"
-          className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB]"
-        >
-          Retour à mes interventions
-        </Link>
+        )}
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {activeStep === 'work' && intervention.check_in && (intervention.status === 'EN_COURS' || intervention.status === 'EN_PAUSE') ? (
+            <Button variant={intervention.status === 'EN_COURS' ? 'secondary' : 'primary'} disabled={statusMutation.isPending} onClick={() => void statusMutation.mutateAsync(intervention.status === 'EN_COURS' ? 'pause' : 'resume')}>
+              {intervention.status === 'EN_COURS' ? 'Mettre en pause' : 'Reprendre le nettoyage'}
+            </Button>
+          ) : null}
+          <Link to="/cleaning/interventions"><Button variant="secondary">Retour à mes interventions</Button></Link>
+        </div>
       </div>
 
       <Card className="border-slate-200">
         <div className="space-y-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          {activeStep !== 'done' ? <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Mot / consigne du gestionnaire</p>
               <p className="mt-2 text-lg font-semibold leading-7 text-[#1F2937]">
@@ -381,54 +393,29 @@ export default function CleaningInterventionDetailPage() {
               </p>
             </div>
             <StatusBadge label={statusBadge.label} variant={statusBadge.variant} />
-          </div>
+          </div> : null}
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            {stepItems.map((step, index) => (
-              <div key={step.id} className="flex items-center gap-2">
-                <span className={[
-                  'inline-flex h-9 items-center rounded-full px-4 text-sm font-semibold',
-                  step.done ? 'bg-emerald-50 text-emerald-700' : activeStep === step.id ? 'bg-[#2563EB] text-white' : 'bg-slate-100 text-slate-500',
-                ].join(' ')}>
-                  {step.done ? '✓' : index + 1} {step.label}
-                </span>
-                {index < stepItems.length - 1 ? <span className="hidden h-px w-8 bg-slate-200 sm:block" /> : null}
-              </div>
-            ))}
-          </div>
-
-          {intervention.check_in ? (
-            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-900">
-              <p className="font-semibold">Check-in terminé</p>
-              <p className="mt-1">Km initial : {intervention.check_in.mileage} · {intervention.check_in.observations}</p>
-            </div>
-          ) : null}
+          {activeStep !== 'done' ? <InterventionWorkflowProgress activeStep={activeStep} steps={stepItems} /> : null}
 
           {checkInError ? <Alert variant="danger" title="Check-in impossible" message={checkInError} className="mt-5" /> : null}
-          {checkInSuccessMessage ? <Alert variant="success" title="Succès" message={checkInSuccessMessage} className="mt-5" /> : null}
           {completeError ? <Alert variant="danger" title="Clôture impossible" message={completeError} className="mt-5" /> : null}
-          {completeSuccessMessage ? <Alert variant="success" title="Succès" message={completeSuccessMessage} className="mt-5" /> : null}
           {workError ? <Alert variant="danger" title="Enregistrement impossible" message={workError} className="mt-5" /> : null}
-          {workSuccessMessage ? <Alert variant="success" title="Succès" message={workSuccessMessage} className="mt-5" /> : null}
           {interruptError ? <Alert variant="danger" title="Interruption impossible" message={interruptError} className="mt-5" /> : null}
-          {interruptSuccessMessage ? <Alert variant="success" title="Intervention interrompue" message={interruptSuccessMessage} className="mt-5" /> : null}
+          {statusActionError ? <Alert variant="danger" title="Mise à jour impossible" message={statusActionError} className="mt-5" /> : null}
 
           {activeStep === 'checkin' ? (
             <div>
               <InterventionCheckInForm
                 embedded
-                role="cleaning"
                 initialMileage={intervention.check_in?.mileage ?? null}
                 disabled={checkInMutation.isPending}
                 isSubmitting={checkInMutation.isPending}
                 onInterrupt={(values) => {
                   setInterruptError(null)
-                  setInterruptSuccessMessage(null)
                   void interruptMutation.mutateAsync(values)
                 }}
                 onSubmit={(values) => {
                   setCheckInError(null)
-                  setCheckInSuccessMessage(null)
                   void checkInMutation.mutateAsync(values)
                 }}
               />
@@ -443,12 +430,11 @@ export default function CleaningInterventionDetailPage() {
                 role="cleaning"
                 initialWorkData={intervention.work_data}
                 initialEstimatedCost={intervention.estimated_cost}
-                photos={intervention.check_in?.photos ?? []}
+                workRequest={intervention.description}
                 disabled={workMutation.isPending}
                 isSubmitting={workMutation.isPending}
                 onSubmit={(values) => {
                   setWorkError(null)
-                  setWorkSuccessMessage(null)
                   void workMutation.mutateAsync(values)
                 }}
                 onPhotoUploadSuccess={() => {
@@ -462,8 +448,8 @@ export default function CleaningInterventionDetailPage() {
             <div>
               <InterventionCheckOutForm
                 embedded
-                role="cleaning"
                 initialMileage={intervention.check_in?.mileage ?? null}
+                initialEnergyLevel={intervention.check_in?.energy_level_percent ?? null}
                 disabled={completeMutation.isPending}
                 isSubmitting={completeMutation.isPending}
                 onSubmit={(values) => {
@@ -472,7 +458,6 @@ export default function CleaningInterventionDetailPage() {
                   }
 
                   setCompleteError(null)
-                  setCompleteSuccessMessage(null)
                   void completeMutation.mutateAsync(values)
                 }}
               />
@@ -480,10 +465,7 @@ export default function CleaningInterventionDetailPage() {
           ) : null}
 
           {activeStep === 'done' ? (
-            <div className="rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] p-4">
-              <p className="text-sm font-semibold text-[#2563EB]">Intervention terminée</p>
-              <p className="mt-2 text-sm text-slate-700">Le rapport final est enregistré et consultable par le gestionnaire.</p>
-            </div>
+            <PersonnelInterventionReport intervention={intervention} />
           ) : null}
         </div>
       </Card>

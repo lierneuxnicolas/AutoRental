@@ -197,9 +197,16 @@ class ReservationManagementListSerializer(serializers.ModelSerializer):
     rental_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     needs_review = serializers.SerializerMethodField()
+    invoice_id = serializers.SerializerMethodField()
 
     def get_needs_review(self, obj):
         return _reservation_needs_review(obj)
+
+    def get_invoice_id(self, obj):
+        try:
+            return obj.invoice.id
+        except Reservation.invoice.RelatedObjectDoesNotExist:
+            return None
 
     class Meta:
         model = Reservation
@@ -211,9 +218,11 @@ class ReservationManagementListSerializer(serializers.ModelSerializer):
             "start_at",
             "end_at",
             "status",
+            "cancellation_source",
             "rental_amount",
             "deposit_amount",
             "needs_review",
+            "invoice_id",
             "created_at",
             "confirmed_at",
             "cancelled_at",
@@ -234,9 +243,16 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
     needs_review = serializers.SerializerMethodField()
     previous_reservation = serializers.SerializerMethodField()
     vehicle_reference_inspection = serializers.SerializerMethodField()
+    invoice_id = serializers.SerializerMethodField()
 
     def get_needs_review(self, obj):
         return _reservation_needs_review(obj)
+
+    def get_invoice_id(self, obj):
+        try:
+            return obj.invoice.id
+        except Reservation.invoice.RelatedObjectDoesNotExist:
+            return None
 
     class Meta:
         model = Reservation
@@ -248,6 +264,7 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
             "start_at",
             "end_at",
             "status",
+            "cancellation_source",
             "rental_amount",
             "deposit_amount",
             "deposit_status",
@@ -257,6 +274,7 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
             "needs_review",
             "previous_reservation",
             "vehicle_reference_inspection",
+            "invoice_id",
             "created_at",
             "confirmed_at",
             "cancelled_at",
