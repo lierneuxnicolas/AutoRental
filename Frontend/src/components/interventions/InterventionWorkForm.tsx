@@ -1,12 +1,11 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import Alert from '../feedback/Alert'
 import LoadingSpinner from '../feedback/LoadingSpinner'
 import Button from '../ui/Button'
 import Card from '../ui/Card'
 import Input from '../ui/Input'
 import InterventionPhotoUpload, { type InterventionPhotoUploadHandle } from './InterventionPhotoUpload'
-import type { WorkerInterventionCheckInPhoto, WorkerInterventionRole, WorkerInterventionWorkData, WorkerInterventionWorkValues } from '../../types/workerIntervention'
-import { resolveMediaUrl } from '../../utils/media'
+import type { WorkerInterventionRole, WorkerInterventionWorkData, WorkerInterventionWorkValues } from '../../types/workerIntervention'
 
 interface InterventionWorkFormProps {
   interventionId: number
@@ -14,7 +13,6 @@ interface InterventionWorkFormProps {
   initialWorkData?: WorkerInterventionWorkData | null
   initialEstimatedCost?: string | number | null
   workRequest?: string
-  photos?: WorkerInterventionCheckInPhoto[]
   embedded?: boolean
   disabled?: boolean
   isSubmitting?: boolean
@@ -53,7 +51,6 @@ export default function InterventionWorkForm({
   initialWorkData,
   initialEstimatedCost,
   workRequest,
-  photos = [],
   embedded = false,
   disabled = false,
   isSubmitting = false,
@@ -72,7 +69,6 @@ export default function InterventionWorkForm({
   const photoUploadRef = useRef<InterventionPhotoUploadHandle | null>(null)
 
   const anomalyOptions = role === 'mechanic' ? mechanicAnomalyTypes : cleaningAnomalyTypes
-  const visiblePhotos = useMemo(() => photos.filter((photo) => Boolean(resolveMediaUrl(photo.file))), [photos])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -110,7 +106,7 @@ export default function InterventionWorkForm({
       <form onSubmit={handleSubmit} className="space-y-5" noValidate>
         {localError ? <Alert variant="danger" title="Saisie invalide" message={localError} /> : null}
 
-        {role === 'mechanic' && workRequest?.trim() ? (
+        {workRequest?.trim() ? (
           <div>
             <p className="text-sm font-medium text-[#1F2937]">Travail demandé</p>
             <p className="mt-1 text-sm leading-6 text-slate-600">{workRequest}</p>
@@ -127,21 +123,22 @@ export default function InterventionWorkForm({
             className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-[#F5F5F5]"
           />
         </div>
-        {role !== 'mechanic' ? (
-          <div className="grid gap-3 md:grid-cols-2">
+        <Input label="Coût éventuel" value={estimatedCost} inputMode="decimal" onChange={(event) => setEstimatedCost(event.target.value)} disabled={disabled || isSubmitting} />
+
+        <div className="grid gap-3 md:grid-cols-2">
+          {role === 'cleaning' ? (
             <label className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm text-[#1F2937]">
               <input type="checkbox" checked={isWorkFinished} onChange={(event) => setIsWorkFinished(event.target.checked)} disabled={disabled || isSubmitting} className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-2 focus:ring-blue-100" />
               Intervention terminée
             </label>
-            <label className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm text-[#1F2937]">
-              <input type="checkbox" checked={Boolean(anomalyType)} onChange={(event) => setAnomalyType(event.target.checked ? 'autre' : '')} disabled={disabled || isSubmitting} className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-2 focus:ring-blue-100" />
-              Anomalie constatée
-            </label>
-          </div>
-        ) : null}
-        {role === 'mechanic' ? <Input label="Coût éventuel" value={estimatedCost} inputMode="decimal" onChange={(event) => setEstimatedCost(event.target.value)} disabled={disabled || isSubmitting} /> : null}
+          ) : <div />}
+          <label className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm text-[#1F2937]">
+            <input type="checkbox" checked={Boolean(anomalyType)} onChange={(event) => setAnomalyType(event.target.checked ? 'autre' : '')} disabled={disabled || isSubmitting} className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-2 focus:ring-blue-100" />
+            Anomalie constatée
+          </label>
+        </div>
 
-        {role !== 'mechanic' && anomalyType ? (
+        {anomalyType ? (
           <div className="grid gap-4 md:grid-cols-[220px_1fr] md:items-end">
             <div className="space-y-2">
               <label className="block text-sm font-medium text-[#1F2937]">Type d’anomalie</label>
@@ -153,26 +150,10 @@ export default function InterventionWorkForm({
           </div>
         ) : null}
 
-        {role === 'mechanic' ? (
-          <div className="w-full space-y-3">
-            <p className="text-sm font-medium text-[#1F2937]">Photos de l’intervention</p>
-            <InterventionPhotoUpload ref={photoUploadRef} interventionId={interventionId} role={role} showSubmitButton={false} onUploadSuccess={onPhotoUploadSuccess} />
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm font-medium text-[#1F2937]">Photos de l’intervention</p>
-              <InterventionPhotoUpload interventionId={interventionId} role={role} onUploadSuccess={onPhotoUploadSuccess} />
-            </div>
-            {visiblePhotos.length > 0 ? (
-              <div className="flex gap-3 overflow-x-auto pb-1">
-                {visiblePhotos.map((photo) => (
-                  <img key={photo.id} src={resolveMediaUrl(photo.file) ?? undefined} alt={photo.caption || `Photo ${photo.id}`} className="h-20 w-28 shrink-0 rounded-xl border border-[#E5E7EB] object-cover" />
-                ))}
-              </div>
-            ) : <p className="text-sm text-slate-500">Aucune photo enregistrée.</p>}
-          </div>
-        )}
+        <div className="w-full space-y-3">
+          <p className="text-sm font-medium text-[#1F2937]">{role === 'mechanic' ? 'Photos de l’intervention' : 'Photos du nettoyage'}</p>
+          <InterventionPhotoUpload ref={photoUploadRef} interventionId={interventionId} role={role} showSubmitButton={false} onUploadSuccess={onPhotoUploadSuccess} />
+        </div>
 
         <div className="flex justify-end">
           <Button type="submit" disabled={disabled || isSubmitting || isSaving}>

@@ -1,27 +1,23 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import Alert from '../../components/feedback/Alert'
 import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
+import PersonnelInterventionReport from '../../components/interventions/PersonnelInterventionReport'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import Input from '../../components/ui/Input'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import {
   assignManagementIntervention,
-  createManagementIntervention,
   getManagementInterventions,
 } from '../../services/managementInterventionService'
 import type {
   InterventionStatus,
-  InterventionType,
   ManagementInterventionAssignRequest,
-  ManagementInterventionCreateRequest,
   ManagementInterventionResponse,
 } from '../../types/managementIntervention'
-
-type InterventionViewMode = 'assigned' | 'all'
 
 function mapStatusToBadge(status: InterventionStatus): { label: string; variant: StatusVariant } {
   switch (status) {
@@ -91,16 +87,6 @@ function toGeneralError(payload: BackendValidationErrorPayload | undefined): str
 
 export default function ManagerInterventionsPage() {
   const queryClient = useQueryClient()
-  const [page, setPage] = useState(1)
-  const [viewMode, setViewMode] = useState<InterventionViewMode>('all')
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [vehicleId, setVehicleId] = useState('')
-  const [reservationId, setReservationId] = useState('')
-  const [type, setType] = useState<InterventionType>('MECANIQUE')
-  const [description, setDescription] = useState('')
-  const [formError, setFormError] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
-  const [lastCreatedIntervention, setLastCreatedIntervention] = useState<ManagementInterventionResponse | null>(null)
   const [assignFormOpenForId, setAssignFormOpenForId] = useState<number | null>(null)
   const [assignUserId, setAssignUserId] = useState('')
   const [assignError, setAssignError] = useState<string | null>(null)
@@ -108,120 +94,32 @@ export default function ManagerInterventionsPage() {
   const [reportOpenForId, setReportOpenForId] = useState<number | null>(null)
 
   const interventionsQuery = useQuery({
-    queryKey: ['manager-interventions', page],
-    queryFn: () => getManagementInterventions({ page }),
-    enabled: viewMode === 'all',
-  })
-
-  const assignedInterventionsQuery = useQuery({
-    queryKey: ['manager-interventions-assigned'],
+    queryKey: ['manager-interventions'],
     queryFn: async () => {
       const allInterventions: ManagementInterventionResponse[] = []
-      const visitedPages = new Set<number>()
       let nextPage: number | null = 1
 
       while (nextPage !== null) {
-        if (visitedPages.has(nextPage)) {
-          break
-        }
-
-        visitedPages.add(nextPage)
-
         const response = await getManagementInterventions({ page: nextPage })
         allInterventions.push(...response.results)
-
         if (!response.next) {
           nextPage = null
-          continue
+        } else {
+          const nextUrl = new URL(response.next, window.location.origin)
+          const parsedPage = Number(nextUrl.searchParams.get('page'))
+          nextPage = Number.isInteger(parsedPage) && parsedPage > nextPage ? parsedPage : null
         }
-
-        let parsedNextPage: number | null
-
-        try {
-          const nextUrl = new URL(response.next, 'http://localhost')
-          const pageValue = Number(nextUrl.searchParams.get('page'))
-          parsedNextPage = Number.isInteger(pageValue) && pageValue > 0 ? pageValue : null
-        } catch {
-          parsedNextPage = null
-        }
-
-        nextPage = parsedNextPage
       }
 
-      return allInterventions.filter((intervention) => intervention.assigned_to !== null)
+      return allInterventions
     },
-    enabled: viewMode === 'assigned',
-  })
-
-  const createMutation = useMutation({
-    mutationFn: (payload: ManagementInterventionCreateRequest) => createManagementIntervention(payload),
   })
 
   const assignMutation = useMutation({
     mutationFn: ({ id, payload }: { id: number; payload: ManagementInterventionAssignRequest }) => assignManagementIntervention(id, payload),
   })
 
-  const interventions = useMemo(
-    () => interventionsQuery.data?.results ?? [],
-    [interventionsQuery.data?.results],
-  )
-
-  const displayedInterventions = useMemo(() => {
-    if (interventions.length > 0) {
-      return interventions
-    }
-
-    return lastCreatedIntervention ? [lastCreatedIntervention] : []
-  }, [interventions, lastCreatedIntervention])
-
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setFormError(null)
-    setSuccessMessage(null)
-
-    const normalizedPayload: ManagementInterventionCreateRequest = {
-      vehicle_id: Number(vehicleId),
-      reservation_id: reservationId ? Number(reservationId) : null,
-      type,
-      description: description.trim(),
-    }
-
-    try {
-      const createdIntervention = await createMutation.mutateAsync(normalizedPayload)
-      setIsCreateOpen(false)
-      setVehicleId('')
-      setReservationId('')
-      setType('MECANIQUE')
-      setDescription('')
-      setLastCreatedIntervention(createdIntervention)
-      setViewMode('all')
-      setPage(1)
-      await queryClient.invalidateQueries({ queryKey: ['manager-interventions'] })
-      await queryClient.invalidateQueries({ queryKey: ['manager-interventions-assigned'] })
-      setSuccessMessage('L’intervention a été créée avec succès.')
-      await queryClient.refetchQueries({ queryKey: ['manager-interventions'] })
-    } catch (error) {
-      if (!axios.isAxiosError(error)) {
-        setFormError('Une erreur inattendue est survenue.')
-        return
-      }
-
-      const statusCode = error.response?.status
-      const backendPayload = error.response?.data as BackendValidationErrorPayload | undefined
-
-      if (statusCode === 403) {
-        setFormError('Vous n’avez pas les permissions pour créer une intervention.')
-        return
-      }
-
-      if (statusCode === 400) {
-        setFormError(toGeneralError(backendPayload))
-        return
-      }
-
-      setFormError(toGeneralError(backendPayload))
-    }
-  }
+  const interventions = interventionsQuery.data ?? []
 
   const handleAssignSubmit = async (event: React.FormEvent<HTMLFormElement>, interventionId: number) => {
     event.preventDefault()
@@ -244,12 +142,7 @@ export default function ManagerInterventionsPage() {
       setAssignFormOpenForId(null)
       setAssignUserId('')
       await queryClient.invalidateQueries({ queryKey: ['manager-interventions'] })
-      await queryClient.invalidateQueries({ queryKey: ['manager-interventions-assigned'] })
-      if (viewMode === 'assigned') {
-        await assignedInterventionsQuery.refetch()
-      } else {
-        await interventionsQuery.refetch()
-      }
+      await interventionsQuery.refetch()
       setAssignSuccessMessage('L’intervention a été assignée avec succès.')
     } catch (error) {
       if (!axios.isAxiosError(error)) {
@@ -279,53 +172,9 @@ export default function ManagerInterventionsPage() {
     }
   }
 
-  const hasPreviousPage = Boolean(interventionsQuery.data?.previous)
-  const hasNextPage = Boolean(interventionsQuery.data?.next)
-  const activeIsLoading = viewMode === 'assigned' ? assignedInterventionsQuery.isLoading : interventionsQuery.isLoading
-  const activeIsError = viewMode === 'assigned' ? assignedInterventionsQuery.isError : interventionsQuery.isError
-  const currentInterventions = viewMode === 'assigned'
-    ? (assignedInterventionsQuery.data ?? [])
-    : displayedInterventions
-  const currentCount = viewMode === 'assigned'
-    ? currentInterventions.length
-    : (interventionsQuery.data?.count ?? currentInterventions.length)
-
   return (
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[#0F172A]">Interventions</h1>
-          <p className="mt-1 text-sm text-slate-500">Consultez la liste des interventions de gestion.</p>
-        </div>
-        <Button variant="primary" size="sm" onClick={() => setIsCreateOpen(true)}>
-          Créer une intervention
-        </Button>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant={viewMode === 'assigned' ? 'primary' : 'secondary'}
-          size="sm"
-          onClick={() => setViewMode('assigned')}
-        >
-          Assignées
-        </Button>
-        <Button
-          variant={viewMode === 'all' ? 'primary' : 'secondary'}
-          size="sm"
-          onClick={() => setViewMode('all')}
-        >
-          Toutes
-        </Button>
-      </div>
-
-      {successMessage ? (
-        <Alert variant="success" title="Intervention créée" message={successMessage} />
-      ) : null}
-
-      {formError ? (
-        <Alert variant="danger" title="Création impossible" message={formError} />
-      ) : null}
+      <h1 className="text-2xl font-bold text-[#0F172A]">Interventions</h1>
 
       {assignSuccessMessage ? (
         <Alert variant="success" title="Intervention assignée" message={assignSuccessMessage} />
@@ -335,77 +184,13 @@ export default function ManagerInterventionsPage() {
         <Alert variant="danger" title="Assignation impossible" message={assignError} />
       ) : null}
 
-      {isCreateOpen ? (
-        <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Nouvelle intervention</h2>}>
-          <form className="space-y-4" onSubmit={handleSubmit}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <Input
-                label="Vehicle ID"
-                type="number"
-                min="1"
-                required
-                value={vehicleId}
-                onChange={(event) => setVehicleId(event.target.value)}
-                placeholder="Ex: 12"
-              />
-              <Input
-                label="Reservation ID"
-                type="number"
-                min="1"
-                value={reservationId}
-                onChange={(event) => setReservationId(event.target.value)}
-                placeholder="Optionnel"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-[#1F2937]" htmlFor="intervention-type">
-                Type d’intervention
-              </label>
-              <select
-                id="intervention-type"
-                value={type}
-                onChange={(event) => setType(event.target.value as InterventionType)}
-                className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-              >
-                <option value="MECANIQUE">MECANIQUE</option>
-                <option value="NETTOYAGE">NETTOYAGE</option>
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-[#1F2937]" htmlFor="intervention-description">
-                Description
-              </label>
-              <textarea
-                id="intervention-description"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                rows={4}
-                className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                placeholder="Description de l’intervention"
-              />
-            </div>
-
-            <div className="flex flex-wrap justify-end gap-3">
-              <Button type="button" variant="secondary" size="sm" onClick={() => setIsCreateOpen(false)}>
-                Annuler
-              </Button>
-              <Button type="submit" variant="primary" size="sm" disabled={createMutation.isPending}>
-                {createMutation.isPending ? 'Création...' : 'Créer l’intervention'}
-              </Button>
-            </div>
-          </form>
-        </Card>
-      ) : null}
-
-      {activeIsLoading ? (
+      {interventionsQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
           <LoadingSpinner size="lg" aria-label="Chargement des interventions" />
         </div>
       ) : null}
 
-      {activeIsError ? (
+      {interventionsQuery.isError ? (
         <Alert
           variant="danger"
           title="Chargement impossible"
@@ -413,36 +198,16 @@ export default function ManagerInterventionsPage() {
         />
       ) : null}
 
-      {!activeIsLoading && !activeIsError && currentInterventions.length === 0 ? (
+      {!interventionsQuery.isLoading && !interventionsQuery.isError && interventions.length === 0 ? (
         <EmptyState
-          title={viewMode === 'assigned' ? 'Aucune intervention assignée' : 'Aucune intervention'}
-          description={
-            viewMode === 'assigned'
-              ? 'Aucune intervention n’est actuellement assignée.'
-              : 'Aucune intervention n’est actuellement enregistrée.'
-          }
+          title="Aucune intervention"
+          description="Aucune intervention n’est actuellement enregistrée."
         />
       ) : null}
 
-      {!activeIsLoading && !activeIsError && currentInterventions.length > 0 ? (
+      {!interventionsQuery.isLoading && !interventionsQuery.isError && interventions.length > 0 ? (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-slate-600">
-              {currentCount} intervention{currentCount > 1 ? 's' : ''}
-            </p>
-            {viewMode === 'all' ? (
-              <div className="flex gap-2">
-                <Button variant="secondary" size="sm" onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))} disabled={!hasPreviousPage}>
-                  Précédent
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => setPage((currentPage) => currentPage + 1)} disabled={!hasNextPage}>
-                  Suivant
-                </Button>
-              </div>
-            ) : null}
-          </div>
-
-          {currentInterventions.map((intervention) => {
+          {interventions.map((intervention) => {
             const status = mapStatusToBadge(intervention.status)
             const assignedTo = getPersonLabel(intervention.assigned_to)
             const createdBy = getPersonLabel(intervention.created_by)
@@ -553,14 +318,11 @@ export default function ManagerInterventionsPage() {
                 </div>
 
                 {reportOpenForId === intervention.id ? (
-                  <div className="mt-5 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] p-4">
-                    <p className="text-sm font-semibold text-[#2563EB]">Rapport final</p>
+                  <div className="mt-5 border-t border-[#E5E7EB] pt-5">
                     {intervention.final_report ? (
-                      <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-6 text-slate-700">
-                        {JSON.stringify(intervention.final_report, null, 2)}
-                      </pre>
+                      <PersonnelInterventionReport intervention={intervention} />
                     ) : (
-                      <p className="mt-2 text-sm text-slate-600">Aucun rapport final disponible.</p>
+                      <p className="text-sm text-slate-600">Aucun rapport final disponible.</p>
                     )}
                   </div>
                 ) : null}

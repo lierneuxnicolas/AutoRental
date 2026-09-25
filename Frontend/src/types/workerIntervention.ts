@@ -76,12 +76,10 @@ export interface WorkerInterventionWorkValues {
 
 export interface WorkerInterventionCheckOutValues {
   final_mileage: number
-  final_vehicle_state: string
-  conclusions: string
-  vehicle_operational?: boolean
-  vehicle_clean?: boolean
-  new_intervention_needed?: boolean
-  final_comment?: string
+  final_energy_level_percent: number
+  anomaly_present: boolean
+  anomaly_description?: string
+  anomaly_severity?: 'ACCEPTABLE' | 'GRAVE'
   photos: File[]
 }
 
@@ -120,10 +118,10 @@ export interface WorkerInterventionCompleteRequest {
 
 export interface WorkerInterventionCheckInValues {
   mileage: number
-  observations: string
-  vehicle_condition?: string
-  cleanliness_state?: string
-  cleanliness_notes?: string
+  energy_level_percent: number
+  anomaly_present: boolean
+  anomaly_description?: string
+  anomaly_severity?: 'ACCEPTABLE' | 'GRAVE'
   photos: File[]
 }
 

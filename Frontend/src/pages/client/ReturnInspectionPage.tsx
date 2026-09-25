@@ -5,6 +5,8 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import DepartureFlowProgress from '../../components/inspections/DepartureFlowProgress'
+import InspectionVehicleStateCard from '../../components/inspections/InspectionVehicleStateCard'
+import { validateInspectionVehicleState } from '../../components/inspections/inspectionVehicleState'
 import ReservationProgressBanner from '../../components/reservations/ReservationProgressBanner'
 import InspectionPhotoSlot from '../../components/inspections/InspectionPhotoSlot'
 import Button from '../../components/ui/Button'
@@ -64,11 +66,6 @@ const INTERIOR_PHOTO_SLOTS: InspectionStepPhotoSlot[] = [
   { key: 'interior_front_seats', label: 'Sieges avant', photoType: 'INTERIEUR', position: 1 },
   { key: 'interior_rear_seats', label: 'Sieges arriere', photoType: 'INTERIEUR', position: 2 },
   { key: 'interior_trunk', label: 'Coffre', photoType: 'AUTRE', position: 1 },
-]
-
-const SEVERITY_OPTIONS: Array<{ value: Severity; label: string }> = [
-  { value: 'ACCEPTABLE', label: 'Acceptable' },
-  { value: 'GRAVE', label: 'Grave' },
 ]
 
 const ANOMALY_PHOTO_SLOTS = [
@@ -835,7 +832,14 @@ export function ReturnInspectionVehicleStatePage() {
     return missing
   }, [damageDescription, damageSeverity, hasDamage, isEnergyValid, isMileageValid])
 
-  const canContinue = Boolean(inspection) && missingFields.length === 0
+  const commonValidation = validateInspectionVehicleState({
+    mileage: mileageInput,
+    energy: energyInput,
+    anomalyPresent: hasDamage,
+    anomalyDescription: damageDescription,
+    anomalySeverity: damageSeverity === 'ACCEPTABLE' || damageSeverity === 'GRAVE' ? damageSeverity : '',
+  })
+  const canContinue = Boolean(inspection) && commonValidation.error === null && mileageFieldError === null
 
   const uploadedAnomalyPhotoIds = useMemo(
     () => Object.values(anomalyPhotoState).map((slot) => slot.photoId).filter((photoId): photoId is number => photoId !== null),
@@ -958,6 +962,29 @@ export function ReturnInspectionVehicleStatePage() {
     )
   }
 
+  const anomalyPhotoFields = (
+    <div className="space-y-2">
+      <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie (2 maximum)</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {ANOMALY_PHOTO_SLOTS.map((slot) => {
+          const slotState = anomalyPhotoState[slot.key]
+          return (
+            <Card key={slot.key} className="h-full">
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-[#1F2937]">{slot.label}</p>
+                <input ref={(input) => { anomalyPhotoInputRefs.current[slot.key] = input }} type="file" accept="image/*" capture="environment" disabled={slotState.isUploading} className="hidden" onChange={(event) => { const file = event.target.files?.[0] ?? null; if (file) void uploadAnomalyPhoto(slot.key, file) }} />
+                {slotState.previewUrl ? <img src={slotState.previewUrl} alt={slot.label} className="h-44 w-full rounded-2xl border border-[#E5E7EB] object-cover" /> : <div className="flex h-44 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-sm text-slate-500">Emplacement vide</div>}
+                {slotState.errorMessage ? <Alert variant="danger" message={slotState.errorMessage} /> : null}
+                <Button className="w-full" disabled={slotState.isUploading} onClick={() => anomalyPhotoInputRefs.current[slot.key]?.click()}>{slotState.isUploading ? 'Envoi en cours...' : slotState.photoId ? 'Remplacer la photo' : 'Ajouter une photo'}</Button>
+                {slotState.photoId ? <Button variant="secondary" className="w-full" onClick={() => removeAnomalyPhoto(slot.key)}>Supprimer la photo</Button> : null}
+              </div>
+            </Card>
+          )
+        })}
+      </div>
+    </div>
+  )
+
   return (
     <ReturnInspectionLayout
       stepIndex={3}
@@ -967,166 +994,31 @@ export function ReturnInspectionVehicleStatePage() {
       showInspectionSummary={false}
     >
       {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
-      <Card header={<h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">État du véhicule</h2>}>
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <label htmlFor="return-mileage" className="block text-sm font-medium text-[#1F2937]">Kilometrage final</label>
-              <input
-                id="return-mileage"
-                type="number"
-                min={0}
-                max={MAX_VEHICLE_MILEAGE}
-                step={1}
-                value={mileageInput}
-                onChange={(event) => setMileageInput(event.target.value)}
-                aria-invalid={mileageFieldError !== null}
-                className={`block w-full rounded-2xl border bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:ring-2 ${mileageFieldError ? 'border-[#DC2626] focus:border-[#DC2626] focus:ring-red-100' : 'border-[#E5E7EB] focus:border-[#2563EB] focus:ring-blue-100'}`}
-                placeholder="Ex: 24510"
-              />
-              {mileageFieldError ? <p className="text-sm text-[#DC2626]">{mileageFieldError}</p> : null}
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="return-energy" className="block text-sm font-medium text-[#1F2937]">Niveau carburant / batterie final (%)</label>
-              <input
-                id="return-energy"
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                value={energyInput}
-                onChange={(event) => setEnergyInput(event.target.value)}
-                aria-invalid={energyFieldError !== null}
-                className={`block w-full rounded-2xl border bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:ring-2 ${energyFieldError ? 'border-[#DC2626] focus:border-[#DC2626] focus:ring-red-100' : 'border-[#E5E7EB] focus:border-[#2563EB] focus:ring-blue-100'}`}
-                placeholder="Ex: 75"
-              />
-              {energyFieldError ? <p className="text-sm text-[#DC2626]">{energyFieldError}</p> : null}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-[#1F2937]">Anomalie constatée</p>
-            <div className="flex flex-wrap gap-3">
-              <label className="flex items-center gap-2 text-sm text-slate-700"><input type="radio" name="return-damage" checked={hasDamage === true} onChange={() => setHasDamage(true)} />Oui</label>
-              <label className="flex items-center gap-2 text-sm text-slate-700"><input type="radio" name="return-damage" checked={hasDamage === false} onChange={() => {
-                setHasDamage(false)
-                setDamageDescription('')
-                setDamageSeverity('')
-                setAnomalyPhotoState((current) => {
-                  Object.values(current).forEach((slot) => revokePreviewUrl(slot.previewUrl))
-                  return buildInitialAnomalyPhotoState()
-                })
-              }} />Non</label>
-            </div>
-          </div>
-
-          {hasDamage ? (
-            <>
-              <div className="space-y-2">
-                <label htmlFor="return-anomaly-description" className="block text-sm font-medium text-[#1F2937]">Description</label>
-                <textarea
-                  id="return-anomaly-description"
-                  value={damageDescription}
-                  onChange={(event) => setDamageDescription(event.target.value)}
-                  rows={4}
-                  className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                  placeholder="Decrivez precisement l'anomalie constatee"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label htmlFor="return-anomaly-severity" className="block text-sm font-medium text-[#1F2937]">Gravite</label>
-                <select
-                  id="return-anomaly-severity"
-                  value={damageSeverity}
-                  onChange={(event) => setDamageSeverity(event.target.value as Severity)}
-                  className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                >
-                  <option value="">Selectionner une gravite</option>
-                  {SEVERITY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie (2 maximum)</p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {ANOMALY_PHOTO_SLOTS.map((slot) => {
-                    const slotState = anomalyPhotoState[slot.key]
-                    return (
-                      <Card key={slot.key} className="h-full">
-                        <div className="space-y-3">
-                          <p className="text-sm font-semibold text-[#1F2937]">{slot.label}</p>
-
-                          <input
-                            ref={(input) => {
-                              anomalyPhotoInputRefs.current[slot.key] = input
-                            }}
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            disabled={slotState.isUploading}
-                            className="hidden"
-                            onChange={(event) => {
-                              const selectedFile = event.target.files?.[0] ?? null
-                              if (selectedFile) {
-                                void uploadAnomalyPhoto(slot.key, selectedFile)
-                              }
-                            }}
-                          />
-
-                          {slotState.previewUrl ? (
-                            <div className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC]">
-                              <img src={slotState.previewUrl} alt={slot.label} className="h-44 w-full object-cover" />
-                            </div>
-                          ) : (
-                            <div className="flex h-44 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-sm text-slate-500">
-                              Emplacement vide
-                            </div>
-                          )}
-
-                          {slotState.errorMessage ? <Alert variant="danger" message={slotState.errorMessage} /> : null}
-
-                          <div className="flex flex-col gap-2">
-                            <Button
-                              className="w-full"
-                              disabled={slotState.isUploading}
-                              onClick={() => anomalyPhotoInputRefs.current[slot.key]?.click()}
-                            >
-                              {slotState.isUploading ? (
-                                <span className="flex items-center gap-2">
-                                  <LoadingSpinner size="sm" aria-label="Envoi de photo" />
-                                  Envoi en cours...
-                                </span>
-                              ) : slotState.photoId ? (
-                                'Remplacer la photo'
-                              ) : (
-                                'Ajouter une photo'
-                              )}
-                            </Button>
-
-                            {slotState.photoId ? (
-                              <Button
-                                variant="secondary"
-                                className="w-full"
-                                disabled={slotState.isUploading}
-                                onClick={() => removeAnomalyPhoto(slot.key)}
-                              >
-                                Supprimer la photo
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                      </Card>
-                    )
-                  })}
-                </div>
-              </div>
-            </>
-          ) : null}
+      <div className="space-y-4">
+        <InspectionVehicleStateCard
+          mileageLabel="Kilométrage final"
+          mileage={mileageInput}
+          onMileageChange={setMileageInput}
+          energy={energyInput}
+          onEnergyChange={setEnergyInput}
+          anomalyPresent={hasDamage}
+          onAnomalyPresentChange={(value) => {
+            setHasDamage(value)
+            if (!value) {
+              setDamageDescription('')
+              setDamageSeverity('')
+              setAnomalyPhotoState((current) => {
+                Object.values(current).forEach((slot) => revokePreviewUrl(slot.previewUrl))
+                return buildInitialAnomalyPhotoState()
+              })
+            }
+          }}
+          anomalyDescription={damageDescription}
+          onAnomalyDescriptionChange={setDamageDescription}
+          anomalySeverity={damageSeverity === 'ACCEPTABLE' || damageSeverity === 'GRAVE' ? damageSeverity : ''}
+          onAnomalySeverityChange={(value) => setDamageSeverity(value as Severity | '')}
+          anomalyPhotos={anomalyPhotoFields}
+        />
 
           {missingFields.length > 0 ? (
             <Alert variant="warning" title="Champs requis" message={<ul className="list-disc pl-5">{missingFields.map((item) => <li key={item}>{item}</li>)}</ul>} />
@@ -1144,8 +1036,7 @@ export function ReturnInspectionVehicleStatePage() {
               )}
             </Button>
           </div>
-        </div>
-      </Card>
+      </div>
     </ReturnInspectionLayout>
   )
 }

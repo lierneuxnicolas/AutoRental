@@ -1508,7 +1508,11 @@ class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 			f"/api/v1/mechanic/interventions/{intervention.id}/check-in/",
 			{
 				"mileage": 1234,
+				"energy_level_percent": 68,
 				"observations": "Controle initial mecanicien",
+				"anomaly_present": True,
+				"anomaly_description": "Rayure acceptable",
+				"anomaly_severity": "ACCEPTABLE",
 				"vehicle_condition": "Bon etat general",
 				"photos": [self._image_file("mechanic-check-in.gif")],
 			},
@@ -1525,8 +1529,10 @@ class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertIsNone(intervention.work_periods.get().ended_at)
 		technical_inspection = intervention.technical_inspections.get()
 		self.assertEqual(technical_inspection.mileage, 1234)
+		self.assertEqual(technical_inspection.energy_level_percent, 68)
 		self.assertIn("Controle initial mecanicien", technical_inspection.observations)
 		self.assertIn("Bon etat general", technical_inspection.observations)
+		self.assertIn("Anomalie ACCEPTABLE: Rayure acceptable", technical_inspection.observations)
 		self.assertEqual(technical_inspection.photos.count(), 1)
 
 	def test_mechanic_can_pause_and_resume_started_intervention(self):
@@ -1729,8 +1735,12 @@ class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 			f"/api/v1/mechanic/interventions/{intervention.id}/check-out/",
 			{
 				"final_mileage": 1010,
+				"final_energy_level_percent": 55,
 				"final_vehicle_state": "Etat final ok",
 				"conclusions": "Reparation terminee",
+				"anomaly_present": True,
+				"anomaly_description": "Bruit persistant",
+				"anomaly_severity": "GRAVE",
 				"vehicle_operational": True,
 				"new_intervention_needed": False,
 				"photos": [self._image_file("mechanic-final.gif")],
@@ -1748,6 +1758,8 @@ class MechanicInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(intervention.vehicle.status, Vehicle.Status.DISPONIBLE)
 		final_inspection = intervention.technical_inspections.get(phase=TechnicalInspection.Phase.FINAL)
 		self.assertEqual(final_inspection.mileage, 1010)
+		self.assertEqual(final_inspection.energy_level_percent, 55)
+		self.assertIn("Anomalie GRAVE: Bruit persistant", final_inspection.observations)
 		self.assertEqual(final_inspection.photos.count(), 1)
 		self.assertIsNotNone(response.data["final_report"])
 		self.assertIsNotNone(response.data["started_at"])
@@ -1869,7 +1881,9 @@ class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 			f"/api/v1/cleaning/interventions/{intervention.id}/check-in/",
 			{
 				"mileage": 2234,
+				"energy_level_percent": 72,
 				"observations": "Controle initial nettoyage",
+				"anomaly_present": False,
 				"cleanliness_state": "Habitacle poussiereux",
 				"cleanliness_notes": "Odeur tabac et dechets arriere",
 				"photos": [self._image_file("cleaning-check-in.gif")],
@@ -1885,6 +1899,7 @@ class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(intervention.vehicle.status, Vehicle.Status.NETTOYAGE)
 		technical_inspection = intervention.technical_inspections.get()
 		self.assertEqual(technical_inspection.mileage, 2234)
+		self.assertEqual(technical_inspection.energy_level_percent, 72)
 		self.assertIn("Controle initial nettoyage", technical_inspection.observations)
 		self.assertIn("Habitacle poussiereux", technical_inspection.observations)
 		self.assertIn("Odeur tabac", technical_inspection.observations)
@@ -1971,7 +1986,7 @@ class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 
 		response = self.client_api.post(
 			f"/api/v1/cleaning/interventions/{intervention.id}/check-out/",
-			{"final_mileage": 2005, "final_vehicle_state": "Propre", "conclusions": "Nettoyage termine", "vehicle_clean": True, "new_intervention_needed": False, "photos": [self._image_file("cleaning-final.gif")]},
+			{"final_mileage": 2005, "final_energy_level_percent": 70, "final_vehicle_state": "Propre", "conclusions": "Nettoyage termine", "anomaly_present": False, "vehicle_clean": True, "new_intervention_needed": False, "photos": [self._image_file("cleaning-final.gif")]},
 			format="multipart",
 		)
 
@@ -1983,6 +1998,7 @@ class CleaningInterventionApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertIsNotNone(intervention.completed_at)
 		final_inspection = intervention.technical_inspections.get(phase=TechnicalInspection.Phase.FINAL)
 		self.assertEqual(final_inspection.mileage, 2005)
+		self.assertEqual(final_inspection.energy_level_percent, 70)
 		self.assertEqual(final_inspection.photos.count(), 1)
 
 	def test_cleaner_check_out_requires_conclusions_and_photo(self):

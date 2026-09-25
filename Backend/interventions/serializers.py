@@ -224,20 +224,44 @@ class InterventionWorkerWorkSerializer(serializers.Serializer):
 
 class InterventionWorkerCheckOutSerializer(serializers.Serializer):
     final_mileage = serializers.IntegerField(min_value=0, required=True)
-    final_vehicle_state = serializers.CharField(required=True, allow_blank=False)
-    conclusions = serializers.CharField(required=True, allow_blank=False)
+    final_vehicle_state = serializers.CharField(required=False, allow_blank=True, default="")
+    conclusions = serializers.CharField(required=False, allow_blank=True, default="")
+    final_energy_level_percent = serializers.IntegerField(min_value=0, max_value=100, required=False, default=0)
     vehicle_operational = serializers.BooleanField(required=False, allow_null=True)
     vehicle_clean = serializers.BooleanField(required=False, allow_null=True)
     new_intervention_needed = serializers.BooleanField(required=False, default=False)
     final_comment = serializers.CharField(required=False, allow_blank=True, default="")
+    anomaly_present = serializers.BooleanField(required=False, default=False)
+    anomaly_description = serializers.CharField(required=False, allow_blank=True, default="")
+    anomaly_severity = serializers.ChoiceField(choices=["ACCEPTABLE", "GRAVE"], required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        if attrs["anomaly_present"]:
+            if not attrs.get("anomaly_description", "").strip():
+                raise serializers.ValidationError({"anomaly_description": "La description de l'anomalie est obligatoire."})
+            if not attrs.get("anomaly_severity"):
+                raise serializers.ValidationError({"anomaly_severity": "La gravite de l'anomalie est obligatoire."})
+        return attrs
 
 
 class InterventionWorkerCheckInSerializer(serializers.Serializer):
     mileage = serializers.IntegerField(min_value=0, required=True)
-    observations = serializers.CharField(required=True, allow_blank=False)
+    observations = serializers.CharField(required=False, allow_blank=True, default="")
     vehicle_condition = serializers.CharField(required=False, allow_blank=True, default="")
     cleanliness_state = serializers.CharField(required=False, allow_blank=True, default="")
+    energy_level_percent = serializers.IntegerField(min_value=0, max_value=100, required=False, default=0)
     cleanliness_notes = serializers.CharField(required=False, allow_blank=True, default="")
+    anomaly_present = serializers.BooleanField(required=False, default=False)
+    anomaly_description = serializers.CharField(required=False, allow_blank=True, default="")
+    anomaly_severity = serializers.ChoiceField(choices=["ACCEPTABLE", "GRAVE"], required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        if attrs["anomaly_present"]:
+            if not attrs.get("anomaly_description", "").strip():
+                raise serializers.ValidationError({"anomaly_description": "La description de l'anomalie est obligatoire."})
+            if not attrs.get("anomaly_severity"):
+                raise serializers.ValidationError({"anomaly_severity": "La gravite de l'anomalie est obligatoire."})
+        return attrs
 
 
 class InterventionWorkerInterruptSerializer(serializers.Serializer):

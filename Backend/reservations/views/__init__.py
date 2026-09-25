@@ -10,6 +10,7 @@ from .client import (
      ReservationUnlockView,
 )
 from .management import (
+    ReservationManagementCancellationView,
     ReservationManagementCompleteView,
     ReservationManagementDepositReleaseView,
     ReservationManagementDetailView,
@@ -34,6 +35,7 @@ __all__ = [
     "ReservationClientPaymentIntentView",
     "ReservationManagementListView",
     "ReservationManagementDetailView",
+    "ReservationManagementCancellationView",
     "ReservationManagementCompleteView",
     "ReservationManagementIssueView",
     "ReservationManagementReviewDecisionView",

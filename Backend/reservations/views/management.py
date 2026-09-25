@@ -37,6 +37,7 @@ from interventions.models import Intervention
 from notifications.models import Notification
 from payments.models import Deposit
 from reservations.models import Reservation
+from reservations.services.expiration import expire_missed_reservations
 from reservations.serializers.management import (
     ReservationManagementDetailSerializer,
     ReservationManagementCompleteRequestSerializer,
@@ -100,6 +101,7 @@ class ReservationManagementFilterSet(filters.FilterSet):
 
     # Filtres exacts
     status = filters.CharFilter(field_name="status", lookup_expr="exact")
+    cancellation_source = filters.CharFilter(field_name="cancellation_source", lookup_expr="exact")
     vehicle = filters.NumberFilter(field_name="vehicle_id", lookup_expr="exact")
     client = filters.NumberFilter(field_name="client_id", lookup_expr="exact")
     start_at = filters.DateTimeFilter(field_name="start_at", lookup_expr="exact")
@@ -194,9 +196,12 @@ class ReservationManagementListView(generics.ListAPIView):
         if getattr(self, "swagger_fake_view", False):
             return Reservation.objects.none()
 
+        expire_missed_reservations()
+
         return Reservation.objects.select_related(
             "client",
             "client__user",
+            "invoice",
             "vehicle",
             "vehicle__brand",
             "vehicle__category",
@@ -402,9 +407,12 @@ class ReservationManagementDetailView(generics.RetrieveAPIView):
         if getattr(self, "swagger_fake_view", False):
             return Reservation.objects.none()
 
+        expire_missed_reservations()
+
         return Reservation.objects.select_related(
             "client",
             "client__user",
+            "invoice",
             "vehicle",
             "vehicle__brand",
             "vehicle__category",
@@ -506,6 +514,52 @@ class ReservationReassignView(generics.GenericAPIView):
         )
 
 
+class ReservationManagementCancellationView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    serializer_class = ReservationUnavailableCancellationResponseSerializer
+
+    def post(self, request, pk):
+        reservation = generics.get_object_or_404(
+            Reservation.objects.select_related("client", "client__user", "vehicle"),
+            pk=pk,
+        )
+        if reservation.status != Reservation.Status.CONFIRMEE:
+            return Response(
+                {
+                    "code": "CANNOT_CANCEL",
+                    "detail": "Seule une réservation confirmée peut être annulée par le gestionnaire.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            reservation = cancel_reservation(
+                reservation=reservation,
+                requested_by=request.user,
+                reason="Réservation annulée par le gestionnaire",
+                cancellation_source=Reservation.CancellationSource.MANAGER,
+            )
+        except CancellationError as error:
+            payload = {"code": error.code, "detail": error.message}
+            if error.details:
+                payload["details"] = error.details
+            return Response(payload, status=status.HTTP_409_CONFLICT)
+
+        refund_initiated = reservation.cancellation_financials.refundable_amount > 0
+        reservation = ReservationManagementDetailView().get_queryset().get(pk=reservation.pk)
+        return Response(
+            ReservationUnavailableCancellationResponseSerializer(
+                {
+                    "message": "Réservation annulée par le gestionnaire.",
+                    "reservation": reservation,
+                    "refund_initiated": refund_initiated,
+                },
+                context={"request": request},
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+
 class ReservationUnavailableCancellationView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
     serializer_class = ReservationUnavailableCancellationResponseSerializer
@@ -533,6 +587,7 @@ class ReservationUnavailableCancellationView(generics.GenericAPIView):
                 requested_by=request.user,
                 reason="Véhicule indisponible — aucun remplacement disponible",
                 allow_reassignment_required=True,
+                cancellation_source=Reservation.CancellationSource.MANAGER,
             )
         except CancellationError as error:
             payload = {"code": error.code, "detail": error.message}
@@ -580,6 +635,7 @@ class ReservationVehicleUnavailableCancellationView(generics.GenericAPIView):
                 requested_by=request.user,
                 reason="Véhicule indisponible en raison d’une intervention mécanique prolongée",
                 vehicle_unavailable=True,
+                cancellation_source=Reservation.CancellationSource.MANAGER,
             )
         except CancellationError as error:
             payload = {"code": error.code, "detail": error.message}

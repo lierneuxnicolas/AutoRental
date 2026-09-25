@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { ArrowLeft, Gauge, CarFront, Camera, UserRound } from 'lucide-react'
@@ -9,6 +9,7 @@ import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import StatusBadge from '../../components/ui/StatusBadge'
 import ReservationReassignmentPanel from '../../components/reservations/ReservationReassignmentPanel'
+import { getInvoiceDownload } from '../../services/invoiceService'
 import {
   getManagementReservationById,
   releaseManagementReservationDeposit,
@@ -16,6 +17,7 @@ import {
 import type {
   ManagementInspection,
   ManagementReservationStatus,
+  ReservationCancellationSource,
   ReservationManagementClientSummary,
   ReservationManagementVehicleSummary,
 } from '../../types/managementReservation'
@@ -26,7 +28,10 @@ interface ManagerReservationDetailPageProps {
   basePath?: string
 }
 
-function getReservationStatusLabel(status: ManagementReservationStatus): string {
+function getReservationStatusLabel(
+  status: ManagementReservationStatus,
+  cancellationSource: ReservationCancellationSource | null,
+): string {
   switch (status) {
     case 'BROUILLON':
       return 'Réservation en brouillon'
@@ -44,7 +49,11 @@ function getReservationStatusLabel(status: ManagementReservationStatus): string 
       return 'Réservation à contrôler'
     case 'TERMINEE':
       return 'Réservation terminée'
+    case 'NON_UTILISEE':
+      return 'Réservation non utilisée'
     case 'ANNULEE':
+      if (cancellationSource === 'CLIENT') return 'Annulée par le client'
+      if (cancellationSource === 'GESTIONNAIRE') return 'Annulée par le gestionnaire'
       return 'Réservation annulée'
     case 'PAIEMENT_ECHOUE':
       return 'Réservation au paiement échoué'
@@ -460,6 +469,8 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
   const queryClient = useQueryClient()
   const reservationId = Number(id)
   const isValidReservationId = Number.isInteger(reservationId) && reservationId > 0
+  const [isInvoiceDownloading, setIsInvoiceDownloading] = useState(false)
+  const [invoiceDownloadError, setInvoiceDownloadError] = useState<string | null>(null)
   const toastMessage = (location.state as { toast?: string } | null)?.toast ?? null
 
   useEffect(() => {
@@ -532,10 +543,32 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
     return <ReservationReassignmentPanel reservation={reservation} basePath={basePath} />
   }
 
-  const reservationStatusLabel = getReservationStatusLabel(reservation.status)
+  const reservationStatusLabel = getReservationStatusLabel(reservation.status, reservation.cancellation_source)
   const departureInspection = reservation.departure_inspection
   const returnInspection = reservation.return_inspection
   const isDepositDecisionPending = reservation.deposit_status === 'AUTORISEE' || reservation.deposit_status === 'A_VERIFIER'
+
+  const handleInvoiceDownload = async () => {
+    if (!reservation.invoice_id || isInvoiceDownloading) return
+
+    setInvoiceDownloadError(null)
+    setIsInvoiceDownloading(true)
+    try {
+      const pdfBlob = await getInvoiceDownload(reservation.invoice_id)
+      const downloadUrl = URL.createObjectURL(pdfBlob)
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = `GetaCar_Facture_${reservation.reference}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(downloadUrl)
+    } catch {
+      setInvoiceDownloadError('La facture n’est pas disponible au téléchargement pour le moment.')
+    } finally {
+      setIsInvoiceDownloading(false)
+    }
+  }
 
   return (
     <section className="mx-auto w-full max-w-[1250px] space-y-5 px-3 py-6 sm:px-4 lg:px-5">
@@ -555,10 +588,21 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
           <h1 className="text-3xl font-bold text-[#0F172A]">Détail de la réservation</h1>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2 md:justify-end">
-          <StatusBadge variant="success" label={reservationStatusLabel} />
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!reservation.invoice_id || isInvoiceDownloading}
+            title={reservation.invoice_id ? undefined : 'Aucune facture disponible'}
+            onClick={() => void handleInvoiceDownload()}
+          >
+            {isInvoiceDownloading ? 'Téléchargement...' : reservation.invoice_id ? 'Télécharger la facture' : 'Facture indisponible'}
+          </Button>
+          <StatusBadge variant={reservation.status === 'NON_UTILISEE' ? 'neutral' : 'success'} label={reservationStatusLabel} />
           {isDepositDecisionPending ? <StatusBadge variant="info" label="Caution à décider" /> : null}
         </div>
       </header>
+
+      {invoiceDownloadError ? <Alert variant="danger" title="Téléchargement impossible" message={invoiceDownloadError} /> : null}
 
       <div className="space-y-4">
         {reservation.previous_reservation ? (

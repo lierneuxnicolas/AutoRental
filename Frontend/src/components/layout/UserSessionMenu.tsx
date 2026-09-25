@@ -34,11 +34,9 @@ const roleConfigs: Record<string, RoleConfig> = {
     menuItems: [
       { label: 'Tableau de bord', to: '/manager' },
       { label: 'Documents à valider', to: '/manager/documents' },
-      { label: 'Réservations', to: '/manager/reservations' },
       { label: 'Gestion des véhicules', to: '/manager/vehicles' },
-      { label: 'Interventions', to: '/manager/interventions' },
-      { label: 'Rapports d’intervention', to: '/manager/interventions/reports' },
-      { label: 'Paiements & factures', to: '/manager/payments' },
+      { label: 'Gestion des réservations', to: '/manager/reservations' },
+      { label: 'Liste des interventions', to: '/manager/interventions' },
     ],
   },
   ADMINISTRATEUR: {
@@ -59,10 +57,7 @@ const roleConfigs: Record<string, RoleConfig> = {
   NETTOYEUR: {
     sessionLabel: 'nettoyage',
     menuItems: [
-      { label: 'Tableau de bord', to: '/cleaning' },
-      { label: 'Véhicules à nettoyer', to: '/cleaning/vehicles' },
       { label: 'Mes interventions', to: '/cleaning/interventions' },
-      { label: 'Historique', to: '/cleaning/history' },
     ],
   },
 }

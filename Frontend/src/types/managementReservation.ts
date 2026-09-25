@@ -11,8 +11,11 @@ export type ManagementReservationStatus =
   | 'EN_COURS'
   | 'A_CONTROLER'
   | 'TERMINEE'
+  | 'NON_UTILISEE'
   | 'ANNULEE'
   | 'PAIEMENT_ECHOUE'
+
+export type ReservationCancellationSource = 'CLIENT' | 'GESTIONNAIRE' | 'SYSTEME'
 
 export interface ReservationManagementClientSummary {
   id: number
@@ -84,9 +87,11 @@ export interface ReservationManagementDetail {
   start_at: string
   end_at: string
   status: ManagementReservationStatus
+  cancellation_source: ReservationCancellationSource | null
   rental_amount: string
   deposit_amount: string
   needs_review: boolean
+  invoice_id: number | null
   previous_reservation: ReservationManagementPreviousSummary | null
   vehicle_reference_inspection: ManagementInspection | null
   deposit_status: ManagementDepositStatus | null
@@ -126,6 +131,7 @@ export interface ManagementReservationListQueryParams {
   start_at_from?: string
   start_at_to?: string
   status?: string
+  cancellation_source?: ReservationCancellationSource
   vehicle?: number
   vehicle_search?: string
   vehicle_registration_plate?: string

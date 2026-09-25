@@ -39,6 +39,8 @@ function mapStatusToUi(status: ReservationStatus | undefined): { label: string; 
       return { label: 'A contrôler', variant: 'warning' }
     case 'TERMINEE':
       return { label: 'Terminée', variant: 'success' }
+    case 'NON_UTILISEE':
+      return { label: 'Non utilisée', variant: 'neutral' }
     case 'ANNULEE':
       return { label: 'Annulée', variant: 'danger' }
     case 'PAIEMENT_ECHOUE':

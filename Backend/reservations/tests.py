@@ -1593,6 +1593,7 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		reservation.refresh_from_db()
 		self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
+		self.assertEqual(reservation.cancellation_source, Reservation.CancellationSource.CLIENT)
 		self.assertIsNotNone(reservation.cancelled_at)
 		self.assertEqual(Notification.objects.count(), notif_before + 1)
 		self.assertTrue(
@@ -2411,6 +2412,48 @@ class ReservationVehicleAccessTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
 		self.assertEqual(response.data["code"], "ACCESS_EXPIRED")
+
+
+class ReservationManagementCancellationTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+
+	def test_manager_cancels_confirmed_reservation_and_records_source(self):
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
+		url = reverse("reservations:management-reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.manager_user)
+
+		with self.captureOnCommitCallbacks(execute=True):
+			response = self.client_api.post(url, {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
+		self.assertEqual(reservation.cancellation_source, Reservation.CancellationSource.MANAGER)
+		self.assertEqual(response.data["reservation"]["cancellation_source"], Reservation.CancellationSource.MANAGER)
+
+	def test_client_cannot_use_manager_cancellation_endpoint(self):
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
+		url = reverse("reservations:management-reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url, {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.CONFIRMEE)
+
+	def test_manager_cannot_cancel_non_confirmed_reservation(self):
+		reservation = self._create_reservation(status=Reservation.Status.EN_COURS)
+		url = reverse("reservations:management-reservation-cancel", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(url, {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.EN_COURS)
+		self.assertIsNone(reservation.cancellation_source)
 
 
 class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
@@ -3510,6 +3553,33 @@ class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase)
 		self.assertIn(self.reservation_client_1.id, ids)
 		self.assertIn(self.reservation_client_2.id, ids)
 
+	def test_manager_reservation_exposes_invoice_and_can_download_it(self):
+		invoice = Invoice.objects.create(
+			reservation=self.reservation_client_1,
+			client=self.reservation_client_1.client,
+			status=Invoice.Status.ISSUED,
+			subtotal=Decimal("100.00"),
+			tax_amount=Decimal("0.00"),
+			total_amount=Decimal("100.00"),
+			currency="EUR",
+			billing_name="Client facture",
+			billing_address="Adresse facture",
+			pdf_file=SimpleUploadedFile("manager-invoice.pdf", b"%PDF-1.4 manager invoice"),
+		)
+		self.client_api.force_authenticate(self.manager_user)
+
+		list_response = self.client_api.get(self.list_url)
+		detail_response = self.client_api.get(
+			reverse("reservations:management-reservation-detail", kwargs={"pk": self.reservation_client_1.id})
+		)
+		download_response = self.client_api.get(reverse("invoicing:invoice-download", kwargs={"pk": invoice.id}))
+
+		list_item = next(item for item in list_response.data["results"] if item["id"] == self.reservation_client_1.id)
+		self.assertEqual(list_item["invoice_id"], invoice.id)
+		self.assertEqual(detail_response.data["invoice_id"], invoice.id)
+		self.assertEqual(download_response.status_code, status.HTTP_200_OK)
+		self.assertEqual(download_response["Content-Type"], "application/pdf")
+
 	def test_administrateur_autorise(self):
 		self.client_api.force_authenticate(self.admin_user)
 		response = self.client_api.get(self.list_url)
@@ -3571,6 +3641,24 @@ class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase)
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual({item["id"] for item in response.data["results"]}, {reservation.id})
+
+	def test_filter_cancelled_reservations_by_source(self):
+		client_cancelled = self._create_reservation(status=Reservation.Status.ANNULEE)
+		client_cancelled.cancellation_source = Reservation.CancellationSource.CLIENT
+		client_cancelled.save(update_fields=["cancellation_source", "updated_at"])
+		manager_cancelled = self._create_reservation(status=Reservation.Status.ANNULEE)
+		manager_cancelled.cancellation_source = Reservation.CancellationSource.MANAGER
+		manager_cancelled.save(update_fields=["cancellation_source", "updated_at"])
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.get(
+			self.list_url,
+			{"status": Reservation.Status.ANNULEE, "cancellation_source": Reservation.CancellationSource.MANAGER},
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual({item["id"] for item in response.data["results"]}, {manager_cancelled.id})
+		self.assertEqual(response.data["results"][0]["cancellation_source"], Reservation.CancellationSource.MANAGER)
 
 	def test_needs_review_is_false_without_checkin_anomaly(self):
 		self.client_api.force_authenticate(self.manager_user)

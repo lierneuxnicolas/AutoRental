@@ -4,11 +4,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
+import PersonnelInterventionCard from '../../components/interventions/PersonnelInterventionCard'
 import Button from '../../components/ui/Button'
-import Card from '../../components/ui/Card'
-import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
+import type { StatusVariant } from '../../components/ui/StatusBadge'
 import { getMechanicInterventions, resumeMechanicIntervention } from '../../services/mechanicInterventionService'
-import type { MechanicInterventionResponse, MechanicInterventionStatus } from '../../types/mechanicIntervention'
+import type { MechanicInterventionStatus } from '../../types/mechanicIntervention'
 
 function mapStatusToBadge(status: MechanicInterventionStatus): { label: string; variant: StatusVariant } {
   switch (status) {
@@ -29,29 +29,6 @@ function mapStatusToBadge(status: MechanicInterventionStatus): { label: string; 
     default:
       return { label: status, variant: 'neutral' }
   }
-}
-
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value))
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  }).format(new Date(value))
-}
-
-function getVehicleLabel(intervention: MechanicInterventionResponse): string {
-  const vehicle = intervention.vehicle
-  return `${vehicle.brand} ${vehicle.model_name}`
 }
 
 function getResumeErrorMessage(error: unknown): string {
@@ -132,61 +109,12 @@ export default function MechanicInterventionsPage() {
           const statusBadge = mapStatusToBadge(intervention.status)
 
           return (
-            <Card
+            <PersonnelInterventionCard
               key={intervention.id}
-              className="border-slate-200"
-              header={
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="flex items-baseline gap-3">
-                    <p className="text-sm font-semibold text-[#2563EB]">{intervention.reference || `#${intervention.id}`}</p>
-                    <p className="text-sm text-slate-600">Date de création : {formatDate(intervention.created_at)}</p>
-                  </div>
-                  <StatusBadge label={statusBadge.label} variant={statusBadge.variant} />
-                </div>
-              }
-            >
-              <div className="grid gap-5 lg:grid-cols-3">
-                <div>
-                  <p className="text-sm font-semibold text-[#1F2937]">Véhicule</p>
-                  <div className="mt-1 space-y-1 text-sm">
-                    <p className="text-slate-700">{getVehicleLabel(intervention)}</p>
-                    <p className="text-slate-600">{intervention.vehicle.registration_number || 'Immatriculation non renseignée'}</p>
-                    <p className="text-slate-600">Couleur : {intervention.vehicle.color || 'Non renseignée'}</p>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="text-sm font-semibold text-[#1F2937]">Localisation</p>
-                  <p className="mt-1 text-sm text-slate-700">Parking : {intervention.vehicle.parking_name ?? 'Non renseigné'}</p>
-                  <p className="mt-1 text-sm text-slate-700">Place : {intervention.vehicle.parking_space_number ?? '—'}</p>
-                </div>
-
-                <div>
-                  <p className="text-sm font-semibold text-[#1F2937]">Responsable</p>
-                  <p className="mt-1 text-sm text-slate-700">Gestionnaire : {`${intervention.created_by.first_name} ${intervention.created_by.last_name}`.trim() || intervention.created_by.email}</p>
-                  <p className="mt-1 text-sm text-slate-700">Attribuée à : {intervention.assigned_to ? `${intervention.assigned_to.first_name} ${intervention.assigned_to.last_name}`.trim() || intervention.assigned_to.email : 'Non renseigné'}</p>
-                </div>
-
-                <div>
-                  <p className="text-sm font-semibold text-[#1F2937]">Travail demandé</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-700">{intervention.description?.trim() ? intervention.description : 'Aucune consigne fournie.'}</p>
-                </div>
-
-                <div>
-                  <p className="text-sm font-semibold text-[#1F2937]">Planification</p>
-                  <p className="mt-1 text-sm text-slate-700">Début : {intervention.planned_start_at ? formatDateTime(intervention.planned_start_at) : 'Non renseigné'}</p>
-                  <p className="mt-1 text-sm text-slate-700">Fin : {intervention.planned_end_at ? formatDateTime(intervention.planned_end_at) : 'Non renseignée'}</p>
-                </div>
-
-                <div>
-                  <p className="text-sm font-semibold text-[#1F2937]">Réalisation</p>
-                  <p className="mt-1 text-sm text-slate-700">Prise en charge : {intervention.started_at ? formatDateTime(intervention.started_at) : '—'}</p>
-                  <p className="mt-1 text-sm text-slate-700">Remise : {intervention.completed_at ? formatDateTime(intervention.completed_at) : '—'}</p>
-                  {intervention.reservation ? <p className="mt-3 text-sm text-slate-600">Réservation liée : {intervention.reservation.reference}</p> : null}
-                </div>
-              </div>
-
-              <div className="mt-5 flex flex-col gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+              intervention={intervention}
+              statusBadge={statusBadge}
+              action={(
+                <>
                 {intervention.status === 'EN_PAUSE' ? (
                   <Button
                     className="min-w-[11rem]"
@@ -203,8 +131,9 @@ export default function MechanicInterventionsPage() {
                 ) : (
                   <Link to={`/mechanic/interventions/${intervention.id}`}><Button variant="secondary" className="min-w-[11rem]">{intervention.status === 'EN_COURS' ? 'Voir l’intervention' : 'Voir le détail'}</Button></Link>
                 )}
-              </div>
-            </Card>
+                </>
+              )}
+            />
           )
         })}
       </div>

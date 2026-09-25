@@ -66,17 +66,20 @@ class InvoiceClientDetailView(generics.RetrieveAPIView):
 
 
 class InvoiceClientDownloadView(generics.GenericAPIView):
-	permission_classes = [IsAuthenticated, IsClient]
+	permission_classes = [IsAuthenticated, IsClient | IsManagerOrAdministrator]
 
 	def get_queryset(self):
 		if getattr(self, "swagger_fake_view", False):
 			return Invoice.objects.none()
 
-		return Invoice.objects.filter(client__user=self.request.user).select_related(
+		queryset = Invoice.objects.select_related(
 			"reservation",
 			"client",
 			"client__user",
 		).prefetch_related("lines")
+		if IsClient().has_permission(self.request, self):
+			return queryset.filter(client__user=self.request.user)
+		return queryset
 
 	@extend_schema(
 		tags=["Invoices"],

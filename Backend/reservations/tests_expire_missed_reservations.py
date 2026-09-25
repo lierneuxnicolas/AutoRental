@@ -5,13 +5,17 @@ from io import StringIO
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APIClient
 
 from accounts.models import ClientProfile
 from accounts.tests.utils import create_user, ensure_roles
 from inspections.models import Inspection
+from interventions.models import VehicleAccess
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory
+from vehicles.services import is_vehicle_available
 
 
 @override_settings(
@@ -89,7 +93,7 @@ class ExpireMissedReservationsCommandTests(TestCase):
             confirmed_at=timezone.now(),
         )
 
-    def test_confirmed_past_without_initial_is_cancelled(self):
+    def test_confirmed_past_without_completed_departure_is_marked_unused(self):
         vehicle = self._create_vehicle(status=Vehicle.Status.RESERVE)
         start_at = timezone.now() - timedelta(hours=6)
         reservation = self._create_confirmed_reservation(
@@ -120,16 +124,13 @@ class ExpireMissedReservationsCommandTests(TestCase):
         payment.refresh_from_db()
         deposit = reservation.deposits.order_by("-id").first()
 
-        self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
-        self.assertIsNotNone(reservation.cancelled_at)
-        self.assertEqual(
-            reservation.cancellation_reason,
-            "Reservation annulee automatiquement : delai de prise en charge depasse.",
-        )
+        self.assertEqual(reservation.status, Reservation.Status.NON_UTILISEE)
+        self.assertIsNone(reservation.cancelled_at)
+        self.assertEqual(reservation.cancellation_reason, "")
         self.assertEqual(vehicle.status, Vehicle.Status.DISPONIBLE)
         self.assertEqual(payment.status, Payment.Status.REUSSI)
         self.assertIsNotNone(deposit)
-        self.assertEqual(deposit.status, Deposit.Status.LIBEREE)
+        self.assertEqual(deposit.status, Deposit.Status.AUTORISEE)
 
     def test_reservation_within_window_is_unchanged(self):
         vehicle = self._create_vehicle(status=Vehicle.Status.RESERVE)
@@ -160,10 +161,27 @@ class ExpireMissedReservationsCommandTests(TestCase):
 
         reservation.refresh_from_db()
         vehicle.refresh_from_db()
-        self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
+        self.assertEqual(reservation.status, Reservation.Status.NON_UTILISEE)
         self.assertEqual(vehicle.status, Vehicle.Status.DISPONIBLE)
+        future_start = timezone.now() + timedelta(hours=2)
+        self.assertTrue(is_vehicle_available(vehicle=vehicle, start=future_start, end=future_start + timedelta(hours=2)))
 
-    def test_reservation_with_initial_inspection_is_unchanged(self):
+    def test_client_list_refreshes_past_confirmed_reservation(self):
+        vehicle = self._create_vehicle(status=Vehicle.Status.RESERVE)
+        start_at = timezone.now() - timedelta(hours=6)
+        reservation = self._create_confirmed_reservation(vehicle=vehicle, start_at=start_at, end_at=start_at + timedelta(hours=4))
+        api = APIClient()
+        api.force_authenticate(self.user)
+
+        response = api.get("/api/v1/reservations/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, Reservation.Status.NON_UTILISEE)
+        item = next(row for row in response.data["results"] if row["id"] == reservation.id)
+        self.assertEqual(item["status"], Reservation.Status.NON_UTILISEE)
+
+    def test_reservation_with_draft_initial_inspection_is_still_marked_unused(self):
         vehicle = self._create_vehicle(status=Vehicle.Status.RESERVE)
         start_at = timezone.now() - timedelta(hours=6)
         reservation = self._create_confirmed_reservation(
@@ -181,8 +199,42 @@ class ExpireMissedReservationsCommandTests(TestCase):
 
         reservation.refresh_from_db()
         vehicle.refresh_from_db()
+        self.assertEqual(reservation.status, Reservation.Status.NON_UTILISEE)
+        self.assertEqual(vehicle.status, Vehicle.Status.DISPONIBLE)
+
+    def test_reservation_with_completed_initial_inspection_is_unchanged(self):
+        vehicle = self._create_vehicle(status=Vehicle.Status.RESERVE)
+        start_at = timezone.now() - timedelta(hours=6)
+        reservation = self._create_confirmed_reservation(vehicle=vehicle, start_at=start_at, end_at=start_at + timedelta(hours=4))
+        Inspection.objects.create(
+            reservation=reservation,
+            inspection_type=Inspection.Type.INITIAL,
+            status=Inspection.Status.TERMINE,
+            completed_at=start_at,
+        )
+
+        call_command("expire_missed_reservations")
+
+        reservation.refresh_from_db()
         self.assertEqual(reservation.status, Reservation.Status.CONFIRMEE)
-        self.assertEqual(vehicle.status, Vehicle.Status.RESERVE)
+
+    def test_reservation_with_actual_pickup_is_unchanged(self):
+        vehicle = self._create_vehicle(status=Vehicle.Status.RESERVE)
+        start_at = timezone.now() - timedelta(hours=6)
+        reservation = self._create_confirmed_reservation(vehicle=vehicle, start_at=start_at, end_at=start_at + timedelta(hours=4))
+        VehicleAccess.objects.create(
+            reservation=reservation,
+            vehicle=vehicle,
+            client=self.user,
+            valid_from=start_at,
+            valid_until=reservation.end_at,
+            last_unlocked_at=start_at,
+        )
+
+        call_command("expire_missed_reservations")
+
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, Reservation.Status.CONFIRMEE)
 
     def test_maintenance_vehicle_is_never_forced_to_disponible(self):
         vehicle = self._create_vehicle(status=Vehicle.Status.MAINTENANCE)
@@ -197,7 +249,7 @@ class ExpireMissedReservationsCommandTests(TestCase):
 
         reservation.refresh_from_db()
         vehicle.refresh_from_db()
-        self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
+        self.assertEqual(reservation.status, Reservation.Status.NON_UTILISEE)
         self.assertEqual(vehicle.status, Vehicle.Status.MAINTENANCE)
 
     def test_second_run_is_idempotent(self):
@@ -213,14 +265,12 @@ class ExpireMissedReservationsCommandTests(TestCase):
         call_command("expire_missed_reservations", stdout=out_first)
 
         reservation.refresh_from_db()
-        first_cancelled_at = reservation.cancelled_at
-        self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
-        self.assertIsNotNone(first_cancelled_at)
+        self.assertEqual(reservation.status, Reservation.Status.NON_UTILISEE)
 
         out_second = StringIO()
         call_command("expire_missed_reservations", stdout=out_second)
 
         reservation.refresh_from_db()
-        self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
-        self.assertEqual(reservation.cancelled_at, first_cancelled_at)
-        self.assertIn("annulees=0", out_second.getvalue())
+        self.assertEqual(reservation.status, Reservation.Status.NON_UTILISEE)
+        self.assertIsNone(reservation.cancelled_at)
+        self.assertIn("non_utilisees=0", out_second.getvalue())

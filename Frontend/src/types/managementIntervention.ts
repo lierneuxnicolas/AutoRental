@@ -1,3 +1,5 @@
+import type { WorkerInterventionCheckIn } from './workerIntervention'
+
 export type InterventionType = 'MECANIQUE' | 'NETTOYAGE'
 
 export type InterventionStatus =
@@ -14,6 +16,9 @@ export interface InterventionVehicleSummary {
   registration_number: string
   brand: string
   model_name: string
+  color: string
+  parking_name?: string | null
+  parking_space_number?: string | null
 }
 
 export interface InterventionReservationSummary {
@@ -78,8 +83,8 @@ export interface ManagementInterventionResponse {
   reservation: InterventionReservationSummary | null
   assigned_to: InterventionAssigneeSummary | null
   created_by: InterventionAssigneeSummary
-  check_in?: unknown
-  check_out?: unknown
+  check_in?: WorkerInterventionCheckIn | null
+  check_out?: WorkerInterventionCheckIn | null
   work_data?: Record<string, unknown> | null
   work_periods: Array<{ id: number; started_at: string; ended_at: string | null }>
   final_report?: Record<string, unknown> | null
