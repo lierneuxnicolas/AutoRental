@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm, useWatch } from 'react-hook-form'
 import { z } from 'zod'
@@ -8,7 +8,12 @@ import Input from '../ui/Input'
 import Select from '../ui/Select'
 import VehicleFormTabs, { type VehicleFormTab } from './VehicleFormTabs'
 import VehicleFormSection from './VehicleFormSection'
-import type { VehicleManagementCreateRequest } from '../../types/managementVehicle'
+import type {
+  VehicleInitialDamageDraft,
+  VehicleInitialStateDraft,
+  VehicleManagementCreateRequest,
+  VehicleReferencePhotoKey,
+} from '../../types/managementVehicle'
 
 const isActiveOptions = [
   { value: 'true', label: 'Actif' },
@@ -32,6 +37,12 @@ const positiveOrZeroIntegerString = (message: string) =>
     .optional()
     .transform((value) => value ?? '')
     .refine((value) => value === '' || Number.isInteger(Number(value)) && Number(value) >= 0, message)
+
+const requiredPositiveOrZeroIntegerString = (requiredMessage: string, invalidMessage: string) =>
+  z.string().trim().min(1, requiredMessage).refine(
+    (value) => Number.isInteger(Number(value)) && Number(value) >= 0,
+    invalidMessage,
+  )
 
 const optionalNonNegativeNumberString = (message: string) =>
   z.string().trim().optional().transform((value) => value ?? '').refine(
@@ -58,7 +69,10 @@ const formSchema = z.object({
   transmission: z.string().trim().min(1, 'La transmission est obligatoire.').max(60, 'Maximum 60 caracteres.'),
   seats: positiveIntegerString('Le nombre de places est obligatoire.', 'Le nombre de places doit etre un entier positif.'),
   doors: positiveIntegerString('Le nombre de portes est obligatoire.', 'Le nombre de portes doit etre un entier positif.'),
-  mileage: positiveOrZeroIntegerString('Le kilometrage doit etre positif ou nul.'),
+  mileage: requiredPositiveOrZeroIntegerString(
+    'Le kilométrage initial est obligatoire.',
+    'Le kilométrage doit être positif ou nul.',
+  ),
   description: z.string().trim().optional(),
   recommended_use: z.string().trim().optional(),
   power_hp: positiveOrZeroIntegerString('La puissance doit être positive ou nulle.'),
@@ -105,7 +119,7 @@ type VehicleFormFieldErrors = Partial<Record<VehicleFieldName, string>>
 
 export interface VehicleManagementFormProps {
   initialValues?: Partial<VehicleManagementCreateRequest>
-  onSubmit: (payload: VehicleManagementCreateRequest) => Promise<void> | void
+  onSubmit: (payload: VehicleManagementCreateRequest, initialState: VehicleInitialStateDraft) => Promise<void> | void
   isSubmitting?: boolean
   submitLabel: string
   apiError?: string | null
@@ -205,6 +219,12 @@ export default function VehicleManagementForm({
   const selectedModel = useWatch({ control, name: 'model_name' })
   const selectedEquipment = useWatch({ control, name: 'equipment' }) ?? []
   const [activeTab, setActiveTab] = useState<VehicleFormTab>('features')
+  const [initialEnergyLevel, setInitialEnergyLevel] = useState('')
+  const [referencePhotos, setReferencePhotos] = useState(createEmptyReferencePhotos)
+  const [initialDamage, setInitialDamage] = useState<VehicleInitialDamageDraft>(emptyInitialDamage)
+  const [initialDamagePreviewUrl, setInitialDamagePreviewUrl] = useState<string | null>(null)
+  const [initialStateError, setInitialStateError] = useState<string | null>(null)
+  const previewUrlsRef = useRef(new Set<string>())
   const selectedCategoryRate = categoryOptions.find((option) => option.value === selectedCategory)?.dailyRate ?? null
   const selectedBrandLabel = brandOptions.find((option) => option.value === selectedBrand)?.label ?? ''
   const vehicleName = [selectedBrandLabel, selectedModel?.trim()].filter(Boolean).join(' ') || 'Nouveau véhicule'
@@ -217,6 +237,24 @@ export default function VehicleManagementForm({
     photoPreviews.forEach((preview) => URL.revokeObjectURL(preview.url))
   }, [photoPreviews])
 
+  useEffect(() => () => {
+    previewUrlsRef.current.forEach((previewUrl) => URL.revokeObjectURL(previewUrl))
+    previewUrlsRef.current.clear()
+  }, [])
+
+  const replacePreviewUrl = (currentUrl: string | null, file: File | null): string | null => {
+    if (currentUrl) {
+      URL.revokeObjectURL(currentUrl)
+      previewUrlsRef.current.delete(currentUrl)
+    }
+    if (!file) {
+      return null
+    }
+    const previewUrl = URL.createObjectURL(file)
+    previewUrlsRef.current.add(previewUrl)
+    return previewUrl
+  }
+
   const handlePhotoInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (!onPhotosChange) {
       return
@@ -227,6 +265,22 @@ export default function VehicleManagementForm({
   }
 
   const onValidSubmit = async (values: VehicleManagementFormValues) => {
+    const energyLevel = Number(initialEnergyLevel)
+    if (!initialEnergyLevel.trim() || !Number.isInteger(energyLevel) || energyLevel < 0 || energyLevel > 100) {
+      setInitialStateError('Le carburant ou niveau d’énergie doit être compris entre 0 et 100.')
+      return
+    }
+    if (referencePhotoSlots.some((slot) => referencePhotos[slot.key].file === null)) {
+      setInitialStateError('Les 8 photos de référence sont obligatoires.')
+      return
+    }
+    const hasInitialDamage = Boolean(initialDamage.description.trim() || initialDamage.severity || initialDamage.photo)
+    if (hasInitialDamage && (!initialDamage.description.trim() || !initialDamage.severity)) {
+      setInitialStateError('Le dommage initial doit avoir une description et une gravité.')
+      return
+    }
+    setInitialStateError(null)
+
     const payload: VehicleManagementCreateRequest = {
       brand: Number(values.brand),
       category: Number(values.category),
@@ -243,9 +297,7 @@ export default function VehicleManagementForm({
       is_active: values.is_active === 'true',
     }
 
-    if (values.mileage && values.mileage.trim() !== '') {
-      payload.mileage = Number(values.mileage)
-    }
+    payload.mileage = Number(values.mileage)
 
     const normalizedDescription = values.description?.trim()
     if (normalizedDescription) {
@@ -268,7 +320,13 @@ export default function VehicleManagementForm({
     if (values.required_license?.trim()) payload.required_license = values.required_license.trim()
     payload.equipment = values.equipment
 
-    await onSubmit(payload)
+    await onSubmit(payload, {
+      energyLevelPercent: initialEnergyLevel,
+      photos: Object.fromEntries(
+        Object.entries(referencePhotos).map(([key, selection]) => [key, selection.file]),
+      ) as Record<VehicleReferencePhotoKey, File | null>,
+      damage: hasInitialDamage ? initialDamage : null,
+    })
   }
 
   return (
@@ -289,7 +347,6 @@ export default function VehicleManagementForm({
                 {...register('parking_space')}
               />
             </div>
-            <Input type="text" label="Kilométrage initial" placeholder="0" inputMode="numeric" error={errors.mileage?.message} {...register('mileage')} />
             <Select label="Actif / inactif" options={[...isActiveOptions]} error={errors.is_active?.message} disabled={disabled} {...register('is_active')} />
             <Select label="Marque" placeholder="Sélectionner une marque" options={brandOptions} error={errors.brand?.message} disabled={disabled || isLoadingOptions} {...register('brand')} />
             <Select label="Catégorie" placeholder="Sélectionner une catégorie" options={categoryOptions} error={errors.category?.message} disabled={disabled || isLoadingOptions} {...register('category')} />
@@ -407,6 +464,120 @@ export default function VehicleManagementForm({
           </VehicleFormTabs>
         </VehicleFormSection>
 
+        <VehicleFormSection title="État initial du véhicule">
+          {initialStateError ? <Alert variant="danger" title="État initial incomplet" message={initialStateError} /> : null}
+          <div className="grid gap-5 lg:grid-cols-[0.8fr_1.8fr_1fr]">
+            <section className="space-y-4 rounded-2xl border border-[#E5E7EB] bg-white p-4">
+              <h3 className="text-base font-semibold text-[#0F172A]">Métriques initiales</h3>
+              <Input
+                type="text"
+                label="Kilométrage initial"
+                placeholder="0"
+                inputMode="numeric"
+                error={errors.mileage?.message}
+                disabled={disabled}
+                {...register('mileage')}
+              />
+              <Input
+                type="text"
+                label="Carburant / énergie (%)"
+                placeholder="100"
+                inputMode="numeric"
+                value={initialEnergyLevel}
+                disabled={disabled}
+                onChange={(event) => setInitialEnergyLevel(event.target.value)}
+              />
+            </section>
+
+            <section className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-base font-semibold text-[#0F172A]">Photos</h3>
+                <span className="text-sm text-slate-500">{Object.values(referencePhotos).filter((selection) => selection.file).length}/8</span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {referencePhotoSlots.map((slot) => {
+                  const selection = referencePhotos[slot.key]
+                  return (
+                    <label key={slot.key} className="group cursor-pointer">
+                      <span className="mb-2 block text-sm font-medium text-[#1F2937]">{slot.label}</span>
+                      <span className="flex aspect-4/3 items-center justify-center overflow-hidden rounded-xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-center text-xs text-slate-500 transition group-hover:border-[#2563EB]">
+                        {selection.previewUrl ? (
+                          <img src={selection.previewUrl} alt={`Aperçu ${slot.label}`} className="h-full w-full object-cover" />
+                        ) : 'Sélectionner'}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="sr-only"
+                        disabled={disabled}
+                        onChange={(event) => {
+                          const selectedFile = event.target.files?.[0] ?? null
+                          setReferencePhotos((current) => ({
+                            ...current,
+                            [slot.key]: {
+                              file: selectedFile,
+                              previewUrl: replacePreviewUrl(current[slot.key].previewUrl, selectedFile),
+                            },
+                          }))
+                        }}
+                      />
+                      <span className="mt-1 block text-xs font-medium text-[#2563EB]">{selection.file ? 'Remplacer' : 'Ajouter une photo'}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
+              <h3 className="whitespace-nowrap text-base font-semibold text-[#0F172A]">Dommages existants (optionnel)</h3>
+              <div className="mt-4 space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="initial-damage-description" className="block text-sm font-medium text-[#1F2937]">Description</label>
+                  <textarea
+                    id="initial-damage-description"
+                    rows={4}
+                    value={initialDamage.description}
+                    disabled={disabled}
+                    onChange={(event) => setInitialDamage((current) => ({ ...current, description: event.target.value }))}
+                    className="block w-full resize-y rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-slate-500"
+                  />
+                </div>
+                <Select
+                  label="Gravité"
+                  placeholder="Sélectionner"
+                  value={initialDamage.severity}
+                  disabled={disabled}
+                  options={[
+                    { value: 'ACCEPTABLE', label: 'Acceptable' },
+                    { value: 'GRAVE', label: 'Grave' },
+                  ]}
+                  onChange={(event) => setInitialDamage((current) => ({
+                    ...current,
+                    severity: event.target.value as VehicleInitialDamageDraft['severity'],
+                  }))}
+                />
+                <label className="block space-y-2 text-sm font-medium text-[#1F2937]">
+                  Photo de preuve
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={disabled}
+                    className="block w-full text-xs text-slate-500 file:mr-2 file:rounded-lg file:border-0 file:bg-white file:px-2 file:py-1.5 file:text-xs file:font-medium"
+                    onChange={(event) => {
+                      const selectedFile = event.target.files?.[0] ?? null
+                      setInitialDamage((current) => ({ ...current, photo: selectedFile }))
+                      setInitialDamagePreviewUrl((currentUrl) => replacePreviewUrl(currentUrl, selectedFile))
+                    }}
+                  />
+                </label>
+                {initialDamagePreviewUrl ? (
+                  <img src={initialDamagePreviewUrl} alt="Aperçu du dommage" className="h-24 w-full rounded-lg object-cover" />
+                ) : null}
+              </div>
+            </section>
+          </div>
+        </VehicleFormSection>
+
         <div className="flex justify-end">
           <Button type="submit" disabled={disabled || isLoadingOptions || parkingSpaceOptions.length === 0} className="w-full sm:w-auto">
             {disabled ? 'Enregistrement...' : submitLabel}
@@ -415,4 +586,32 @@ export default function VehicleManagementForm({
       </form>
     </div>
   )
+}
+
+const referencePhotoSlots: Array<{ key: VehicleReferencePhotoKey; label: string }> = [
+  { key: 'reference_front_left', label: 'Avant gauche' },
+  { key: 'reference_front_right', label: 'Avant droit' },
+  { key: 'reference_rear_left', label: 'Arrière gauche' },
+  { key: 'reference_rear_right', label: 'Arrière droit' },
+  { key: 'reference_dashboard', label: 'Tableau de bord' },
+  { key: 'reference_front_seats', label: 'Sièges avant' },
+  { key: 'reference_rear_seats', label: 'Sièges arrière' },
+  { key: 'reference_trunk', label: 'Coffre' },
+]
+
+interface ReferencePhotoSelection {
+  file: File | null
+  previewUrl: string | null
+}
+
+function createEmptyReferencePhotos(): Record<VehicleReferencePhotoKey, ReferencePhotoSelection> {
+  return Object.fromEntries(
+    referencePhotoSlots.map((slot) => [slot.key, { file: null, previewUrl: null }]),
+  ) as Record<VehicleReferencePhotoKey, ReferencePhotoSelection>
+}
+
+const emptyInitialDamage: VehicleInitialDamageDraft = {
+  description: '',
+  severity: '',
+  photo: null,
 }

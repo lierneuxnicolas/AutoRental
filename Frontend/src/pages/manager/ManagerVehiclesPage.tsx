@@ -124,6 +124,17 @@ function getOperationalState(
   const reassignmentReservation = vehicleReservations.find(
     (reservation) => reservation.status === 'REAFFECTATION_REQUIRED',
   ) ?? null
+  const normalizedStatus = vehicle.public_status.trim().toUpperCase()
+
+  // Highest priority: a GRAVE check-in anomaly makes the vehicle unusable and must stay visible above any other state.
+  if (normalizedStatus === 'A_CONTROLER' && vehicle.has_urgent_checkin_anomaly) {
+    return {
+      label: 'Urgent',
+      variant: 'danger',
+      detail: null,
+      reservation: reassignmentReservation,
+    }
+  }
 
   const now = Date.now()
   const currentRental = vehicleReservations.find((reservation) => (
@@ -168,7 +179,17 @@ function getOperationalState(
     }
   }
 
-  const normalizedStatus = vehicle.public_status.trim().toUpperCase()
+  // Below current occupation/intervention/validation states: a supervision flag from an
+  // ACCEPTABLE check-in anomaly does not block the vehicle, so it only surfaces once nothing more relevant applies.
+  if (vehicle.needs_supervision) {
+    return {
+      label: 'À surveiller',
+      variant: 'warning',
+      detail: null,
+      reservation: reassignmentReservation,
+    }
+  }
+
   const hasCompletedMechanicalIntervention = interventions.some((intervention) => (
     intervention.vehicle.id === vehicle.id
     && intervention.intervention_type === 'MECANIQUE'
@@ -651,9 +672,24 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
     queryFn: () => getManagementReservations({ page_size: 100, ordering: 'start_at' }),
   })
 
+  // Fetched separately so a currently active rental is never dropped by the
+  // page_size=100 cap on the general (mostly historical) reservations query.
+  const activeRentalsQuery = useQuery({
+    queryKey: ['manager-reservations', 'active-rentals'],
+    queryFn: () => getManagementReservations({ status: 'EN_COURS', page_size: 100, ordering: '-start_at' }),
+  })
+
   const vehicles = useMemo(() => vehiclesQuery.data?.results ?? [], [vehiclesQuery.data?.results])
   const interventions = useMemo(() => interventionsQuery.data?.results ?? [], [interventionsQuery.data?.results])
-  const reservations = useMemo(() => reservationsQuery.data?.results ?? [], [reservationsQuery.data?.results])
+  const reservations = useMemo(() => {
+    const fleetStateReservations = reservationsQuery.data?.results ?? []
+    const activeRentals = activeRentalsQuery.data?.results ?? []
+    const byId = new Map(fleetStateReservations.map((reservation) => [reservation.id, reservation]))
+    for (const reservation of activeRentals) {
+      byId.set(reservation.id, reservation)
+    }
+    return Array.from(byId.values())
+  }, [reservationsQuery.data?.results, activeRentalsQuery.data?.results])
 
   const statusMutation = useMutation({
     mutationFn: ({ vehicleId, payload }: { vehicleId: number; payload: VehicleManagementStatusUpdateRequest }) =>

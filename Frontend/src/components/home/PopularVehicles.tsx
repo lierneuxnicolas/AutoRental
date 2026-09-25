@@ -3,21 +3,9 @@ import { Link } from 'react-router-dom'
 import { Alert, LoadingSpinner } from '../feedback'
 import { VehicleCard } from '../vehicles'
 import type { VehicleCardProps } from '../vehicles'
-import { getVehicles } from '../../services/vehicleService'
+import { getPopularVehicles } from '../../services/vehicleService'
 import type { PublicVehicle } from '../../types/vehicle'
 import { resolveMediaUrl } from '../../utils/media'
-
-type PopularVehicleCandidate = PublicVehicle & {
-  popular?: boolean
-}
-
-function toVehicleList(payload: Awaited<ReturnType<typeof getVehicles>>): PublicVehicle[] {
-  if (Array.isArray(payload)) {
-    return payload
-  }
-
-  return payload.results
-}
 
 export default function PopularVehicles() {
   const [vehicles, setVehicles] = useState<PublicVehicle[]>([])
@@ -32,13 +20,13 @@ export default function PopularVehicles() {
       setErrorMessage(null)
 
       try {
-        const payload = await getVehicles()
+        const payload = await getPopularVehicles()
 
         if (!isMounted) {
           return
         }
 
-        setVehicles(toVehicleList(payload))
+        setVehicles(payload)
       } catch {
         if (!isMounted) {
           return
@@ -61,15 +49,7 @@ export default function PopularVehicles() {
   }, [])
 
   const popularCards = useMemo(() => {
-    const candidateVehicles = vehicles as PopularVehicleCandidate[]
-    const hasPopularFlag = candidateVehicles.some((vehicle) => vehicle.popular === true)
-
-    // Fallback: if API does not expose a "popular" flag, use the first 3 available vehicles.
-    const selectedVehicles = hasPopularFlag
-      ? candidateVehicles.filter((vehicle) => vehicle.popular === true).slice(0, 3)
-      : candidateVehicles.slice(0, 3)
-
-    return selectedVehicles.map<VehicleCardProps>((vehicle) => ({
+    return vehicles.slice(0, 3).map<VehicleCardProps>((vehicle) => ({
       id: vehicle.id,
       brand: vehicle.brand,
       modelName: vehicle.model_name,

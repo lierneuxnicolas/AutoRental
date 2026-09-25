@@ -268,7 +268,10 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
                         <p className="font-semibold text-[#0F172A]">{reservation.reference}</p>
                         <p className="mt-1 text-sm font-medium text-[#1F2937]">{reservation.vehicle.brand} {reservation.vehicle.model_name}</p>
                         <p className="text-xs text-slate-500">{reservation.vehicle.registration_plate || '—'}</p>
-                        <div className="mt-2"><StatusBadge variant={status.variant} label={status.label} /></div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <StatusBadge variant={status.variant} label={status.label} />
+                          {reservation.needs_review ? <StatusBadge variant="warning" label="À vérifier" /> : null}
+                        </div>
                       </div>
                     </div>
 
@@ -325,7 +328,12 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
                         <p className="text-xs text-slate-500">{reservation.vehicle.registration_plate || '—'}</p>
                       </td>
                       <td className="px-3 py-3"><Period reservation={reservation} /></td>
-                      <td className="px-3 py-3"><StatusBadge variant={status.variant} label={status.label} /></td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <StatusBadge variant={status.variant} label={status.label} />
+                          {reservation.needs_review ? <StatusBadge variant="warning" label="À vérifier" /> : null}
+                        </div>
+                      </td>
                       <td className="px-3 py-3">
                         <div className="flex flex-wrap gap-2">
                           <Link to={`${basePath}/reservations/${reservation.id}`}>

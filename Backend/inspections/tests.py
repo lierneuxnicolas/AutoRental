@@ -708,7 +708,7 @@ class InspectionMediaUploadTests(TestCase):
             self._damage_url(self.initial_inspection.id),
             {
                 "description": "Rayure sur la porte",
-                "severity": Damage.Severity.MINEUR,
+                "severity": Damage.Severity.ACCEPTABLE,
                 "location": "Porte avant gauche",
                 "photo_ids": [photo.id],
             },
@@ -728,7 +728,7 @@ class InspectionMediaUploadTests(TestCase):
             self._damage_url(self.initial_inspection.id),
             {
                 "description": "Rayure",
-                "severity": Damage.Severity.MINEUR,
+                "severity": Damage.Severity.ACCEPTABLE,
                 "location": "Porte",
                 "photo_ids": [other_photo.id],
             },
@@ -743,7 +743,7 @@ class InspectionMediaUploadTests(TestCase):
             self._damage_url(self.other_inspection.id),
             {
                 "description": "Rayure",
-                "severity": Damage.Severity.MINEUR,
+                "severity": Damage.Severity.ACCEPTABLE,
                 "location": "Porte",
             },
             format="json",
@@ -879,7 +879,7 @@ class DepartureVehicleStateApiTests(TestCase):
         self.assertEqual(self.vehicle.status, Vehicle.Status.RESERVE)
         self.assertEqual(Damage.objects.filter(inspection=self.inspection).count(), 0)
 
-    def test_minor_damage_allows_departure_completion(self):
+    def test_acceptable_damage_allows_departure_completion(self):
         self.api.force_authenticate(self.client_user)
 
         state_response = self.api.post(
@@ -889,7 +889,7 @@ class DepartureVehicleStateApiTests(TestCase):
                 "energy_level_percent": 68,
                 "anomaly_present": True,
                 "anomaly_description": "Rayure legere sur la porte",
-                "anomaly_severity": Damage.Severity.MINEUR,
+                "anomaly_severity": Damage.Severity.ACCEPTABLE,
             },
             format="json",
         )
@@ -897,7 +897,7 @@ class DepartureVehicleStateApiTests(TestCase):
         self.assertEqual(state_response.status_code, status.HTTP_200_OK)
         damage_id = state_response.data["damage"]["id"]
         damage = Damage.objects.get(pk=damage_id)
-        self.assertEqual(damage.severity, Damage.Severity.MINEUR)
+        self.assertEqual(damage.severity, Damage.Severity.ACCEPTABLE)
         self.assertEqual(damage.evidence_photos.count(), 0)
 
         with self.captureOnCommitCallbacks(execute=True):
@@ -927,7 +927,7 @@ class DepartureVehicleStateApiTests(TestCase):
                 "energy_level_percent": 66,
                 "anomaly_present": True,
                 "anomaly_description": "Micro impact",
-                "anomaly_severity": Damage.Severity.MODERE,
+                "anomaly_severity": Damage.Severity.ACCEPTABLE,
             },
             format="json",
         )
@@ -957,7 +957,7 @@ class DepartureVehicleStateApiTests(TestCase):
         self.assertEqual(self.inspection.mileage, 1115)
         self.assertEqual(self.inspection.energy_level_percent, 67)
 
-    def test_critical_damage_blocks_completion_sets_vehicle_status_and_notifies_manager(self):
+    def test_grave_damage_blocks_completion_sets_vehicle_status_and_notifies_manager(self):
         self.api.force_authenticate(self.client_user)
 
         with self.captureOnCommitCallbacks(execute=True):
@@ -968,7 +968,7 @@ class DepartureVehicleStateApiTests(TestCase):
                     "energy_level_percent": 72,
                     "anomaly_present": True,
                     "anomaly_description": "Voyant moteur rouge",
-                    "anomaly_severity": Damage.Severity.CRITIQUE,
+                    "anomaly_severity": Damage.Severity.GRAVE,
                 },
                 format="json",
             )
@@ -979,6 +979,7 @@ class DepartureVehicleStateApiTests(TestCase):
         self.assertTrue(self.inspection.has_critical_issue)
         self.assertEqual(self.inspection.critical_issue_description, "Voyant moteur rouge")
         self.assertEqual(self.vehicle.status, Vehicle.Status.A_CONTROLER)
+        self.assertTrue(self.vehicle.has_urgent_checkin_anomaly)
 
         self.assertEqual(
             Notification.objects.filter(
@@ -1005,7 +1006,7 @@ class DepartureVehicleStateApiTests(TestCase):
         self.vehicle.refresh_from_db()
         self.assertEqual(self.vehicle.status, Vehicle.Status.A_CONTROLER)
 
-    def test_critical_damage_notification_has_no_duplicate(self):
+    def test_grave_damage_notification_has_no_duplicate(self):
         self.api.force_authenticate(self.client_user)
 
         with self.captureOnCommitCallbacks(execute=True):
@@ -1016,7 +1017,7 @@ class DepartureVehicleStateApiTests(TestCase):
                     "energy_level_percent": 64,
                     "anomaly_present": True,
                     "anomaly_description": "Bruit moteur anormal",
-                    "anomaly_severity": Damage.Severity.CRITIQUE,
+                    "anomaly_severity": Damage.Severity.GRAVE,
                 },
                 format="json",
             )
@@ -1027,7 +1028,7 @@ class DepartureVehicleStateApiTests(TestCase):
                     "energy_level_percent": 63,
                     "anomaly_present": True,
                     "anomaly_description": "Bruit moteur anormal persistant",
-                    "anomaly_severity": Damage.Severity.CRITIQUE,
+                    "anomaly_severity": Damage.Severity.GRAVE,
                 },
                 format="json",
             )
@@ -1044,7 +1045,7 @@ class DepartureVehicleStateApiTests(TestCase):
             1,
         )
 
-    def test_critical_damage_can_attach_existing_photos(self):
+    def test_grave_damage_can_attach_existing_photos(self):
         self.api.force_authenticate(self.client_user)
         anomaly_photo = InspectionPhoto.objects.create(
             inspection=self.inspection,
@@ -1060,7 +1061,7 @@ class DepartureVehicleStateApiTests(TestCase):
                 "energy_level_percent": 62,
                 "anomaly_present": True,
                 "anomaly_description": "Fuite visible",
-                "anomaly_severity": Damage.Severity.CRITIQUE,
+                "anomaly_severity": Damage.Severity.GRAVE,
                 "photo_ids": [anomaly_photo.id],
             },
             format="json",
@@ -1070,6 +1071,121 @@ class DepartureVehicleStateApiTests(TestCase):
         self.assertEqual(response.data["damage"]["photo_ids"], [anomaly_photo.id])
         damage = Damage.objects.get(pk=response.data["damage"]["id"])
         self.assertEqual(list(damage.evidence_photos.values_list("id", flat=True)), [anomaly_photo.id])
+
+    def test_legacy_severity_is_rejected_for_new_departure_anomaly(self):
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._state_url(self.inspection.id),
+            {
+                "mileage": 1150,
+                "energy_level_percent": 62,
+                "anomaly_present": True,
+                "anomaly_description": "Ancienne gravite",
+                "anomaly_severity": Damage.Severity.MINEUR,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "ANOMALY_SEVERITY_REQUIRED")
+        self.assertFalse(Damage.objects.filter(inspection=self.inspection).exists())
+
+    def test_acceptable_anomaly_marks_vehicle_for_supervision_and_allows_completion(self):
+        self.api.force_authenticate(self.client_user)
+
+        state_response = self.api.post(
+            self._state_url(self.inspection.id),
+            {
+                "mileage": 1160,
+                "energy_level_percent": 65,
+                "anomaly_present": True,
+                "anomaly_description": "Petite rayure sans gravite",
+                "anomaly_severity": Damage.Severity.ACCEPTABLE,
+            },
+            format="json",
+        )
+
+        self.assertEqual(state_response.status_code, status.HTTP_200_OK)
+        damage = Damage.objects.get(pk=state_response.data["damage"]["id"])
+        self.assertEqual(damage.severity, Damage.Severity.ACCEPTABLE)
+
+        self.inspection.refresh_from_db()
+        self.vehicle.refresh_from_db()
+        self.assertFalse(self.inspection.has_critical_issue)
+        self.assertEqual(self.inspection.critical_issue_description, "")
+        self.assertTrue(self.vehicle.needs_supervision)
+        self.assertFalse(self.vehicle.has_urgent_checkin_anomaly)
+        self.assertNotEqual(self.vehicle.status, Vehicle.Status.A_CONTROLER)
+
+        completion_response = self.api.post(
+            self._complete_url(self.inspection.id),
+            {
+                "mileage": 1160,
+                "energy_level_percent": 65,
+                "comments": "Depart valide malgre anomalie acceptable",
+            },
+            format="json",
+        )
+
+        self.assertEqual(completion_response.status_code, status.HTTP_200_OK)
+        self.reservation.refresh_from_db()
+        self.vehicle.refresh_from_db()
+        self.assertEqual(self.reservation.status, Reservation.Status.EN_COURS)
+        self.assertEqual(self.vehicle.status, Vehicle.Status.LOUE)
+        self.assertTrue(self.vehicle.needs_supervision)
+
+    def test_grave_anomaly_blocks_completion_sets_vehicle_status_and_notifies_manager(self):
+        self.api.force_authenticate(self.client_user)
+        self.vehicle.needs_supervision = True
+        self.vehicle.save(update_fields=["needs_supervision", "updated_at"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            state_response = self.api.post(
+                self._state_url(self.inspection.id),
+                {
+                    "mileage": 1170,
+                    "energy_level_percent": 60,
+                    "anomaly_present": True,
+                    "anomaly_description": "Fumee sous le capot",
+                    "anomaly_severity": Damage.Severity.GRAVE,
+                },
+                format="json",
+            )
+
+        self.assertEqual(state_response.status_code, status.HTTP_200_OK)
+        self.inspection.refresh_from_db()
+        self.vehicle.refresh_from_db()
+        self.assertTrue(self.inspection.has_critical_issue)
+        self.assertEqual(self.inspection.critical_issue_description, "Fumee sous le capot")
+        self.assertEqual(self.vehicle.status, Vehicle.Status.A_CONTROLER)
+        self.assertFalse(self.vehicle.needs_supervision)
+        self.assertTrue(self.vehicle.has_urgent_checkin_anomaly)
+
+        self.assertEqual(
+            Notification.objects.filter(
+                user=self.manager_user,
+                notification_type="VEHICLE_REQUIRES_REVIEW",
+                related_object_type="Inspection",
+                related_object_id=self.inspection.id,
+            ).count(),
+            1,
+        )
+
+        completion_response = self.api.post(
+            self._complete_url(self.inspection.id),
+            {
+                "mileage": 1170,
+                "energy_level_percent": 60,
+                "comments": "Tentative de cloture",
+            },
+            format="json",
+        )
+
+        self.assertEqual(completion_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(completion_response.data["code"], "CRITICAL_ISSUE_UNRESOLVED")
+        self.vehicle.refresh_from_db()
+        self.assertEqual(self.vehicle.status, Vehicle.Status.A_CONTROLER)
 
 
 class DepartureInspectionCompletionTests(TestCase):
@@ -1566,7 +1682,7 @@ class ReturnInspectionFlowTests(TestCase):
                 "energy_level_percent": 65,
                 "anomaly_present": True,
                 "anomaly_description": "Rayure pare-chocs",
-                "anomaly_severity": Damage.Severity.MODERE,
+                "anomaly_severity": Damage.Severity.ACCEPTABLE,
                 "photo_ids": [photo.id],
             },
             format="json",
@@ -1579,7 +1695,7 @@ class ReturnInspectionFlowTests(TestCase):
         self.assertEqual(final_inspection.energy_level_percent, 65)
         self.assertFalse(final_inspection.has_critical_issue)
         damage = Damage.objects.get(pk=response.data["damage"]["id"])
-        self.assertEqual(damage.severity, Damage.Severity.MODERE)
+        self.assertEqual(damage.severity, Damage.Severity.ACCEPTABLE)
         self.assertEqual(damage.description, "Rayure pare-chocs")
         self.assertEqual(list(damage.evidence_photos.values_list("id", flat=True)), [photo.id])
 

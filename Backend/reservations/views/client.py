@@ -36,6 +36,7 @@ from reservations.serializers.reservation import (
 )
 from reservations.services import ReservationCreationError, create_draft_reservation
 from reservations.services.cancellation import CancellationError, build_cancellation_preview, cancel_reservation
+from reservations.services.expiration import expire_stale_draft_reservations
 from vehicles.models import Vehicle
 
 
@@ -104,9 +105,21 @@ class ReservationClientListCreateView(generics.ListCreateAPIView):
         if getattr(self, "swagger_fake_view", False):
             return Reservation.objects.none()
 
+        expire_stale_draft_reservations()
+
         return (
             Reservation.objects.filter(client__user=self.request.user)
-            .select_related("client", "client__user", "vehicle", "vehicle__brand", "vehicle__category")
+            .select_related(
+                "client",
+                "client__user",
+                "vehicle",
+                "vehicle__brand",
+                "vehicle__category",
+                "vehicle__parking_space",
+                "vehicle__parking_space__parking",
+                "vehicle_access",
+            )
+            .prefetch_related("inspections")
             .order_by(*self.ordering)
         )
 
@@ -212,12 +225,17 @@ class ReservationClientDetailView(generics.RetrieveAPIView):
         if getattr(self, "swagger_fake_view", False):
             return Reservation.objects.none()
 
+        expire_stale_draft_reservations()
+
         return Reservation.objects.filter(client__user=self.request.user).select_related(
             "client",
             "client__user",
             "vehicle",
             "vehicle__brand",
             "vehicle__category",
+            "vehicle__parking_space",
+            "vehicle__parking_space__parking",
+            "vehicle_access",
         ).prefetch_related(
             "inspections__photos",
         )
@@ -335,6 +353,83 @@ class ReservationClientCancelView(generics.GenericAPIView):
 
         response_data = {
             "message": "Réservation annulée.",
+            "reservation": ReservationListDetailSerializer(cancelled_reservation).data,
+            "cancellation_financials": {
+                "amount_paid": cancelled_reservation.cancellation_financials.amount_paid,
+                "cancellation_fee": cancelled_reservation.cancellation_financials.cancellation_fee,
+                "refundable_amount": cancelled_reservation.cancellation_financials.refundable_amount,
+                "deposit_release": "Liberee integralement",
+            },
+        }
+        return Response(response_data, status=status.HTTP_200_OK)
+
+
+class ReservationClientCriticalAnomalyCancelView(generics.GenericAPIView):
+    """
+    Annule une réservation CONFIRMEE bloquée par une anomalie GRAVE signalée au check-in.
+
+    POST /api/v1/reservations/{id}/cancel-critical-checkin-anomaly/
+
+    Réutilise integralement reservations.services.cancellation.cancel_reservation
+    (même logique de remboursement/caution que l'annulation standard). Le véhicule
+    n'est pas touché (reste A_CONTROLER) et l'inspection/les dommages/photos sont
+    conservés. Le gestionnaire est notifié.
+    """
+
+    permission_classes = [IsAuthenticated, IsClient, IsReservationOwner]
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return Reservation.objects.filter(client__user=self.request.user).select_related(
+            "client",
+            "client__user",
+            "vehicle",
+            "vehicle__brand",
+            "vehicle__category",
+        )
+
+    def get_object(self):
+        queryset = self.get_queryset()
+        reservation = get_object_or_404(queryset, pk=self.kwargs[self.lookup_url_kwarg])
+        self.check_object_permissions(self.request, reservation)
+        return reservation
+
+    @extend_schema(
+        tags=["Reservations"],
+        description=(
+            "Annule une réservation CONFIRMEE bloquée par une anomalie GRAVE signalée au check-in. "
+            "Le véhicule reste A_CONTROLER et les preuves (inspection, dommages, photos) sont conservées."
+        ),
+        responses={
+            200: ReservationCancelResponseSerializer,
+            401: ErrorDetailResponseSerializer,
+            403: ErrorDetailResponseSerializer,
+            404: ErrorDetailResponseSerializer,
+            409: ErrorDetailResponseSerializer,
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        reservation = self.get_object()
+
+        try:
+            cancelled_reservation = cancel_reservation(
+                reservation=reservation,
+                requested_by=request.user,
+                reason="Annulation suite à anomalie grave constatée au check-in",
+                critical_checkin_anomaly=True,
+            )
+        except CancellationError as exc:
+            detail = {"code": exc.code, "message": exc.message}
+            if exc.details:
+                detail["details"] = exc.details
+            return Response(detail, status=status.HTTP_409_CONFLICT)
+
+        response_data = {
+            "message": "Réservation annulée suite à une anomalie grave constatée au check-in.",
             "reservation": ReservationListDetailSerializer(cancelled_reservation).data,
             "cancellation_financials": {
                 "amount_paid": cancelled_reservation.cancellation_financials.amount_paid,

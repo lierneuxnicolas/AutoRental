@@ -1,7 +1,8 @@
-from django.db.models import Prefetch
+from django.db.models import Count, Prefetch, Q
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 
 from vehicles.filters import VehiclePublicFilter
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment
@@ -16,6 +17,7 @@ from vehicles.serializers import (
 	VehiclePublicSerializer,
 )
 from vehicles.services import get_available_vehicles
+from reservations.models import Reservation
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(
@@ -136,6 +138,33 @@ class VehicleAvailablePublicListView(VehiclePublicListView):
 	)
 	def get(self, request, *args, **kwargs):
 		return super().get(request, *args, **kwargs)
+
+
+class VehiclePopularPublicListView(VehiclePublicListView):
+	permission_classes = [AllowAny]
+	pagination_class = None
+
+	def get_queryset(self):
+		return (
+			super().get_queryset()
+			.annotate(
+				reservation_count=Count(
+					"reservations",
+					filter=~Q(reservations__status=Reservation.Status.ANNULEE),
+				)
+			)
+			.order_by("-reservation_count", "id")
+		)
+
+	@extend_schema(
+		tags=["Vehicles"],
+		auth=[],
+		description="Retourne les trois véhicules actifs les plus réservés, en excluant les réservations annulées.",
+		responses={200: VehiclePublicSerializer(many=True)},
+	)
+	def get(self, request, *args, **kwargs):
+		queryset = self.get_queryset()[:3]
+		return Response(self.get_serializer(queryset, many=True).data)
 
 
 class VehiclePublicDetailView(generics.RetrieveAPIView):

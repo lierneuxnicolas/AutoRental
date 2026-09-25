@@ -10,8 +10,8 @@ import UnlockDetectionIllustration from '../../components/vehicle/UnlockDetectio
 import { unlockVehicle } from '../../services/inspectionService'
 import { getReservationById } from '../../services/reservationService'
 import { getVehicleById } from '../../services/vehicleService'
-
-const UNLOCK_EARLY_WINDOW_MINUTES = 15
+import type { ReservationStatus } from '../../types/reservation'
+import { getUnlockWindowAvailability } from '../../utils/reservationActionRules'
 
 type UnlockAvailability = {
   isEnabled: boolean
@@ -50,21 +50,9 @@ function toErrorMessage(error: unknown): string {
   return 'Une erreur est survenue. Veuillez reessayer.'
 }
 
-function getUnlockAvailability(status: string | undefined, startAt: string, endAt: string): UnlockAvailability {
-  if (status !== 'CONFIRMEE') {
-    return { isEnabled: false }
-  }
-
-  const startDate = new Date(startAt)
-  const endDate = new Date(endAt)
-
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-    return { isEnabled: false }
-  }
-
-  const now = Date.now()
-  const availableAt = startDate.getTime() - (UNLOCK_EARLY_WINDOW_MINUTES * 60 * 1000)
-  return { isEnabled: now >= availableAt && now <= endDate.getTime() }
+function getUnlockAvailability(status: ReservationStatus | undefined, startAt: string, endAt: string): UnlockAvailability {
+  const { isEnabled } = getUnlockWindowAvailability(status, startAt, endAt)
+  return { isEnabled }
 }
 
 export default function ClientVehicleUnlockPage() {

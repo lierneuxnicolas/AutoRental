@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from numbers import Real
 
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
 from vehicles.models import Vehicle
@@ -132,7 +132,8 @@ def get_blocking_reservation_statuses():
     """Return blocking reservation statuses for availability filtering.
 
     Decision for point 39B:
-    - BROUILLON does not block.
+    - BROUILLON does not block by default (see get_blocking_reservation_filter
+      for the time-limited exception while a draft's hold is still active).
     - EN_ATTENTE_CAUTION does not block yet because there is no hold expiry.
     - EN_ATTENTE_PAIEMENT blocks temporarily.
     - CONFIRMEE, REAFFECTATION_REQUIRED and EN_COURS block.
@@ -140,6 +141,25 @@ def get_blocking_reservation_statuses():
     """
 
     return _get_reservation_statuses()
+
+
+def get_blocking_reservation_filter(*, reference_time=None) -> Q:
+    """Return the Q filter matching reservations that currently block a vehicle.
+
+    Includes the always-blocking statuses (see get_blocking_reservation_statuses)
+    plus BROUILLON reservations still within their temporary hold window
+    (Reservation.DRAFT_HOLD_MINUTES after creation). A BROUILLON reservation
+    older than that window is treated as expired and must not block.
+    """
+
+    reservation_model = _get_reservation_model()
+    now = reference_time or timezone.now()
+    hold_cutoff = now - timedelta(minutes=reservation_model.DRAFT_HOLD_MINUTES)
+
+    return Q(status__in=get_blocking_reservation_statuses()) | Q(
+        status=reservation_model.Status.BROUILLON,
+        created_at__gte=hold_cutoff,
+    )
 
 
 def _get_reservation_queryset(*, reservation_queryset=None):
@@ -156,11 +176,7 @@ def _build_conflict_filter(*, start, end, reservation_queryset=None):
     and a reservation starting exactly at the requested end does not overlap.
     """
 
-    return {
-        "status__in": get_blocking_reservation_statuses(),
-        "start_at__lt": end,
-        "end_at__gt": start,
-    }
+    return Q(start_at__lt=end, end_at__gt=start) & get_blocking_reservation_filter()
 
 
 def is_vehicle_available(*, vehicle, start, end, reservation_queryset=None) -> bool:
@@ -196,12 +212,12 @@ def is_vehicle_available(*, vehicle, start, end, reservation_queryset=None) -> b
     reservation_queryset = _get_reservation_queryset(reservation_queryset=reservation_queryset)
 
     conflict_exists = reservation_queryset.filter(
-        vehicle_id=vehicle.pk,
-        **_build_conflict_filter(
+        _build_conflict_filter(
             start=period["start"],
             end=period["end"],
             reservation_queryset=reservation_queryset,
         ),
+        vehicle_id=vehicle.pk,
     ).exists()
     intervention_conflict_exists = _get_planned_intervention_conflicts(
         vehicle_id=vehicle.pk,
@@ -238,12 +254,12 @@ def get_available_vehicles(*, start, end, base_queryset=None, reservation_querys
     )
 
     conflicting_reservations = reservation_queryset.filter(
-        vehicle_id=OuterRef("pk"),
-        **_build_conflict_filter(
+        _build_conflict_filter(
             start=period["start"],
             end=period["end"],
             reservation_queryset=reservation_queryset,
         ),
+        vehicle_id=OuterRef("pk"),
     )
     intervention_model = _get_intervention_model()
     conflicting_interventions = intervention_model.objects.filter(

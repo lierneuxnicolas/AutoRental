@@ -6,9 +6,12 @@ import type {
   ManagementReservationValidationRequest,
   ManagementReservationValidationResponse,
   PaginatedManagementReservationListResponse,
+  ReservationDepositReleaseResponse,
   ReservationManagementDetail,
   ReservationReassignmentResponse,
   ReservationReplacementVehicle,
+  ReservationReviewDecisionType,
+  ReservationReviewDecisionResponse,
   ReservationUnavailableCancellationResponse,
 } from '../types/managementReservation'
 
@@ -99,6 +102,26 @@ export async function reportManagementReservationIssue(
         'Content-Type': 'multipart/form-data',
       },
     },
+  )
+  return data
+}
+
+export async function submitReservationReviewDecision(
+  id: number | string,
+  decision: ReservationReviewDecisionType,
+): Promise<ReservationReviewDecisionResponse> {
+  const { data } = await api.post<ReservationReviewDecisionResponse>(
+    `/management/reservations/${id}/review-decision/`,
+    { decision },
+  )
+  return data
+}
+
+export async function releaseManagementReservationDeposit(
+  id: number | string,
+): Promise<ReservationDepositReleaseResponse> {
+  const { data } = await api.post<ReservationDepositReleaseResponse>(
+    `/management/reservations/${id}/release-deposit/`,
   )
   return data
 }

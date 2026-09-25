@@ -5,6 +5,7 @@ from reservations.views import (
     PriceSimulationView,
     ReservationClientCancelView,
     ReservationClientCancelPreviewView,
+    ReservationClientCriticalAnomalyCancelView,
     ReservationClientDepositAuthorizeView,
     ReservationClientDetailView,
     ReservationClientListCreateView,
@@ -12,8 +13,10 @@ from reservations.views import (
     ReservationLockView,
     ReservationManagementDetailView,
     ReservationManagementCompleteView,
+    ReservationManagementDepositReleaseView,
     ReservationManagementIssueView,
     ReservationManagementListView,
+    ReservationManagementReviewDecisionView,
     ReservationReassignView,
     ReservationReplacementVehicleListView,
     ReservationUnavailableCancellationView,
@@ -41,6 +44,11 @@ urlpatterns = [
     path("reservations/<int:pk>/payment-intent/", ReservationClientPaymentIntentView.as_view(), name="reservation-payment-intent"),
     path("reservations/<int:pk>/cancel-preview/", ReservationClientCancelPreviewView.as_view(), name="reservation-cancel-preview"),
     path("reservations/<int:pk>/cancel/", ReservationClientCancelView.as_view(), name="reservation-cancel"),
+    path(
+        "reservations/<int:pk>/cancel-critical-checkin-anomaly/",
+        ReservationClientCriticalAnomalyCancelView.as_view(),
+        name="reservation-cancel-critical-checkin-anomaly",
+    ),
     path("reservations/<int:pk>/unlock/", ReservationUnlockView.as_view(), name="reservation-unlock"),
     path("reservations/<int:pk>/lock/", ReservationLockView.as_view(), name="reservation-lock"),
     # Management endpoints (point 39F)
@@ -75,5 +83,15 @@ urlpatterns = [
         "management/reservations/<int:pk>/report-issue/",
         ReservationManagementIssueView.as_view(),
         name="management-reservation-report-issue",
+    ),
+    path(
+        "management/reservations/<int:pk>/review-decision/",
+        ReservationManagementReviewDecisionView.as_view(),
+        name="management-reservation-review-decision",
+    ),
+    path(
+        "management/reservations/<int:pk>/release-deposit/",
+        ReservationManagementDepositReleaseView.as_view(),
+        name="management-reservation-release-deposit",
     ),
 ]

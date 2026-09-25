@@ -37,6 +37,28 @@ export interface VehicleManagementCreateRequest {
   equipment?: number[]
 }
 
+export type VehicleReferencePhotoKey =
+  | 'reference_front_left'
+  | 'reference_front_right'
+  | 'reference_rear_left'
+  | 'reference_rear_right'
+  | 'reference_dashboard'
+  | 'reference_front_seats'
+  | 'reference_rear_seats'
+  | 'reference_trunk'
+
+export interface VehicleInitialDamageDraft {
+  description: string
+  severity: 'ACCEPTABLE' | 'GRAVE' | ''
+  photo: File | null
+}
+
+export interface VehicleInitialStateDraft {
+  energyLevelPercent: string
+  photos: Record<VehicleReferencePhotoKey, File | null>
+  damage: VehicleInitialDamageDraft | null
+}
+
 export interface VehicleManagementUpdateRequest {
   brand?: number
   category?: number
@@ -154,6 +176,8 @@ export interface ManagementVehicleListItem {
   registration_number: string
   is_active: boolean
   public_status: string
+  needs_supervision: boolean
+  has_urgent_checkin_anomaly: boolean
   parking_name: string | null
   parking_space_number: string | null
   main_photo: VehiclePhotoPublic | null

@@ -212,6 +212,7 @@ const FAQ_ITEMS: FaqItem[] = [
 
 export default function FaqSection() {
   const [openIndex, setOpenIndex] = useState<number | null>(0)
+  const [showAll, setShowAll] = useState(false)
   const baseId = useId()
 
   const handleToggle = (index: number) => {
@@ -234,16 +235,17 @@ export default function FaqSection() {
             const buttonId = `${baseId}-button-${index}`
 
             return (
-              <div
-                key={item.question}
-                className={`rounded-2xl border bg-white transition-all duration-200 hover:border-blue-300 hover:bg-blue-50/40 hover:shadow-sm ${
+              <div key={item.question} className={index < 5 || showAll ? 'grid grid-rows-[1fr] opacity-100 transition-all duration-300 ease-out' : 'hidden'}>
+                <div className="overflow-hidden">
+                  <div
+                    className={`rounded-2xl border bg-white transition-all duration-200 hover:border-blue-300 hover:bg-blue-50/40 hover:shadow-sm ${
                   isOpen
                     ? 'border-blue-300 bg-blue-50/40 shadow-[0_6px_20px_rgba(15,23,42,0.06)]'
                     : 'border-slate-200 shadow-[0_2px_10px_rgba(15,23,42,0.04)]'
-                }`}
-              >
-                <h3>
-                  <button
+                    }`}
+                  >
+                    <h3>
+                      <button
                     id={buttonId}
                     type="button"
                     className="flex w-full cursor-pointer items-center justify-between gap-4 rounded-2xl px-5 py-3 text-left text-base font-semibold text-[#1F2937] transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 sm:text-lg"
@@ -256,20 +258,33 @@ export default function FaqSection() {
                       className={`h-5 w-5 shrink-0 self-center text-[#2563EB] transition-transform duration-200 ${isOpen ? 'rotate-180' : 'rotate-0'}`}
                       aria-hidden="true"
                     />
-                  </button>
-                </h3>
+                      </button>
+                    </h3>
 
-                <div
+                    <div
                   id={panelId}
                   role="region"
                   aria-labelledby={buttonId}
                   className={`grid transition-all duration-200 ease-out ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
                 >
-                  <div className="overflow-hidden px-5 pb-4">{item.content}</div>
+                      <div className="overflow-hidden px-5 pb-4">{item.content}</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )
           })}
+          {FAQ_ITEMS.length > 5 ? (
+            <div className="pt-1 text-center">
+              <button
+                type="button"
+                onClick={() => setShowAll((current) => !current)}
+                className="rounded-2xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-[#2563EB] shadow-sm transition-all duration-200 hover:border-blue-300 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+              >
+                {showAll ? 'Voir moins' : 'Voir toutes les questions'}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </section>

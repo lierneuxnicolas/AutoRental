@@ -1871,7 +1871,7 @@ export default function VehicleDetailPage() {
                     </p>
 
                     <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
-                      <Button onClick={() => navigate(`/client/reservations/${confirmationReservation.id}`)}>
+                      <Button onClick={() => navigate(`/client/reservations?highlight=${confirmationReservation.id}`)}>
                         Voir ma réservation
                       </Button>
                       <Button variant="secondary" onClick={() => navigate('/')}>

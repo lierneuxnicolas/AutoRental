@@ -7,6 +7,7 @@ import type {
   ParkingSpaceOption,
   VehicleCategoryOption,
   VehicleEquipmentOption,
+  VehicleInitialStateDraft,
   VehicleManagementCreateRequest,
   VehicleManagementStatusUpdateRequest,
   VehicleManagementUpdateRequest,
@@ -37,8 +38,44 @@ export async function getVehicleEquipmentCatalog(): Promise<VehicleEquipmentOpti
 
 export async function createVehicle(
   payload: VehicleManagementCreateRequest,
+  initialState: VehicleInitialStateDraft,
 ): Promise<ManagementVehicleResponse> {
-  const { data } = await api.post<ManagementVehicleResponse>('/management/vehicles/', payload)
+  const formData = new FormData()
+  Object.entries(payload).forEach(([key, value]) => {
+    if (value === undefined || value === null) {
+      return
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => formData.append(key, String(item)))
+      return
+    }
+    formData.append(key, String(value))
+  })
+
+  formData.append('initial_energy_level_percent', initialState.energyLevelPercent)
+  Object.entries(initialState.photos).forEach(([key, file]) => {
+    if (file) {
+      formData.append(key, file)
+    }
+  })
+
+  const damagePayload: Array<{ description: string; severity: string; photo_index?: number }> = []
+  if (initialState.damage) {
+    const item: { description: string; severity: string; photo_index?: number } = {
+      description: initialState.damage.description.trim(),
+      severity: initialState.damage.severity,
+    }
+    if (initialState.damage.photo) {
+      item.photo_index = 0
+      formData.append('initial_damage_photos', initialState.damage.photo)
+    }
+    damagePayload.push(item)
+  }
+  formData.append('initial_damages', JSON.stringify(damagePayload))
+
+  const { data } = await api.post<ManagementVehicleResponse>('/management/vehicles/', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
   return data
 }
 

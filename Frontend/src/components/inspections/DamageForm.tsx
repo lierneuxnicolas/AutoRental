@@ -32,10 +32,8 @@ function toErrorMessage(error: unknown): string {
 }
 
 const SEVERITY_OPTIONS: { value: Severity; label: string }[] = [
-  { value: 'MINEUR', label: 'Mineur' },
-  { value: 'MODERE', label: 'Modere' },
-  { value: 'MAJEUR', label: 'Majeur' },
-  { value: 'CRITIQUE', label: 'Critique' },
+  { value: 'ACCEPTABLE', label: 'Acceptable' },
+  { value: 'GRAVE', label: 'Grave' },
 ]
 
 export interface DamageFormProps {
@@ -47,7 +45,7 @@ export interface DamageFormProps {
 
 export default function DamageForm({ inspectionId, uploadedPhotos, damages, onDamageAdded }: DamageFormProps) {
   const [description, setDescription] = useState('')
-  const [severity, setSeverity] = useState<Severity>('MINEUR')
+  const [severity, setSeverity] = useState<Severity>('ACCEPTABLE')
   const [location, setLocation] = useState('')
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<number[]>([])
   const [formError, setFormError] = useState<string | null>(null)
@@ -57,7 +55,7 @@ export default function DamageForm({ inspectionId, uploadedPhotos, damages, onDa
     onSuccess: (damage) => {
       onDamageAdded(damage)
       setDescription('')
-      setSeverity('MINEUR')
+      setSeverity('ACCEPTABLE')
       setLocation('')
       setSelectedPhotoIds([])
       setFormError(null)

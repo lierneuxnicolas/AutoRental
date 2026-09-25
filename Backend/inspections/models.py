@@ -5,8 +5,14 @@ from django.db.models import Q
 
 class Inspection(models.Model):
 	class Type(models.TextChoices):
+		REFERENCE = "REFERENCE", "Reference vehicule"
 		INITIAL = "INITIAL", "Initial"
 		FINAL = "FINAL", "Final"
+
+	class GeneralCondition(models.TextChoices):
+		GOOD = "BON", "Bon"
+		WATCH = "A_SURVEILLER", "A surveiller"
+		BAD = "MAUVAIS", "Mauvais"
 
 	class Status(models.TextChoices):
 		BROUILLON = "BROUILLON", "Brouillon"
@@ -18,6 +24,15 @@ class Inspection(models.Model):
 		"reservations.Reservation",
 		on_delete=models.CASCADE,
 		related_name="inspections",
+		null=True,
+		blank=True,
+	)
+	vehicle = models.ForeignKey(
+		"vehicles.Vehicle",
+		on_delete=models.CASCADE,
+		related_name="reference_inspections",
+		null=True,
+		blank=True,
 	)
 	completed_by = models.ForeignKey(
 		settings.AUTH_USER_MODEL,
@@ -31,6 +46,7 @@ class Inspection(models.Model):
 	status = models.CharField(max_length=20, choices=Status.choices, default=Status.BROUILLON, db_index=True)
 	mileage = models.PositiveIntegerField(null=True, blank=True)
 	energy_level_percent = models.PositiveSmallIntegerField(null=True, blank=True)
+	general_condition = models.CharField(max_length=20, choices=GeneralCondition.choices, null=True, blank=True)
 	comments = models.TextField(blank=True)
 	has_critical_issue = models.BooleanField(default=False)
 	critical_issue_description = models.TextField(blank=True)
@@ -50,6 +66,17 @@ class Inspection(models.Model):
 			models.UniqueConstraint(
 				fields=["reservation", "inspection_type"],
 				name="insp_unique_reservation_type",
+			),
+			models.UniqueConstraint(
+				fields=["vehicle", "inspection_type"],
+				name="insp_unique_vehicle_reference",
+			),
+			models.CheckConstraint(
+				condition=(
+					Q(inspection_type="REFERENCE", reservation__isnull=True, vehicle__isnull=False)
+					| (~Q(inspection_type="REFERENCE") & Q(reservation__isnull=False, vehicle__isnull=True))
+				),
+				name="insp_reference_parent_consistency",
 			),
 			models.CheckConstraint(
 				condition=Q(mileage__gte=0) | Q(mileage__isnull=True),
@@ -129,6 +156,8 @@ class Damage(models.Model):
 		MODERE = "MODERE", "Modere"
 		MAJEUR = "MAJEUR", "Majeur"
 		CRITIQUE = "CRITIQUE", "Critique"
+		ACCEPTABLE = "ACCEPTABLE", "Acceptable"
+		GRAVE = "GRAVE", "Grave"
 
 	class Status(models.TextChoices):
 		SIGNALE = "SIGNALE", "Signale"

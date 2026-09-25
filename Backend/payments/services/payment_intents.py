@@ -15,7 +15,7 @@ from payments.models import Deposit, Payment
 from reservations.models import Reservation
 from reservations.services.pricing import PricingError, calculate_price_simulation
 from vehicles.models import Vehicle
-from vehicles.services import BOOKABLE_VEHICLE_STATUSES, get_blocking_reservation_statuses
+from vehicles.services import BOOKABLE_VEHICLE_STATUSES, get_blocking_reservation_filter
 
 
 ALLOWED_PAYMENT_METHOD_TYPES = ["card", "bancontact"]
@@ -110,8 +110,8 @@ def _assert_vehicle_still_available(reservation: Reservation) -> None:
 
     has_conflict = (
         Reservation.objects.filter(
+            get_blocking_reservation_filter(),
             vehicle_id=reservation.vehicle_id,
-            status__in=get_blocking_reservation_statuses(),
             start_at__lt=reservation.end_at,
             end_at__gt=reservation.start_at,
         )
@@ -253,6 +253,28 @@ def create_or_reuse_payment_intent(
     requested_by,
 ):
     _configure_stripe()
+
+    with transaction.atomic():
+        reservation_locked = (
+            Reservation.objects.select_for_update()
+            .select_related("client", "client__user", "vehicle", "vehicle__brand", "vehicle__category")
+            .get(pk=reservation.pk)
+        )
+        Vehicle.objects.select_for_update().get(pk=reservation_locked.vehicle_id)
+
+        draft_expired = False
+        if reservation_locked.status == Reservation.Status.BROUILLON:
+            from reservations.services.expiration import expire_draft_reservation_if_stale
+
+            draft_expired = expire_draft_reservation_if_stale(reservation=reservation_locked, reference_time=timezone.now())
+
+    # The expiration transition above must be committed on its own: raising inside the
+    # same atomic block would roll back the cancellation together with the error.
+    if draft_expired:
+        _raise_payment_intent_error(
+            "DRAFT_EXPIRED",
+            "Le brouillon de reservation a expire (delai de 15 minutes depasse). Veuillez creer une nouvelle reservation.",
+        )
 
     with transaction.atomic():
         reservation_locked = (

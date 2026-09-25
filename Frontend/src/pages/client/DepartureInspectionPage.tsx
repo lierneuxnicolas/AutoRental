@@ -841,7 +841,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-              <Link to={`/client/reservations/${reservationId}`}>
+              <Link to={`/client/reservations?highlight=${reservationId}`}>
                 <Button className="w-full sm:w-auto">{isReturnMode ? 'Voir ma reservation' : 'Voir ma location en cours'}</Button>
               </Link>
               <Link to="/client">
@@ -1012,7 +1012,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
               ) : (
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat des lieux - Exterieur</h2>
-                  <Link to={`/client/reservations/${reservationId}`}>
+                  <Link to={`/client/reservations?highlight=${reservationId}`}>
                     <Button variant="secondary">Retour a la reservation</Button>
                   </Link>
                 </div>
@@ -1075,7 +1075,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
               ) : (
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat des lieux - Interieur</h2>
-                  <Link to={`/client/reservations/${reservationId}`}>
+                  <Link to={`/client/reservations?highlight=${reservationId}`}>
                     <Button variant="secondary">Retour a la reservation</Button>
                   </Link>
                 </div>

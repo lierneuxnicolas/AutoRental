@@ -41,6 +41,14 @@ function formatDateTime(value: string): string {
   }).format(new Date(value))
 }
 
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(value))
+}
+
 function getVehicleLabel(intervention: MechanicInterventionResponse): string {
   const vehicle = intervention.vehicle
   return `${vehicle.brand} ${vehicle.model_name}`
@@ -116,9 +124,6 @@ export default function MechanicInterventionsPage() {
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6 flex flex-col gap-2">
         <h1 className="text-2xl font-semibold text-[#1F2937]">Mes interventions</h1>
-        <p className="text-sm text-slate-600">
-          Consultez les interventions qui vous ont été assignées par le gestionnaire.
-        </p>
       </div>
 
       <div className="grid gap-4">
@@ -134,7 +139,7 @@ export default function MechanicInterventionsPage() {
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-baseline gap-3">
                     <p className="text-sm font-semibold text-[#2563EB]">{intervention.reference || `#${intervention.id}`}</p>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{intervention.intervention_type}</p>
+                    <p className="text-sm text-slate-600">Date de création : {formatDate(intervention.created_at)}</p>
                   </div>
                   <StatusBadge label={statusBadge.label} variant={statusBadge.variant} />
                 </div>

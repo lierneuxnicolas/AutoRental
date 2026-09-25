@@ -469,7 +469,10 @@ def save_departure_vehicle_state(
                     "ANOMALY_DESCRIPTION_REQUIRED",
                     "La description de l'anomalie est obligatoire.",
                 )
-            valid_severities = {choice[0] for choice in inspection_locked.damages.model.Severity.choices}
+            valid_severities = {
+                inspection_locked.damages.model.Severity.ACCEPTABLE,
+                inspection_locked.damages.model.Severity.GRAVE,
+            }
             if anomaly_severity not in valid_severities:
                 _raise_departure_error(
                     "ANOMALY_SEVERITY_REQUIRED",
@@ -489,7 +492,7 @@ def save_departure_vehicle_state(
                     InspectionPhoto.objects.filter(inspection=inspection_locked, id__in=normalized_photo_ids)
                 )
 
-            is_critical = anomaly_severity == inspection_locked.damages.model.Severity.CRITIQUE
+            is_critical = anomaly_severity == inspection_locked.damages.model.Severity.GRAVE
 
         inspection_locked.mileage = mileage
         inspection_locked.energy_level_percent = energy_level_percent
@@ -515,6 +518,27 @@ def save_departure_vehicle_state(
                     reservation_reference=reservation_locked.reference,
                 )
             )
+
+        is_grave_checkin_anomaly = (
+            anomaly_present and anomaly_severity == inspection_locked.damages.model.Severity.GRAVE
+        )
+        if is_grave_checkin_anomaly:
+            urgent_fields = []
+            if not vehicle_locked.has_urgent_checkin_anomaly:
+                vehicle_locked.has_urgent_checkin_anomaly = True
+                urgent_fields.append("has_urgent_checkin_anomaly")
+            if vehicle_locked.needs_supervision:
+                vehicle_locked.needs_supervision = False
+                urgent_fields.append("needs_supervision")
+            if urgent_fields:
+                vehicle_locked.save(update_fields=[*urgent_fields, "updated_at"])
+
+        requires_supervision = (
+            anomaly_present and anomaly_severity == inspection_locked.damages.model.Severity.ACCEPTABLE
+        )
+        if requires_supervision and not vehicle_locked.has_urgent_checkin_anomaly and not vehicle_locked.needs_supervision:
+            vehicle_locked.needs_supervision = True
+            vehicle_locked.save(update_fields=["needs_supervision", "updated_at"])
 
         inspection.mileage = inspection_locked.mileage
         inspection.energy_level_percent = inspection_locked.energy_level_percent

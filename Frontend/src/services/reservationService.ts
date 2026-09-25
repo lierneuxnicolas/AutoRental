@@ -37,3 +37,12 @@ export async function getReservationCancellationPreview(id: number | string): Pr
   const { data } = await api.get<ReservationCancellationPreview>(`/reservations/${id}/cancel-preview/`)
   return data
 }
+
+export async function cancelReservationForCriticalCheckinAnomaly(
+  id: number | string,
+): Promise<ReservationCancelResponse> {
+  const { data } = await api.post<ReservationCancelResponse>(
+    `/reservations/${id}/cancel-critical-checkin-anomaly/`,
+  )
+  return data
+}

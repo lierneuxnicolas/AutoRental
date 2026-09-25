@@ -1,7 +1,12 @@
+import json
 from datetime import date
 
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
+from inspections.models import Damage, Inspection, InspectionPhoto
+from inspections.serializers import InspectionPhotoCreateSerializer
 from interventions.models import Intervention
 from vehicles.models import Brand, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment
 from vehicles.serializers.public import VehiclePhotoPublicSerializer
@@ -19,6 +24,8 @@ class VehicleManagementListSerializer(serializers.Serializer):
 	registration_number = serializers.CharField(read_only=True)
 	is_active = serializers.BooleanField(read_only=True)
 	public_status = serializers.CharField(source="status", read_only=True)
+	needs_supervision = serializers.BooleanField(read_only=True)
+	has_urgent_checkin_anomaly = serializers.BooleanField(read_only=True)
 	parking_name = serializers.CharField(source="parking_space.parking.name", read_only=True)
 	parking_space_number = serializers.CharField(source="parking_space.number", read_only=True)
 	main_photo = serializers.SerializerMethodField()
@@ -33,6 +40,17 @@ class VehicleManagementListSerializer(serializers.Serializer):
 
 
 class VehicleManagementWriteSerializer(serializers.ModelSerializer):
+	REFERENCE_PHOTO_FIELDS = {
+		"reference_front_left": (InspectionPhoto.PhotoType.AVANT, 0),
+		"reference_front_right": (InspectionPhoto.PhotoType.COTE_DROIT, 0),
+		"reference_rear_left": (InspectionPhoto.PhotoType.COTE_GAUCHE, 0),
+		"reference_rear_right": (InspectionPhoto.PhotoType.ARRIERE, 0),
+		"reference_dashboard": (InspectionPhoto.PhotoType.TABLEAU_DE_BORD, 0),
+		"reference_front_seats": (InspectionPhoto.PhotoType.INTERIEUR, 1),
+		"reference_rear_seats": (InspectionPhoto.PhotoType.INTERIEUR, 2),
+		"reference_trunk": (InspectionPhoto.PhotoType.AUTRE, 1),
+	}
+
 	brand = serializers.PrimaryKeyRelatedField(queryset=Brand.objects.all())
 	category = serializers.PrimaryKeyRelatedField(queryset=VehicleCategory.objects.all())
 	parking_space = serializers.PrimaryKeyRelatedField(queryset=ParkingSpace.objects.select_related("parking"))
@@ -44,6 +62,21 @@ class VehicleManagementWriteSerializer(serializers.ModelSerializer):
 	)
 	fuel_type = serializers.CharField(source="energy_type")
 	status = serializers.ChoiceField(choices=Vehicle.Status.choices, required=False, default=Vehicle.Status.DISPONIBLE)
+	initial_energy_level_percent = serializers.IntegerField(min_value=0, max_value=100, required=False, write_only=True)
+	initial_damages = serializers.CharField(required=False, allow_blank=True, default="[]", write_only=True)
+	initial_damage_photos = serializers.ListField(
+		child=serializers.ImageField(),
+		required=False,
+		write_only=True,
+	)
+	reference_front_left = serializers.ImageField(required=False, write_only=True)
+	reference_front_right = serializers.ImageField(required=False, write_only=True)
+	reference_rear_left = serializers.ImageField(required=False, write_only=True)
+	reference_rear_right = serializers.ImageField(required=False, write_only=True)
+	reference_dashboard = serializers.ImageField(required=False, write_only=True)
+	reference_front_seats = serializers.ImageField(required=False, write_only=True)
+	reference_rear_seats = serializers.ImageField(required=False, write_only=True)
+	reference_trunk = serializers.ImageField(required=False, write_only=True)
 
 	class Meta:
 		model = Vehicle
@@ -75,6 +108,17 @@ class VehicleManagementWriteSerializer(serializers.ModelSerializer):
 			"status",
 			"is_active",
 			"equipment",
+			"initial_energy_level_percent",
+			"initial_damages",
+			"initial_damage_photos",
+			"reference_front_left",
+			"reference_front_right",
+			"reference_rear_left",
+			"reference_rear_right",
+			"reference_dashboard",
+			"reference_front_seats",
+			"reference_rear_seats",
+			"reference_trunk",
 		]
 		read_only_fields = ["id"]
 
@@ -141,6 +185,51 @@ class VehicleManagementWriteSerializer(serializers.ModelSerializer):
 	def validate(self, attrs):
 		if self.instance is None and "parking_space" not in attrs:
 			raise serializers.ValidationError({"parking_space": "Ce champ est obligatoire."})
+		if self.instance is None:
+			required_fields = {
+				"mileage": "Le kilometrage initial est obligatoire.",
+				"initial_energy_level_percent": "Le niveau de carburant ou d'energie initial est obligatoire.",
+				**{
+					field_name: "Cette photo de reference est obligatoire."
+					for field_name in self.REFERENCE_PHOTO_FIELDS
+				},
+			}
+			missing = {
+				field_name: message
+				for field_name, message in required_fields.items()
+				if field_name not in attrs
+			}
+			if missing:
+				raise serializers.ValidationError(missing)
+
+			photo_validator = InspectionPhotoCreateSerializer()
+			for field_name in self.REFERENCE_PHOTO_FIELDS:
+				photo_validator.validate_file(attrs[field_name])
+			for photo in attrs.get("initial_damage_photos", []):
+				photo_validator.validate_file(photo)
+
+			try:
+				damages = json.loads(attrs.get("initial_damages") or "[]")
+			except (TypeError, json.JSONDecodeError):
+				raise serializers.ValidationError({"initial_damages": "Le format des dommages est invalide."})
+			if not isinstance(damages, list):
+				raise serializers.ValidationError({"initial_damages": "Une liste de dommages est attendue."})
+			if len(damages) > 1:
+				raise serializers.ValidationError({"initial_damages": "Un seul dommage initial est autorise."})
+
+			valid_severities = {Damage.Severity.ACCEPTABLE, Damage.Severity.GRAVE}
+			damage_photos = attrs.get("initial_damage_photos", [])
+			if len(damage_photos) > 1:
+				raise serializers.ValidationError({"initial_damage_photos": "Une seule photo de dommage est autorisee."})
+			for index, damage in enumerate(damages):
+				if not isinstance(damage, dict) or not str(damage.get("description", "")).strip():
+					raise serializers.ValidationError({"initial_damages": f"La description du dommage {index + 1} est obligatoire."})
+				if damage.get("severity") not in valid_severities:
+					raise serializers.ValidationError({"initial_damages": f"La gravite du dommage {index + 1} est invalide."})
+				photo_index = damage.get("photo_index")
+				if photo_index is not None and (not isinstance(photo_index, int) or photo_index < 0 or photo_index >= len(damage_photos)):
+					raise serializers.ValidationError({"initial_damages": f"La photo du dommage {index + 1} est invalide."})
+			attrs["initial_damages"] = damages
 		return attrs
 
 	def _save_category_daily_rate(self, vehicle, daily_rate):
@@ -152,11 +241,75 @@ class VehicleManagementWriteSerializer(serializers.ModelSerializer):
 			category.daily_rate = daily_rate
 			category.save(update_fields=["daily_rate", "updated_at"])
 
+	@transaction.atomic
 	def create(self, validated_data):
 		daily_rate = validated_data.pop("category_daily_rate", None)
+		energy_level = validated_data.pop("initial_energy_level_percent")
+		damages = validated_data.pop("initial_damages", [])
+		damage_photos = validated_data.pop("initial_damage_photos", [])
+		reference_photos = {
+			field_name: validated_data.pop(field_name)
+			for field_name in self.REFERENCE_PHOTO_FIELDS
+		}
 		validated_data["status"] = Vehicle.Status.DISPONIBLE
 		vehicle = super().create(validated_data)
 		self._save_category_daily_rate(vehicle, daily_rate)
+
+		now = timezone.now()
+		inspection = Inspection.objects.create(
+			vehicle=vehicle,
+			inspection_type=Inspection.Type.REFERENCE,
+			status=Inspection.Status.TERMINE,
+			mileage=vehicle.mileage,
+			energy_level_percent=energy_level,
+			started_at=now,
+			completed_at=now,
+			completed_by=self.context["request"].user,
+		)
+
+		for field_name, (photo_type, position) in self.REFERENCE_PHOTO_FIELDS.items():
+			InspectionPhoto.objects.create(
+				inspection=inspection,
+				photo_type=photo_type,
+				position=position,
+				file=reference_photos[field_name],
+			)
+
+		created_damage_photos = [
+			InspectionPhoto.objects.create(
+				inspection=inspection,
+				photo_type=InspectionPhoto.PhotoType.DOMMAGE,
+				position=index + 1,
+				file=photo,
+			)
+			for index, photo in enumerate(damage_photos)
+		]
+		for damage_data in damages:
+			damage = Damage.objects.create(
+				inspection=inspection,
+				vehicle=vehicle,
+				reported_by=self.context["request"].user,
+				description=damage_data["description"].strip(),
+				severity=damage_data["severity"],
+				location="Etat initial du vehicule",
+				is_new=False,
+				status=Damage.Status.CONFIRME,
+			)
+			photo_index = damage_data.get("photo_index")
+			if photo_index is not None:
+				damage.evidence_photos.add(created_damage_photos[photo_index])
+
+		has_grave_damage = any(damage["severity"] == Damage.Severity.GRAVE for damage in damages)
+		has_acceptable_damage = any(damage["severity"] == Damage.Severity.ACCEPTABLE for damage in damages)
+		if has_grave_damage:
+			vehicle.status = Vehicle.Status.A_CONTROLER
+			vehicle.has_urgent_checkin_anomaly = True
+			vehicle.needs_supervision = False
+			vehicle.save(update_fields=["status", "has_urgent_checkin_anomaly", "needs_supervision", "updated_at"])
+		elif has_acceptable_damage:
+			vehicle.needs_supervision = True
+			vehicle.save(update_fields=["needs_supervision", "updated_at"])
+
 		return vehicle
 
 	def update(self, instance, validated_data):

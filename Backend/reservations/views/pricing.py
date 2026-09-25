@@ -14,7 +14,7 @@ from vehicles.models import Vehicle
 from vehicles.services import (
     AvailabilityValidationError,
     BOOKABLE_VEHICLE_STATUSES,
-    get_blocking_reservation_statuses,
+    get_blocking_reservation_filter,
     is_vehicle_available,
 )
 
@@ -159,8 +159,8 @@ class PriceSimulationView(APIView):
             if reservation_context is not None:
                 reservation_queryset = reservation_queryset.exclude(pk=reservation_context.pk)
                 overlap_exists = reservation_queryset.filter(
+                    get_blocking_reservation_filter(),
                     vehicle_id=vehicle.pk,
-                    status__in=get_blocking_reservation_statuses(),
                     start_at__lt=payload["end_at"],
                     end_at__gt=payload["start_at"],
                 ).exists()

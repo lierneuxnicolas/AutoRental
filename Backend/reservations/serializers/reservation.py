@@ -31,6 +31,9 @@ class ReservationVehicleSummarySerializer(serializers.Serializer):
     transmission = serializers.CharField(read_only=True)
     seats = serializers.IntegerField(read_only=True)
     doors = serializers.IntegerField(read_only=True)
+    registration_number = serializers.CharField(read_only=True)
+    parking_name = serializers.CharField(source="parking_space.parking.name", read_only=True)
+    parking_space_number = serializers.CharField(source="parking_space.number", read_only=True)
 
 
 class ReservationCreateRequestSerializer(serializers.Serializer):
@@ -81,6 +84,9 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
     insurance_type = serializers.CharField(read_only=True)
     deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     total_amount = serializers.SerializerMethodField()
+    invoice_id = serializers.SerializerMethodField()
+    actual_pickup_at = serializers.SerializerMethodField()
+    actual_return_at = serializers.SerializerMethodField()
 
     def get_total_amount(self, obj):
         try:
@@ -95,6 +101,28 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
 
         return pricing.total_amount
 
+    def get_invoice_id(self, obj):
+        try:
+            return obj.invoice.id
+        except Reservation.invoice.RelatedObjectDoesNotExist:
+            return None
+
+    def get_actual_pickup_at(self, obj):
+        try:
+            return obj.vehicle_access.last_unlocked_at
+        except Reservation.vehicle_access.RelatedObjectDoesNotExist:
+            return None
+
+    def get_actual_return_at(self, obj):
+        # VehicleAccess.last_locked_at is overwritten by every client lock action
+        # during the rental (not only the final return), so it cannot reliably
+        # represent the actual return moment. The return inspection's
+        # completed_at is only ever set once, when the vehicle is truly returned.
+        for inspection in obj.inspections.all():
+            if inspection.inspection_type == Inspection.Type.FINAL:
+                return inspection.completed_at
+        return None
+
     class Meta:
         model = Reservation
         fields = [
@@ -108,6 +136,9 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
             "insurance_type",
             "deposit_amount",
             "total_amount",
+            "invoice_id",
+            "actual_pickup_at",
+            "actual_return_at",
             "created_at",
             "confirmed_at",
             "cancelled_at",

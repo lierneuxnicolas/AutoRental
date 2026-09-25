@@ -475,7 +475,10 @@ def save_return_vehicle_state(
                     "ANOMALY_DESCRIPTION_REQUIRED",
                     "La description de l'anomalie est obligatoire.",
                 )
-            valid_severities = {choice[0] for choice in inspection_locked.damages.model.Severity.choices}
+            valid_severities = {
+                inspection_locked.damages.model.Severity.ACCEPTABLE,
+                inspection_locked.damages.model.Severity.GRAVE,
+            }
             if anomaly_severity not in valid_severities:
                 _raise_return_error(
                     "ANOMALY_SEVERITY_REQUIRED",
@@ -495,7 +498,7 @@ def save_return_vehicle_state(
                     InspectionPhoto.objects.filter(inspection=inspection_locked, id__in=normalized_photo_ids)
                 )
 
-            is_critical = anomaly_severity == inspection_locked.damages.model.Severity.CRITIQUE
+            is_critical = anomaly_severity == inspection_locked.damages.model.Severity.GRAVE
 
         inspection_locked.mileage = mileage
         inspection_locked.energy_level_percent = energy_level_percent

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Alert from '../feedback/Alert'
 import Button from '../ui/Button'
 import Card from '../ui/Card'
@@ -52,6 +52,14 @@ const halfHourOptions = Array.from({ length: 48 }, (_, index) => {
   return { value: `${hour}:${minute}`, label: `${hour}:${minute}` }
 })
 
+const blockingInterventionStatuses = new Set([
+  'A_ATTRIBUER',
+  'ATTRIBUEE',
+  'PLANIFIEE',
+  'EN_COURS',
+  'EN_PAUSE',
+])
+
 export default function VehicleStatusForm({
   currentStatus,
   vehicleLabel,
@@ -76,6 +84,7 @@ export default function VehicleStatusForm({
   const [plannedEndDate, setPlannedEndDate] = useState('')
   const [plannedEndTime, setPlannedEndTime] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
+  const [agendaReferenceTime] = useState(() => Date.now())
 
   const requiredRole = status === 'MAINTENANCE'
     ? 'MECANICIEN'
@@ -97,13 +106,50 @@ export default function VehicleStatusForm({
   const plannedStartAt = plannedDate && plannedTime ? `${plannedDate}T${plannedTime}` : ''
   const plannedEndAt = plannedEndDate && plannedEndTime ? `${plannedEndDate}T${plannedEndTime}` : ''
   const selectedVehicleId = vehicleId === undefined ? null : Number(vehicleId)
-  const vehicleReservations = reservations.filter((reservation) => selectedVehicleId !== null && Number(reservation.vehicle.id) === selectedVehicleId)
-  const vehicleInterventions = interventions.filter((intervention) => selectedVehicleId !== null && Number(intervention.vehicle.id) === selectedVehicleId)
+  const agendaItems = useMemo(() => {
+    if (selectedVehicleId === null) {
+      return []
+    }
+
+    const reservationItems = reservations
+      .filter((reservation) => (
+        Number(reservation.vehicle.id) === selectedVehicleId
+        && (reservation.status === 'EN_COURS' || reservation.status === 'CONFIRMEE')
+        && new Date(reservation.end_at).getTime() > agendaReferenceTime
+      ))
+      .map((reservation) => ({
+        key: `reservation-${reservation.id}`,
+        kind: 'reservation' as const,
+        label: reservation.reference,
+        startAt: reservation.start_at,
+        endAt: reservation.end_at,
+        reservation,
+      }))
+    const interventionItems = interventions
+      .filter((intervention) => (
+        Number(intervention.vehicle.id) === selectedVehicleId
+        && blockingInterventionStatuses.has(intervention.status)
+        && intervention.planned_start_at
+        && intervention.planned_end_at
+        && new Date(intervention.planned_end_at).getTime() > agendaReferenceTime
+      ))
+      .map((intervention) => ({
+        key: `intervention-${intervention.id}`,
+        kind: 'intervention' as const,
+        label: intervention.reference,
+        startAt: intervention.planned_start_at as string,
+        endAt: intervention.planned_end_at as string,
+        intervention,
+      }))
+
+    return [...reservationItems, ...interventionItems]
+      .sort((left, right) => new Date(left.startAt).getTime() - new Date(right.startAt).getTime())
+  }, [agendaReferenceTime, interventions, reservations, selectedVehicleId])
   const conflictingReservation = plannedStartAt && plannedEndAt
-    ? vehicleReservations.find((reservation) => reservation.status !== 'ANNULEE' && new Date(reservation.start_at) < new Date(plannedEndAt) && new Date(reservation.end_at) > new Date(plannedStartAt))
+    ? agendaItems.find((item) => item.kind === 'reservation' && new Date(item.startAt) < new Date(plannedEndAt) && new Date(item.endAt) > new Date(plannedStartAt))?.reservation
     : undefined
   const conflictingIntervention = !conflictingReservation && plannedStartAt && plannedEndAt
-    ? vehicleInterventions.find((intervention) => intervention.status !== 'ANNULEE' && intervention.planned_start_at && intervention.planned_end_at && new Date(intervention.planned_start_at) < new Date(plannedEndAt) && new Date(intervention.planned_end_at) > new Date(plannedStartAt))
+    ? agendaItems.find((item) => item.kind === 'intervention' && new Date(item.startAt) < new Date(plannedEndAt) && new Date(item.endAt) > new Date(plannedStartAt))?.intervention
     : undefined
   const hasImmediateConflict = Boolean(conflictingReservation || conflictingIntervention)
   const conflictStart = conflictingReservation?.start_at ?? conflictingIntervention?.planned_start_at
@@ -254,15 +300,14 @@ export default function VehicleStatusForm({
           {requiredRole ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-3 text-sm">
               <p className="font-semibold text-[#1F2937]">Agenda du véhicule</p>
-              {vehicleReservations.length === 0 && vehicleInterventions.filter((item) => item.planned_start_at && item.planned_end_at).length === 0 ? (
+              {agendaItems.length === 0 ? (
                 <p className="mt-2 text-slate-500">Aucune période réservée. Libre sur la période affichée.</p>
               ) : (
                 <div className="mt-2 space-y-2">
-                  {vehicleReservations.filter((item) => item.status !== 'ANNULEE').map((reservation) => (
-                    <p key={`reservation-${reservation.id}`} className="text-slate-600">Réservé · {reservation.reference} · {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(reservation.start_at))} → {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(reservation.end_at))}</p>
-                  ))}
-                  {vehicleInterventions.filter((item) => item.planned_start_at && item.planned_end_at).map((intervention) => (
-                    <p key={`intervention-${intervention.id}`} className="text-slate-600">Intervention · {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(intervention.planned_start_at as string))} → {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(intervention.planned_end_at as string))}</p>
+                  {agendaItems.map((item) => (
+                    <p key={item.key} className="text-slate-600">
+                      {item.kind === 'reservation' ? `Réservé · ${item.label}` : `Intervention · ${item.label}`} · {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(item.startAt))} → {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(item.endAt))}
+                    </p>
                   ))}
                 </div>
               )}
