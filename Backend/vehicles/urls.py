@@ -14,12 +14,14 @@ from vehicles.views import (
 	VehicleEquipmentCatalogPublicListView,
 	VehiclePublicDetailView,
 	VehiclePublicListView,
+	VehiclePopularPublicListView,
 )
 
 app_name = "vehicles"
 
 urlpatterns = [
 	path("vehicles/", VehiclePublicListView.as_view(), name="public-vehicles-list"),
+	path("vehicles/popular/", VehiclePopularPublicListView.as_view(), name="public-vehicles-popular"),
 	path("vehicles/available/", VehicleAvailablePublicListView.as_view(), name="public-vehicles-available"),
 	path("vehicles/<int:pk>/", VehiclePublicDetailView.as_view(), name="public-vehicles-detail"),
 	path("management/vehicles/", VehicleManagementCreateView.as_view(), name="management-vehicles-create"),

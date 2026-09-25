@@ -8,7 +8,7 @@ from interventions.services.assignment import InterventionAssignmentError, assig
 from interventions.services.creation import InterventionCreationError, create_intervention
 from reservations.models import Reservation
 from vehicles.models import Vehicle
-from vehicles.services import get_blocking_reservation_statuses
+from vehicles.services import get_blocking_reservation_filter
 
 
 @dataclass(frozen=True)
@@ -45,8 +45,8 @@ def plan_intervention(
             Reservation.objects.select_for_update()
             .select_related("client__user", "vehicle")
             .filter(
+                get_blocking_reservation_filter(),
                 vehicle=vehicle,
-                status__in=get_blocking_reservation_statuses(),
                 start_at__lt=planned_end_at,
                 end_at__gt=planned_start_at,
             )

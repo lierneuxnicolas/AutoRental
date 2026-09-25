@@ -267,6 +267,28 @@ def mark_authorized_deposit_for_verification(*, reservation: Reservation) -> Dep
     return deposit
 
 
+def release_reservation_deposit_for_management(*, reservation: Reservation, requested_by) -> Deposit:
+    """Release whichever deposit is still AUTORISEE or A_VERIFIER for this reservation.
+
+    Reuses mark_authorized_deposit_for_verification + release_authorized_deposit as-is:
+    no new Stripe logic is introduced here.
+    """
+
+    with transaction.atomic():
+        locked_reservation = Reservation.objects.select_for_update().get(pk=reservation.pk)
+        mark_authorized_deposit_for_verification(reservation=locked_reservation)
+        deposit = release_authorized_deposit(reservation=locked_reservation)
+
+        if deposit is None:
+            _raise_deposit_release_error(
+                "NO_DEPOSIT_TO_RELEASE",
+                "Aucune caution autorisee ou a verifier n'a ete trouvee pour cette reservation.",
+            )
+
+    return deposit
+
+
+
 def _notify_deposit_authorized_once(*, reservation: Reservation, deposit: Deposit, owner) -> None:
     message = f"La caution de votre reservation {reservation.reference} a ete autorisee."
     existing_links = set(
@@ -410,6 +432,26 @@ def authorize_deposit(
     mode,
 ):
     normalized_mode = _normalize_mode(mode)
+
+    with transaction.atomic():
+        reservation_locked = (
+            Reservation.objects.select_for_update()
+            .select_related("client", "client__user", "vehicle", "vehicle__brand", "vehicle__category")
+            .get(pk=reservation.pk)
+        )
+        draft_expired = False
+        if reservation_locked.status == Reservation.Status.BROUILLON:
+            from reservations.services.expiration import expire_draft_reservation_if_stale
+
+            draft_expired = expire_draft_reservation_if_stale(reservation=reservation_locked, reference_time=timezone.now())
+
+    # The expiration transition above must be committed on its own: raising inside the
+    # same atomic block would roll back the cancellation together with the error.
+    if draft_expired:
+        _raise_deposit_error(
+            "DRAFT_EXPIRED",
+            "Le brouillon de reservation a expire (delai de 15 minutes depasse). Veuillez creer une nouvelle reservation.",
+        )
 
     with transaction.atomic():
         reservation_locked = (

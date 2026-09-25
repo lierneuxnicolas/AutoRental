@@ -63,6 +63,19 @@ export interface ManagementInspection extends Inspection {
   damages: InspectionDamage[]
 }
 
+export interface ReservationManagementPreviousSummary {
+  id: number
+  reference: string
+  client_summary: ReservationManagementClientSummary
+  start_at: string
+  end_at: string
+  status: ManagementReservationStatus
+  rental_amount: string
+  deposit_amount: string
+  departure_inspection: ManagementInspection | null
+  return_inspection: ManagementInspection | null
+}
+
 export interface ReservationManagementDetail {
   id: number
   reference: string
@@ -73,6 +86,9 @@ export interface ReservationManagementDetail {
   status: ManagementReservationStatus
   rental_amount: string
   deposit_amount: string
+  needs_review: boolean
+  previous_reservation: ReservationManagementPreviousSummary | null
+  vehicle_reference_inspection: ManagementInspection | null
   deposit_status: ManagementDepositStatus | null
   departure_inspection: ManagementInspection | null
   return_inspection: ManagementInspection | null
@@ -166,4 +182,22 @@ export interface ManagementReservationIssueResponse {
   message: string
   reservation: ReservationManagementDetail
   intervention: ManagementInterventionResponse | null
+}
+
+export type ReservationReviewDecisionType = 'PARK' | 'MAINTENANCE' | 'UNAVAILABLE'
+
+export interface ReservationReviewDecisionRequest {
+  decision: ReservationReviewDecisionType
+}
+
+export interface ReservationReviewDecisionResponse {
+  message: string
+  reservation: ReservationManagementDetail
+  intervention: ManagementInterventionResponse | null
+}
+
+export interface ReservationDepositReleaseResponse {
+  message: string
+  reservation: ReservationManagementDetail
+  deposit_status: ManagementDepositStatus
 }

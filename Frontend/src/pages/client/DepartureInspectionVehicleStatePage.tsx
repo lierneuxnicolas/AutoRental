@@ -8,7 +8,7 @@ import ReservationProgressBanner from '../../components/reservations/Reservation
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import { saveDepartureVehicleState, uploadInspectionPhoto } from '../../services/inspectionService'
-import { getReservationById } from '../../services/reservationService'
+import { cancelReservationForCriticalCheckinAnomaly, getReservationById } from '../../services/reservationService'
 import type { DepartureVehicleStateRequest, Severity } from '../../types/inspection'
 import { resolveMediaUrl } from '../../utils/media'
 
@@ -21,14 +21,9 @@ type ApiErrorPayload = {
 }
 
 const SEVERITY_OPTIONS: Array<{ value: Severity; label: string }> = [
-  { value: 'MINEUR', label: 'Mineure' },
-  { value: 'MODERE', label: 'Moderee' },
-  { value: 'MAJEUR', label: 'Majeure' },
-  { value: 'CRITIQUE', label: 'Critique' },
+  { value: 'ACCEPTABLE', label: 'Acceptable' },
+  { value: 'GRAVE', label: 'Grave' },
 ]
-
-const CRITICAL_BLOCK_MESSAGE =
-  'Anomalie importante signalee. Pour votre securite, n\'utilisez pas le vehicule. Le depart est bloque et votre signalement a ete transmis au gestionnaire.'
 
 const ANOMALY_PHOTO_SLOTS = [
   { key: 'slot1', label: "Photo de l'anomalie 1", position: 1 },
@@ -137,6 +132,8 @@ export default function DepartureInspectionVehicleStatePage() {
   )
   const [globalError, setGlobalError] = useState<string | null>(null)
   const [isCriticalSaved, setIsCriticalSaved] = useState(false)
+  const [showCancelConfirmation, setShowCancelConfirmation] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
   const anomalyPhotoInputRefs = useRef<Record<AnomalyPhotoSlotKey, HTMLInputElement | null>>({
     slot1: null,
     slot2: null,
@@ -287,6 +284,17 @@ export default function DepartureInspectionVehicleStatePage() {
     },
   })
 
+  const cancelForCriticalAnomalyMutation = useMutation({
+    mutationFn: () => cancelReservationForCriticalCheckinAnomaly(reservationId),
+    onSuccess: () => {
+      setCancelError(null)
+      navigate('/client/reservations')
+    },
+    onError: (error) => {
+      setCancelError(toErrorMessage(error))
+    },
+  })
+
   if (!isReservationIdValid) {
     return (
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
@@ -323,7 +331,7 @@ export default function DepartureInspectionVehicleStatePage() {
           header={
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat du vehicule</h2>
-              <Link to={`/client/reservations/${reservationId}`}>
+              <Link to={`/client/reservations?highlight=${reservationId}`}>
                 <Button variant="secondary">Retour a la reservation</Button>
               </Link>
             </div>
@@ -510,9 +518,63 @@ export default function DepartureInspectionVehicleStatePage() {
             ) : null}
 
             {isCriticalIssue(inspection) || isCriticalSaved ? (
-              <Alert variant="warning" title="Depart bloque" message={CRITICAL_BLOCK_MESSAGE} />
+              <div className="space-y-4">
+                <Alert
+                  variant="danger"
+                  title="Depart bloque"
+                  message="L'anomalie signalée empêche l'utilisation du véhicule."
+                />
+
+                {cancelError ? <Alert variant="danger" title="Annulation impossible" message={cancelError} /> : null}
+
+                {showCancelConfirmation ? (
+                  <Card>
+                    <div className="space-y-4">
+                      <p className="text-sm font-medium text-[#1F2937]">
+                        Voulez-vous annuler cette réservation et effectuer une nouvelle réservation ?
+                      </p>
+                      <div className="flex flex-wrap gap-3">
+                        <Button
+                          variant="danger"
+                          disabled={cancelForCriticalAnomalyMutation.isPending}
+                          onClick={() => {
+                            setCancelError(null)
+                            void cancelForCriticalAnomalyMutation.mutateAsync()
+                          }}
+                        >
+                          {cancelForCriticalAnomalyMutation.isPending ? (
+                            <span className="flex items-center gap-2">
+                              <LoadingSpinner size="sm" aria-label="Annulation en cours" />
+                              Annulation...
+                            </span>
+                          ) : (
+                            'Annuler la réservation'
+                          )}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          disabled={cancelForCriticalAnomalyMutation.isPending}
+                          onClick={() => {
+                            setShowCancelConfirmation(false)
+                            setCancelError(null)
+                          }}
+                        >
+                          Retour
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ) : (
+                  <div className="flex justify-center">
+                    <Button variant="danger" onClick={() => setShowCancelConfirmation(true)}>
+                      Annuler la réservation
+                    </Button>
+                  </div>
+                )}
+              </div>
             ) : null}
 
+            {isCriticalIssue(inspection) || isCriticalSaved ? null : (
             <div className="flex justify-center pt-2">
               <Button
                 className="w-full sm:w-auto"
@@ -551,6 +613,7 @@ export default function DepartureInspectionVehicleStatePage() {
               </Button>
 
             </div>
+            )}
           </div>
         </Card>
       )}

@@ -27,7 +27,6 @@ const roleConfigs: Record<string, RoleConfig> = {
       { label: 'Mon espace', to: '/client' },
       { label: 'Mes réservations', to: '/client/reservations' },
       { label: 'Mon profil', to: '/client/profile' },
-      { label: 'Mes factures', to: '/client/invoices' },
     ],
   },
   GESTIONNAIRE_COMPTABLE: {
@@ -54,10 +53,7 @@ const roleConfigs: Record<string, RoleConfig> = {
   MECANICIEN: {
     sessionLabel: 'mécanicien',
     menuItems: [
-      { label: 'Tableau de bord', to: '/mechanic' },
-      { label: 'Véhicules à réparer', to: '/mechanic/vehicles' },
       { label: 'Interventions', to: '/mechanic/interventions' },
-      { label: 'Historique', to: '/mechanic/history' },
     ],
   },
   NETTOYEUR: {
@@ -108,7 +104,6 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
       { label: 'Tableau de bord', to: '/client' },
       { label: 'Mes réservations', to: '/client/reservations' },
       { label: 'Mon profil', to: '/client/profile' },
-      { label: 'Mes factures', to: '/client/invoices' },
     ],
     [],
   )

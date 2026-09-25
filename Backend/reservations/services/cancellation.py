@@ -13,7 +13,9 @@ from django.utils import timezone
 
 from invoicing.models import Invoice, InvoiceLine
 from invoicing.services import create_invoice_for_reservation
-from notifications.services import create_notification
+from accounts.models import Role
+from inspections.models import Inspection
+from notifications.services import create_notification, notify_users_with_roles
 from payments.models import Payment, Refund
 from payments.services.deposits import (
     DepositReleaseError,
@@ -427,6 +429,7 @@ def cancel_reservation(
     reason: str,
     allow_reassignment_required: bool = False,
     vehicle_unavailable: bool = False,
+    critical_checkin_anomaly: bool = False,
 ) -> Reservation:
     """
     Annule une réservation.
@@ -520,9 +523,31 @@ def cancel_reservation(
             reservation_locked.status,
             reservation=reservation_locked,
         )
-        if not is_management_reassignment_cancellation and not is_status_cancellable(
-            reservation_locked.status,
-            reservation=reservation_locked,
+
+        is_critical_checkin_cancellation = False
+        if critical_checkin_anomaly:
+            if reservation_locked.status != Reservation.Status.CONFIRMEE:
+                _raise_cancellation_error(
+                    "CANNOT_CANCEL",
+                    "Seule une réservation CONFIRMEE peut être annulée suite à une anomalie grave au check-in.",
+                    details={"current_status": reservation_locked.status},
+                )
+            has_critical_checkin_issue = Inspection.objects.filter(
+                reservation=reservation_locked,
+                inspection_type=Inspection.Type.INITIAL,
+                has_critical_issue=True,
+            ).exists()
+            if not has_critical_checkin_issue:
+                _raise_cancellation_error(
+                    "NO_CRITICAL_CHECKIN_ANOMALY",
+                    "Aucune anomalie grave n'est enregistrée au check-in de cette réservation.",
+                )
+            is_critical_checkin_cancellation = True
+
+        if (
+            not is_management_reassignment_cancellation
+            and not is_critical_checkin_cancellation
+            and not is_status_cancellable(reservation_locked.status, reservation=reservation_locked)
         ):
             _raise_cancellation_error(
                 "CANNOT_CANCEL",
@@ -531,7 +556,7 @@ def cancel_reservation(
             )
 
         financials = calculate_cancellation_financials(reservation=reservation_locked)
-        if is_management_reassignment_cancellation or is_vehicle_unavailability_cancellation:
+        if is_management_reassignment_cancellation or is_vehicle_unavailability_cancellation or is_critical_checkin_cancellation:
             financials = CancellationFinancialBreakdown(
                 amount_paid=financials.amount_paid,
                 cancellation_fee=Decimal("0.00"),
@@ -599,6 +624,20 @@ def cancel_reservation(
             transaction.on_commit(
                 lambda reservation_id=reservation_locked.id: _send_vehicle_unavailable_cancellation_email(
                     reservation=Reservation.objects.select_related("client__user", "vehicle__brand").get(pk=reservation_id),
+                )
+            )
+        if is_critical_checkin_cancellation:
+            transaction.on_commit(
+                lambda reservation_id=reservation_locked.id, reference=reservation_locked.reference: notify_users_with_roles(
+                    role_codes={Role.Code.GESTIONNAIRE_COMPTABLE, Role.Code.ADMINISTRATEUR},
+                    notification_type="RESERVATION_CANCELLED",
+                    title="Réservation annulée — anomalie grave au check-in",
+                    message=(
+                        f"Le client a annulé la réservation {reference} suite à une anomalie grave constatée "
+                        "au check-in. Le véhicule reste à contrôler."
+                    ),
+                    related_object_type="reservation",
+                    related_object_id=reservation_id,
                 )
             )
 

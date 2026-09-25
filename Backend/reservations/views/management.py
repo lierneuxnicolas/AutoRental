@@ -48,6 +48,9 @@ from reservations.serializers.management import (
     ReservationReassignResponseSerializer,
     ReservationReplacementVehicleSerializer,
     ReservationUnavailableCancellationResponseSerializer,
+    ReservationReviewDecisionRequestSerializer,
+    ReservationReviewDecisionResponseSerializer,
+    ReservationDepositReleaseResponseSerializer,
 )
 from reservations.services import ReservationCompletionError, complete_reservation, report_return_issue
 from reservations.services.reassignment import (
@@ -56,6 +59,8 @@ from reservations.services.reassignment import (
     reassign_reservation,
 )
 from reservations.services.cancellation import CancellationError, cancel_reservation
+from reservations.services.review import ReservationReviewError, resolve_reservation_review
+from payments.services.deposits import DepositReleaseError, release_reservation_deposit_for_management
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou d'autorisation.")
@@ -197,7 +202,23 @@ class ReservationManagementListView(generics.ListAPIView):
             "vehicle__category",
             "vehicle__parking_space",
             "vehicle__parking_space__parking",
-        ).prefetch_related("vehicle__photos").order_by(*self.ordering)
+        ).prefetch_related(
+            "vehicle__photos",
+            Prefetch(
+                "vehicle__reference_inspections",
+                queryset=Inspection.objects.select_related("completed_by").prefetch_related(
+                    "photos",
+                    "damages",
+                    "damages__evidence_photos",
+                ),
+                to_attr="prefetched_reference_inspections",
+            ),
+            Prefetch(
+                "inspections",
+                queryset=Inspection.objects.filter(inspection_type=Inspection.Type.INITIAL).prefetch_related("damages"),
+                to_attr="prefetched_inspections",
+            ),
+        ).order_by(*self.ordering)
 
     @extend_schema(
         tags=["Reservation Management"],
@@ -687,6 +708,117 @@ class ReservationManagementIssueView(generics.GenericAPIView):
                 "message": "Anomalie enregistree. La caution reste en verification.",
                 "reservation": updated_reservation,
                 "intervention": intervention,
+            },
+            context={"request": request},
+        )
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class ReservationManagementReviewDecisionView(generics.GenericAPIView):
+    """Décision du gestionnaire pour une réservation marquée 'À vérifier' (anomalie check-in)."""
+
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    serializer_class = ReservationReviewDecisionRequestSerializer
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return ReservationManagementDetailView().get_queryset()
+
+    @extend_schema(
+        tags=["Reservation Management"],
+        request=ReservationReviewDecisionRequestSerializer,
+        description=(
+            "Applique la decision du gestionnaire (remise au parc, mise en maintenance ou indisponibilite) "
+            "suite a une anomalie de check-in, et retire l'indicateur 'A verifier' de la reservation. "
+            "N'affecte ni la caution, ni les inspections/dommages/photos existants."
+        ),
+        responses={
+            200: ReservationReviewDecisionResponseSerializer,
+            400: ErrorDetailResponseSerializer,
+            401: ErrorDetailResponseSerializer,
+            403: ErrorDetailResponseSerializer,
+            404: ErrorDetailResponseSerializer,
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        reservation = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        decision = serializer.validated_data["decision"]
+        try:
+            updated_reservation, _vehicle, intervention = resolve_reservation_review(
+                reservation=reservation,
+                requested_by=request.user,
+                decision=decision,
+            )
+        except ReservationReviewError as exc:
+            return Response({"code": exc.code, "message": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+
+        decision_labels = {
+            "PARK": "Vehicule remis au parc.",
+            "MAINTENANCE": "Vehicule mis en maintenance.",
+            "UNAVAILABLE": "Vehicule rendu indisponible.",
+        }
+        updated_reservation = self.get_queryset().get(pk=updated_reservation.pk)
+        response_serializer = ReservationReviewDecisionResponseSerializer(
+            {
+                "message": decision_labels[decision],
+                "reservation": updated_reservation,
+                "intervention": intervention,
+            },
+            context={"request": request},
+        )
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class ReservationManagementDepositReleaseView(generics.GenericAPIView):
+    """Libère la caution encore autorisée/bloquée d'une réservation (action manager distincte)."""
+
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return ReservationManagementDetailView().get_queryset()
+
+    @extend_schema(
+        tags=["Reservation Management"],
+        description=(
+            "Libere la caution AUTORISEE ou A_VERIFIER de cette reservation en reutilisant le service "
+            "de liberation existant (aucune nouvelle logique Stripe)."
+        ),
+        responses={
+            200: ReservationDepositReleaseResponseSerializer,
+            400: ErrorDetailResponseSerializer,
+            401: ErrorDetailResponseSerializer,
+            403: ErrorDetailResponseSerializer,
+            404: ErrorDetailResponseSerializer,
+            503: ErrorDetailResponseSerializer,
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        reservation = self.get_object()
+
+        try:
+            deposit = release_reservation_deposit_for_management(reservation=reservation, requested_by=request.user)
+        except DepositReleaseError as exc:
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE if exc.code == "STRIPE_UNAVAILABLE" else status.HTTP_400_BAD_REQUEST
+            return Response({"code": exc.code, "message": exc.message}, status=status_code)
+
+        updated_reservation = self.get_queryset().get(pk=reservation.pk)
+        response_serializer = ReservationDepositReleaseResponseSerializer(
+            {
+                "message": "Caution liberee.",
+                "reservation": updated_reservation,
+                "deposit_status": deposit.status,
             },
             context={"request": request},
         )

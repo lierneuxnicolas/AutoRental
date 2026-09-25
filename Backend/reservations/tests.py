@@ -25,7 +25,7 @@ from rest_framework.test import APIClient
 from accounts.models import ClientDocument, ClientProfile, Role
 from accounts.tests.utils import create_user, ensure_roles
 from common.models import SystemLog
-from inspections.models import Inspection, InspectionPhoto
+from inspections.models import Damage, Inspection, InspectionPhoto
 from interventions.models import Intervention, LockingLog, VehicleAccess
 from interventions.services.vehicle_access import activate_vehicle_access
 from invoicing.models import Invoice, InvoiceLine
@@ -2046,6 +2046,181 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 			self.assertEqual(apps.get_model("payments", "Payment").objects.count(), payment_before)
 
 
+class ReservationCriticalCheckinAnomalyCancellationTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+
+	def _confirmed_reservation_past_start(self):
+		start = timezone.now() - timedelta(hours=1)
+		end = timezone.now() + timedelta(hours=3)
+		return self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=end,
+		)
+
+	def _create_success_payment(self, reservation, amount):
+		return Payment.objects.create(
+			reservation=reservation,
+			provider=Payment.Provider.STRIPE,
+			amount=Decimal(amount),
+			currency="EUR",
+			status=Payment.Status.REUSSI,
+			stripe_payment_intent_id=f"pi_critical_{reservation.id}_{int(timezone.now().timestamp() * 1000000)}",
+		)
+
+	def _create_grave_checkin_inspection(self, reservation):
+		inspection = Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.INITIAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=timezone.now(),
+			has_critical_issue=True,
+			critical_issue_description="Fumee moteur",
+		)
+		Damage.objects.create(
+			inspection=inspection,
+			vehicle=reservation.vehicle,
+			reported_by=reservation.client.user,
+			description="Fumee moteur au demarrage",
+			severity=Damage.Severity.GRAVE,
+			location="Etat du vehicule",
+		)
+		return inspection
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_annulation_reussie_pour_anomalie_grave_au_checkin(self, mocked_refund_create):
+		mocked_refund_create.return_value = SimpleNamespace(id="re_critical_checkin_001", status="succeeded")
+		reservation = self._confirmed_reservation_past_start()
+		self._create_success_payment(reservation, "120.00")
+		inspection = self._create_grave_checkin_inspection(reservation)
+
+		vehicle = reservation.vehicle
+		vehicle.status = Vehicle.Status.A_CONTROLER
+		vehicle.needs_supervision = False
+		vehicle.has_urgent_checkin_anomaly = True
+		vehicle.save(update_fields=["status", "needs_supervision", "has_urgent_checkin_anomaly"])
+
+		url = reverse("reservations:reservation-cancel-critical-checkin-anomaly", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+		notif_before = Notification.objects.count()
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+			with self.captureOnCommitCallbacks(execute=True):
+				response = self.client_api.post(url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.ANNULEE)
+		self.assertEqual(
+			reservation.cancellation_reason,
+			"Annulation suite à anomalie grave constatée au check-in",
+		)
+		self.assertEqual(response.data["cancellation_financials"]["cancellation_fee"], Decimal("0.00"))
+		self.assertEqual(
+			response.data["cancellation_financials"]["refundable_amount"],
+			response.data["cancellation_financials"]["amount_paid"],
+		)
+
+		vehicle.refresh_from_db()
+		self.assertEqual(vehicle.status, Vehicle.Status.A_CONTROLER)
+		self.assertFalse(vehicle.needs_supervision)
+		self.assertTrue(vehicle.has_urgent_checkin_anomaly)
+
+		inspection.refresh_from_db()
+		self.assertTrue(inspection.has_critical_issue)
+		self.assertTrue(Damage.objects.filter(inspection=inspection, severity=Damage.Severity.GRAVE).exists())
+
+		self.assertTrue(
+			Notification.objects.filter(
+				notification_type="RESERVATION_CANCELLED",
+				user=self.client_user_1,
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).exists()
+		)
+		self.assertTrue(
+			Notification.objects.filter(
+				notification_type="RESERVATION_CANCELLED",
+				user=self.manager_user,
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).exists()
+		)
+		self.assertTrue(
+			Notification.objects.filter(
+				notification_type="RESERVATION_CANCELLED",
+				user=self.admin_user,
+				related_object_type="reservation",
+				related_object_id=reservation.id,
+			).exists()
+		)
+		self.assertGreater(Notification.objects.count(), notif_before)
+
+	def test_refuse_si_statut_different_de_confirmee(self):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		self._create_grave_checkin_inspection(reservation)
+		url = reverse("reservations:reservation-cancel-critical-checkin-anomaly", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url)
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "CANNOT_CANCEL")
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.BROUILLON)
+
+	def test_refuse_si_aucune_anomalie_grave_enregistree(self):
+		reservation = self._confirmed_reservation_past_start()
+		url = reverse("reservations:reservation-cancel-critical-checkin-anomaly", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url)
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "NO_CRITICAL_CHECKIN_ANOMALY")
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.CONFIRMEE)
+
+	def test_refuse_pour_anomalie_acceptable_uniquement(self):
+		reservation = self._confirmed_reservation_past_start()
+		inspection = Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.INITIAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=timezone.now(),
+		)
+		Damage.objects.create(
+			inspection=inspection,
+			vehicle=reservation.vehicle,
+			reported_by=reservation.client.user,
+			description="Petite rayure",
+			severity=Damage.Severity.ACCEPTABLE,
+			location="Etat du vehicule",
+		)
+		url = reverse("reservations:reservation-cancel-critical-checkin-anomaly", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(url)
+
+		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+		self.assertEqual(response.data["code"], "NO_CRITICAL_CHECKIN_ANOMALY")
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.CONFIRMEE)
+
+	def test_autre_client_refuse(self):
+		reservation = self._confirmed_reservation_past_start()
+		self._create_grave_checkin_inspection(reservation)
+		url = reverse("reservations:reservation-cancel-critical-checkin-anomaly", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.client_user_2)
+
+		response = self.client_api.post(url)
+
+		self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+		reservation.refresh_from_db()
+		self.assertEqual(reservation.status, Reservation.Status.CONFIRMEE)
+
+
 class ReservationVehicleAccessTests(ReservationTestDataMixin, TestCase):
 	def setUp(self):
 		self.client_api = APIClient()
@@ -3397,6 +3572,65 @@ class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase)
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual({item["id"] for item in response.data["results"]}, {reservation.id})
 
+	def test_needs_review_is_false_without_checkin_anomaly(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.get(self.list_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		item = next(row for row in response.data["results"] if row["id"] == self.reservation_client_1.id)
+		self.assertFalse(item["needs_review"])
+
+	def test_needs_review_is_true_for_acceptable_checkin_anomaly(self):
+		inspection = Inspection.objects.create(
+			reservation=self.reservation_client_1,
+			inspection_type=Inspection.Type.INITIAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=timezone.now(),
+		)
+		Damage.objects.create(
+			inspection=inspection,
+			vehicle=self.reservation_client_1.vehicle,
+			reported_by=self.client_user_1,
+			description="Petite rayure",
+			severity=Damage.Severity.ACCEPTABLE,
+			location="Etat du vehicule",
+		)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.get(self.list_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		item = next(row for row in response.data["results"] if row["id"] == self.reservation_client_1.id)
+		self.assertTrue(item["needs_review"])
+		self.assertEqual(item["status"], self.reservation_client_1.status)
+
+	def test_needs_review_is_true_for_grave_checkin_anomaly_in_detail_view(self):
+		inspection = Inspection.objects.create(
+			reservation=self.reservation_client_2,
+			inspection_type=Inspection.Type.INITIAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=timezone.now(),
+			has_critical_issue=True,
+			critical_issue_description="Fumee moteur",
+		)
+		Damage.objects.create(
+			inspection=inspection,
+			vehicle=self.reservation_client_2.vehicle,
+			reported_by=self.client_user_2,
+			description="Fumee moteur",
+			severity=Damage.Severity.GRAVE,
+			location="Etat du vehicule",
+		)
+		self.client_api.force_authenticate(self.manager_user)
+
+		detail_url = reverse("reservations:management-reservation-detail", kwargs={"pk": self.reservation_client_2.id})
+		response = self.client_api.get(detail_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertTrue(response.data["needs_review"])
+		self.assertEqual(response.data["status"], self.reservation_client_2.status)
+
 	def test_filter_reservation_date_bounds(self):
 		start = timezone.now() + timedelta(days=10)
 		matching = self._create_reservation(start_at=start, end_at=start + timedelta(hours=4))
@@ -3488,12 +3722,308 @@ class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase)
 		self.assertEqual(response.data["deposit_status"], Deposit.Status.A_VERIFIER)
 		self.assertEqual(response.data["departure_inspection"]["inspection_type"], Inspection.Type.INITIAL)
 		self.assertEqual(response.data["return_inspection"]["inspection_type"], Inspection.Type.FINAL)
+		self.assertEqual(response.data["departure_inspection"]["completed_by_name"], self.client_user_1.get_full_name())
+		self.assertEqual(response.data["return_inspection"]["completed_by_name"], self.client_user_1.get_full_name())
 		self.assertEqual(response.data["departure_inspection"]["mileage"], 1100)
 		self.assertEqual(response.data["return_inspection"]["mileage"], 1300)
 		self.assertEqual(len(response.data["departure_inspection"]["photos"]), 6)
 		self.assertEqual(len(response.data["return_inspection"]["photos"]), 6)
 		self.assertEqual(response.data["departure_inspection"]["damages"], [])
 		self.assertEqual(response.data["return_inspection"]["damages"], [])
+
+	def test_previous_reservation_is_none_when_no_earlier_reservation_exists(self):
+		space = ParkingSpace.objects.create(parking=self.parking, number="PREV-1", is_active=True)
+		vehicle = Vehicle.objects.create(
+			brand=self.brand,
+			category=self.category,
+			parking_space=space,
+			registration_number="PREV-VEH-001",
+			model_name="Model Prev 1",
+			year=2025,
+			color="Grey",
+			energy_type="Hybrid",
+			transmission="Auto",
+			seats=5,
+			doors=5,
+			mileage=500,
+			status=Vehicle.Status.DISPONIBLE,
+			is_active=True,
+		)
+		reservation = self._create_reservation(
+			vehicle=vehicle,
+			start_at=timezone.now() + timedelta(days=10),
+			end_at=timezone.now() + timedelta(days=10, hours=4),
+		)
+		reference = Inspection.objects.create(
+			vehicle=vehicle,
+			inspection_type=Inspection.Type.REFERENCE,
+			status=Inspection.Status.TERMINE,
+			mileage=500,
+			energy_level_percent=75,
+			general_condition=Inspection.GeneralCondition.GOOD,
+			completed_by=self.manager_user,
+			completed_at=timezone.now(),
+		)
+		self.client_api.force_authenticate(self.manager_user)
+
+		detail_url = reverse("reservations:management-reservation-detail", kwargs={"pk": reservation.id})
+		response = self.client_api.get(detail_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertIsNone(response.data["previous_reservation"])
+		self.assertEqual(response.data["vehicle_reference_inspection"]["id"], reference.id)
+		self.assertEqual(response.data["vehicle_reference_inspection"]["mileage"], 500)
+		self.assertEqual(response.data["vehicle_reference_inspection"]["energy_level_percent"], 75)
+		self.assertEqual(response.data["vehicle_reference_inspection"]["general_condition"], Inspection.GeneralCondition.GOOD)
+
+	def test_previous_reservation_exposes_closest_earlier_rental_for_same_vehicle(self):
+		space = ParkingSpace.objects.create(parking=self.parking, number="PREV-2", is_active=True)
+		vehicle = Vehicle.objects.create(
+			brand=self.brand,
+			category=self.category,
+			parking_space=space,
+			registration_number="PREV-VEH-002",
+			model_name="Model Prev 2",
+			year=2025,
+			color="Blue",
+			energy_type="Hybrid",
+			transmission="Auto",
+			seats=5,
+			doors=5,
+			mileage=500,
+			status=Vehicle.Status.DISPONIBLE,
+			is_active=True,
+		)
+		older = self._create_reservation(
+			vehicle=vehicle,
+			status=Reservation.Status.TERMINEE,
+			start_at=timezone.now() - timedelta(days=20),
+			end_at=timezone.now() - timedelta(days=19),
+		)
+		closest_previous = self._create_reservation(
+			vehicle=vehicle,
+			status=Reservation.Status.TERMINEE,
+			start_at=timezone.now() - timedelta(days=5),
+			end_at=timezone.now() - timedelta(days=4),
+		)
+		current = self._create_reservation(
+			vehicle=vehicle,
+			start_at=timezone.now() + timedelta(days=1),
+			end_at=timezone.now() + timedelta(days=1, hours=4),
+		)
+		self.assertIsNotNone(older)
+
+		previous_departure = Inspection.objects.create(
+			reservation=closest_previous,
+			inspection_type=Inspection.Type.INITIAL,
+			status=Inspection.Status.TERMINE,
+			mileage=900,
+			energy_level_percent=90,
+			completed_at=closest_previous.start_at,
+		)
+		previous_return = Inspection.objects.create(
+			reservation=closest_previous,
+			inspection_type=Inspection.Type.FINAL,
+			status=Inspection.Status.TERMINE,
+			mileage=1050,
+			energy_level_percent=40,
+			completed_at=closest_previous.end_at,
+		)
+		Damage.objects.create(
+			inspection=previous_return,
+			vehicle=vehicle,
+			reported_by=self.manager_user,
+			description="Rayure porte arriere",
+			severity=Damage.Severity.ACCEPTABLE,
+			location="Portiere arriere droite",
+		)
+
+		self.client_api.force_authenticate(self.manager_user)
+		detail_url = reverse("reservations:management-reservation-detail", kwargs={"pk": current.id})
+		response = self.client_api.get(detail_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		previous_data = response.data["previous_reservation"]
+		self.assertIsNotNone(previous_data)
+		self.assertEqual(previous_data["id"], closest_previous.id)
+		self.assertEqual(previous_data["reference"], closest_previous.reference)
+		self.assertEqual(previous_data["client_summary"]["email"], closest_previous.client.user.email)
+		self.assertEqual(previous_data["rental_amount"], f"{closest_previous.rental_amount:.2f}")
+		self.assertEqual(previous_data["deposit_amount"], f"{closest_previous.deposit_amount:.2f}")
+		self.assertEqual(previous_data["departure_inspection"]["mileage"], 900)
+		self.assertEqual(previous_data["return_inspection"]["mileage"], 1050)
+		self.assertEqual(len(previous_data["return_inspection"]["damages"]), 1)
+		self.assertEqual(previous_data["return_inspection"]["damages"][0]["severity"], Damage.Severity.ACCEPTABLE)
+
+		self.assertEqual(previous_departure.reservation_id, closest_previous.id)
+
+
+class ReservationManagementReviewDecisionTests(ReservationTestDataMixin, TestCase):
+	def setUp(self):
+		self.client_api = APIClient()
+		space = ParkingSpace.objects.create(parking=self.parking, number="REVIEW-1", is_active=True)
+		self.vehicle = Vehicle.objects.create(
+			brand=self.brand,
+			category=self.category,
+			parking_space=space,
+			registration_number="REVIEW-VEH-001",
+			model_name="Model Review",
+			year=2025,
+			color="Black",
+			energy_type="Hybrid",
+			transmission="Auto",
+			seats=5,
+			doors=5,
+			mileage=500,
+			status=Vehicle.Status.LOUE,
+			needs_supervision=True,
+			has_urgent_checkin_anomaly=True,
+			is_active=True,
+		)
+		self.reservation = self._create_reservation(
+			vehicle=self.vehicle,
+			status=Reservation.Status.EN_COURS,
+			start_at=timezone.now() - timedelta(hours=2),
+			end_at=timezone.now() + timedelta(hours=2),
+		)
+		inspection = Inspection.objects.create(
+			reservation=self.reservation,
+			inspection_type=Inspection.Type.INITIAL,
+			status=Inspection.Status.TERMINE,
+			mileage=500,
+			energy_level_percent=80,
+			completed_at=timezone.now() - timedelta(hours=2),
+		)
+		Damage.objects.create(
+			inspection=inspection,
+			vehicle=self.vehicle,
+			reported_by=self.manager_user,
+			description="Rayure mineure",
+			severity=Damage.Severity.ACCEPTABLE,
+			location="Portiere avant",
+		)
+		self.deposit = Deposit.objects.create(
+			reservation=self.reservation,
+			mode=Deposit.Mode.SIMULATED,
+			amount=self.reservation.deposit_amount,
+			currency="EUR",
+			status=Deposit.Status.AUTORISEE,
+			authorized_at=timezone.now(),
+		)
+		self.review_url = reverse(
+			"reservations:management-reservation-review-decision",
+			kwargs={"pk": self.reservation.id},
+		)
+		self.release_url = reverse(
+			"reservations:management-reservation-release-deposit",
+			kwargs={"pk": self.reservation.id},
+		)
+		self.detail_url = reverse(
+			"reservations:management-reservation-detail",
+			kwargs={"pk": self.reservation.id},
+		)
+
+	def test_needs_review_is_true_before_any_decision(self):
+		self.client_api.force_authenticate(self.manager_user)
+		response = self.client_api.get(self.detail_url)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertTrue(response.data["needs_review"])
+
+	def test_park_decision_resets_vehicle_and_clears_needs_review(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.review_url, {"decision": "PARK"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.vehicle.refresh_from_db()
+		self.reservation.refresh_from_db()
+		self.assertEqual(self.vehicle.status, Vehicle.Status.DISPONIBLE)
+		self.assertFalse(self.vehicle.needs_supervision)
+		self.assertFalse(self.vehicle.has_urgent_checkin_anomaly)
+		self.assertIsNotNone(self.reservation.review_resolved_at)
+		self.assertFalse(response.data["reservation"]["needs_review"])
+
+		# The Damage/Inspection history must remain untouched.
+		self.assertEqual(Damage.objects.filter(inspection__reservation=self.reservation).count(), 1)
+
+	def test_maintenance_decision_opens_intervention_and_clears_flags(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.review_url, {"decision": "MAINTENANCE"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.vehicle.refresh_from_db()
+		self.assertEqual(self.vehicle.status, Vehicle.Status.MAINTENANCE)
+		self.assertFalse(self.vehicle.needs_supervision)
+		self.assertFalse(self.vehicle.has_urgent_checkin_anomaly)
+		self.assertIsNotNone(response.data["intervention"])
+		intervention = Intervention.objects.get(pk=response.data["intervention"]["id"])
+		self.assertEqual(intervention.intervention_type, Intervention.Type.MECANIQUE)
+		self.assertEqual(intervention.vehicle_id, self.vehicle.id)
+		self.assertFalse(response.data["reservation"]["needs_review"])
+
+	def test_unavailable_decision_resets_vehicle_and_clears_needs_review(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.review_url, {"decision": "UNAVAILABLE"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.vehicle.refresh_from_db()
+		self.assertEqual(self.vehicle.status, Vehicle.Status.INDISPONIBLE)
+		self.assertFalse(self.vehicle.needs_supervision)
+		self.assertFalse(self.vehicle.has_urgent_checkin_anomaly)
+		self.assertFalse(response.data["reservation"]["needs_review"])
+
+	def test_invalid_decision_is_rejected(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.review_url, {"decision": "NOT_A_DECISION"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.vehicle.refresh_from_db()
+		self.assertTrue(self.vehicle.needs_supervision)
+
+	def test_client_cannot_submit_review_decision(self):
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self.review_url, {"decision": "PARK"}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+	def test_release_deposit_succeeds_for_authorized_deposit(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.release_url, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.deposit.refresh_from_db()
+		self.assertEqual(self.deposit.status, Deposit.Status.LIBEREE)
+		self.assertEqual(response.data["deposit_status"], Deposit.Status.LIBEREE)
+
+	def test_release_deposit_fails_cleanly_when_nothing_to_release(self):
+		self.deposit.status = Deposit.Status.LIBEREE
+		self.deposit.released_at = timezone.now()
+		self.deposit.save(update_fields=["status", "released_at", "updated_at"])
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(self.release_url, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "NO_DEPOSIT_TO_RELEASE")
+
+	def test_review_decision_and_deposit_release_are_independent_actions(self):
+		self.client_api.force_authenticate(self.manager_user)
+
+		park_response = self.client_api.post(self.review_url, {"decision": "PARK"}, format="json")
+		self.assertEqual(park_response.status_code, status.HTTP_200_OK)
+
+		self.deposit.refresh_from_db()
+		self.assertEqual(self.deposit.status, Deposit.Status.AUTORISEE)
+
+		release_response = self.client_api.post(self.release_url, format="json")
+		self.assertEqual(release_response.status_code, status.HTTP_200_OK)
+		self.deposit.refresh_from_db()
+		self.assertEqual(self.deposit.status, Deposit.Status.LIBEREE)
 
 
 class ReservationManagementReassignmentTests(ReservationTestDataMixin, TestCase):

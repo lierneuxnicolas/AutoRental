@@ -13,14 +13,45 @@ Données volontairement masquées pour la sécurité:
 
 from rest_framework import serializers
 
+from django.db.models import Prefetch
+
 from accounts.models import ClientProfile
-from inspections.models import Inspection
+from inspections.models import Damage, Inspection
 from inspections.serializers import InspectionDamageReadSerializer, InspectionPhotoReadSerializer
 from interventions.models import Intervention
 from interventions.serializers import InterventionManagementResponseSerializer
 from reservations.models import Reservation
 from vehicles.models import Vehicle
 from vehicles.serializers.public import VehiclePhotoPublicSerializer
+
+
+REVIEW_TRIGGER_SEVERITIES = {Damage.Severity.ACCEPTABLE, Damage.Severity.GRAVE}
+
+
+def _reservation_needs_review(obj) -> bool:
+    """Return True when the check-in (departure) inspection reported an ACCEPTABLE or GRAVE anomaly.
+
+    This is a display-only indicator for the manager list/detail views: it does not
+    replace the reservation's real business status (obj.status). A manager decision
+    (see reservations.services.review) sets review_resolved_at, which clears this flag
+    without touching the underlying Damage/Inspection history.
+    """
+
+    if obj.review_resolved_at is not None:
+        return False
+
+    inspections = getattr(obj, "prefetched_inspections", None)
+    if inspections is None:
+        inspections = obj.inspections.filter(inspection_type=Inspection.Type.INITIAL).prefetch_related("damages")
+
+    for inspection in inspections:
+        if inspection.inspection_type != Inspection.Type.INITIAL:
+            continue
+        for damage in inspection.damages.all():
+            if damage.severity in REVIEW_TRIGGER_SEVERITIES:
+                return True
+
+    return False
 
 
 # ==============================================================================
@@ -76,6 +107,12 @@ class ReservationManagementVehicleSummarySerializer(serializers.Serializer):
 class ReservationManagementInspectionSerializer(serializers.ModelSerializer):
     photos = InspectionPhotoReadSerializer(many=True, read_only=True)
     damages = InspectionDamageReadSerializer(many=True, read_only=True)
+    completed_by_name = serializers.SerializerMethodField()
+
+    def get_completed_by_name(self, obj):
+        if obj.completed_by is None:
+            return None
+        return obj.completed_by.get_full_name().strip() or None
 
     class Meta:
         model = Inspection
@@ -85,17 +122,66 @@ class ReservationManagementInspectionSerializer(serializers.ModelSerializer):
             "status",
             "mileage",
             "energy_level_percent",
+            "general_condition",
             "comments",
             "has_critical_issue",
             "critical_issue_description",
             "started_at",
             "completed_at",
             "completed_by",
+            "completed_by_name",
             "created_at",
             "updated_at",
             "photos",
             "damages",
         ]
+
+
+class ReservationManagementPreviousSerializer(serializers.ModelSerializer):
+    """Etat resume de la reservation precedente du meme vehicule (comparaison manager).
+
+    Reutilise ReservationManagementInspectionSerializer : aucune duplication des
+    photos/dommages, seule une lecture des inspections deja existantes.
+    """
+
+    client_summary = ReservationManagementClientSummarySerializer(source="*", read_only=True)
+    rental_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    departure_inspection = serializers.SerializerMethodField()
+    return_inspection = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Reservation
+        fields = [
+            "id",
+            "reference",
+            "client_summary",
+            "start_at",
+            "end_at",
+            "status",
+            "rental_amount",
+            "deposit_amount",
+            "departure_inspection",
+            "return_inspection",
+        ]
+
+    def _get_inspection(self, obj, inspection_type):
+        for inspection in obj.inspections.all():
+            if inspection.inspection_type == inspection_type:
+                return inspection
+        return None
+
+    def get_departure_inspection(self, obj):
+        inspection = self._get_inspection(obj, Inspection.Type.INITIAL)
+        if inspection is None:
+            return None
+        return ReservationManagementInspectionSerializer(inspection, context=self.context).data
+
+    def get_return_inspection(self, obj):
+        inspection = self._get_inspection(obj, Inspection.Type.FINAL)
+        if inspection is None:
+            return None
+        return ReservationManagementInspectionSerializer(inspection, context=self.context).data
 
 
 # ==============================================================================
@@ -110,6 +196,10 @@ class ReservationManagementListSerializer(serializers.ModelSerializer):
     client_summary = ReservationManagementClientSummarySerializer(source="*", read_only=True)
     rental_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    needs_review = serializers.SerializerMethodField()
+
+    def get_needs_review(self, obj):
+        return _reservation_needs_review(obj)
 
     class Meta:
         model = Reservation
@@ -123,6 +213,7 @@ class ReservationManagementListSerializer(serializers.ModelSerializer):
             "status",
             "rental_amount",
             "deposit_amount",
+            "needs_review",
             "created_at",
             "confirmed_at",
             "cancelled_at",
@@ -140,6 +231,12 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
     interventions = serializers.SerializerMethodField()
     rental_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    needs_review = serializers.SerializerMethodField()
+    previous_reservation = serializers.SerializerMethodField()
+    vehicle_reference_inspection = serializers.SerializerMethodField()
+
+    def get_needs_review(self, obj):
+        return _reservation_needs_review(obj)
 
     class Meta:
         model = Reservation
@@ -157,6 +254,9 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
             "departure_inspection",
             "return_inspection",
             "interventions",
+            "needs_review",
+            "previous_reservation",
+            "vehicle_reference_inspection",
             "created_at",
             "confirmed_at",
             "cancelled_at",
@@ -196,6 +296,50 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
 
     def get_return_inspection(self, obj):
         inspection = self._get_inspection(obj, Inspection.Type.FINAL)
+        if inspection is None:
+            return None
+        return ReservationManagementInspectionSerializer(inspection, context=self.context).data
+
+    def get_previous_reservation(self, obj):
+        """Return the closest earlier reservation of the same vehicle, if any.
+
+        Used by the manager detail page to compare the vehicle's previous
+        check-in/check-out state with the current one. Read-only lookup: it
+        does not alter any reservation/inspection data.
+        """
+
+        previous = (
+            Reservation.objects.filter(vehicle_id=obj.vehicle_id, start_at__lt=obj.start_at)
+            .exclude(pk=obj.pk)
+            .select_related("client__user")
+            .prefetch_related(
+                Prefetch(
+                    "inspections",
+                    queryset=Inspection.objects.select_related("completed_by").prefetch_related(
+                        "photos",
+                        "damages",
+                        "damages__evidence_photos",
+                    ),
+                )
+            )
+            .order_by("-start_at")
+            .first()
+        )
+        if previous is None:
+            return None
+        return ReservationManagementPreviousSerializer(previous, context=self.context).data
+
+    def get_vehicle_reference_inspection(self, obj):
+        inspections = getattr(obj.vehicle, "prefetched_reference_inspections", None)
+        if inspections is None:
+            inspection = obj.vehicle.reference_inspections.filter(
+                inspection_type=Inspection.Type.REFERENCE,
+            ).first()
+        else:
+            inspection = next(
+                (item for item in inspections if item.inspection_type == Inspection.Type.REFERENCE),
+                None,
+            )
         if inspection is None:
             return None
         return ReservationManagementInspectionSerializer(inspection, context=self.context).data
@@ -256,6 +400,27 @@ class ReservationManagementIssueResponseSerializer(serializers.Serializer):
     message = serializers.CharField(read_only=True)
     reservation = ReservationManagementDetailSerializer(read_only=True)
     intervention = InterventionManagementResponseSerializer(read_only=True, allow_null=True)
+
+
+# ==============================================================================
+# Decision du gestionnaire suite a une anomalie signalee au check-in ("A verifier")
+# ==============================================================================
+
+
+class ReservationReviewDecisionRequestSerializer(serializers.Serializer):
+    decision = serializers.ChoiceField(choices=["PARK", "MAINTENANCE", "UNAVAILABLE"])
+
+
+class ReservationReviewDecisionResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(read_only=True)
+    reservation = ReservationManagementDetailSerializer(read_only=True)
+    intervention = InterventionManagementResponseSerializer(read_only=True, allow_null=True)
+
+
+class ReservationDepositReleaseResponseSerializer(serializers.Serializer):
+    message = serializers.CharField(read_only=True)
+    reservation = ReservationManagementDetailSerializer(read_only=True)
+    deposit_status = serializers.CharField(read_only=True)
 
 
 class ReservationReplacementVehicleSerializer(serializers.Serializer):

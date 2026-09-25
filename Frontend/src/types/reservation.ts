@@ -37,6 +37,9 @@ export interface ReservationVehicleSummary {
   transmission: string
   seats: number
   doors: number
+  registration_number: string
+  parking_name: string
+  parking_space_number: string
 }
 
 export interface ReservationCreateResponse {
@@ -50,6 +53,9 @@ export interface ReservationCreateResponse {
   insurance_type?: 'STANDARD' | 'DUO' | 'OMNIUM'
   deposit_amount: string
   total_amount: string
+  invoice_id?: number | null
+  actual_pickup_at?: string | null
+  actual_return_at?: string | null
   created_at: string
   confirmed_at?: string | null
   cancelled_at?: string | null

@@ -1,24 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
-import { AlertTriangle, CheckCircle2, Fuel, Gauge, UserRound, CarFront, Camera, FileWarning } from 'lucide-react'
+import { ArrowLeft, Gauge, CarFront, Camera, UserRound } from 'lucide-react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
-import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
-import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
+import StatusBadge from '../../components/ui/StatusBadge'
 import ReservationReassignmentPanel from '../../components/reservations/ReservationReassignmentPanel'
 import {
-  cancelVehicleUnavailableManagementReservation,
   getManagementReservationById,
+  releaseManagementReservationDeposit,
 } from '../../services/managementReservationService'
 import type {
-  ManagementDepositStatus,
   ManagementInspection,
   ManagementReservationStatus,
-  ReservationManagementDetail,
+  ReservationManagementClientSummary,
+  ReservationManagementVehicleSummary,
 } from '../../types/managementReservation'
 import type { InspectionPhoto, PhotoType } from '../../types/inspection'
 import { resolveMediaUrl } from '../../utils/media'
@@ -27,53 +26,28 @@ interface ManagerReservationDetailPageProps {
   basePath?: string
 }
 
-function mapStatusToUi(status: ManagementReservationStatus): { label: string; variant: StatusVariant } {
+function getReservationStatusLabel(status: ManagementReservationStatus): string {
   switch (status) {
     case 'BROUILLON':
-      return { label: 'Brouillon', variant: 'neutral' }
+      return 'Réservation en brouillon'
     case 'EN_ATTENTE_CAUTION':
-      return { label: 'En attente caution', variant: 'warning' }
+      return 'Réservation en attente de caution'
     case 'EN_ATTENTE_PAIEMENT':
-      return { label: 'En attente paiement', variant: 'warning' }
+      return 'Réservation en attente de paiement'
     case 'CONFIRMEE':
-      return { label: 'Confirmee', variant: 'success' }
+      return 'Réservation confirmée'
     case 'REAFFECTATION_REQUIRED':
-      return { label: 'À réaffecter', variant: 'warning' }
+      return 'Réservation à réaffecter'
     case 'EN_COURS':
-      return { label: 'En cours', variant: 'info' }
+      return 'Réservation en cours'
     case 'A_CONTROLER':
-      return { label: 'A verifier', variant: 'warning' }
+      return 'Réservation à contrôler'
     case 'TERMINEE':
-      return { label: 'Terminee', variant: 'success' }
+      return 'Réservation terminée'
     case 'ANNULEE':
-      return { label: 'Annulee', variant: 'danger' }
+      return 'Réservation annulée'
     case 'PAIEMENT_ECHOUE':
-      return { label: 'Paiement echoue', variant: 'danger' }
-  }
-}
-
-function mapDepositStatus(status: ManagementDepositStatus | null): { label: string; variant: StatusVariant } {
-  switch (status) {
-    case 'A_VERIFIER':
-      return { label: 'A verifier', variant: 'warning' }
-    case 'AUTORISEE':
-      return { label: 'Autorisee', variant: 'info' }
-    case 'LIBEREE':
-      return { label: 'Liberee', variant: 'success' }
-    case 'CAPTUREE':
-      return { label: 'Capturee', variant: 'danger' }
-    case 'ECHOUEE':
-      return { label: 'Echouee', variant: 'danger' }
-    case 'ANNULEE':
-      return { label: 'Annulee', variant: 'neutral' }
-    case 'EXPIREE':
-      return { label: 'Expiree', variant: 'neutral' }
-    case 'EN_ATTENTE':
-      return { label: 'En attente', variant: 'warning' }
-    case 'CREE':
-      return { label: 'Creee', variant: 'neutral' }
-    default:
-      return { label: 'Inconnue', variant: 'neutral' }
+      return 'Réservation au paiement échoué'
   }
 }
 
@@ -95,19 +69,23 @@ function formatDateTime(value: string | null): string {
 
 function formatNullableNumber(value: number | null | undefined, suffix = ''): string {
   if (value === null || value === undefined) {
-    return 'Non renseigne'
+    return '—'
   }
 
   return `${value}${suffix}`
 }
 
-function toVehicleLabel(reservation: ReservationManagementDetail): string {
-  return `${reservation.vehicle.brand} ${reservation.vehicle.model_name}`.trim()
-}
-
-function toClientLabel(reservation: ReservationManagementDetail): string {
-  const fullName = `${reservation.client_summary.first_name} ${reservation.client_summary.last_name}`.trim()
-  return fullName || reservation.client_summary.email
+function formatGeneralCondition(value: ManagementInspection['general_condition']): string {
+  switch (value) {
+    case 'BON':
+      return 'Bon'
+    case 'A_SURVEILLER':
+      return 'À surveiller'
+    case 'MAUVAIS':
+      return 'Mauvais'
+    default:
+      return 'Non renseigné'
+  }
 }
 
 function toErrorState(error: unknown): { title: string; message: string } {
@@ -147,14 +125,153 @@ function Field({ label, value }: { label: string; value: string }) {
   )
 }
 
+function displayValue(value: string | null | undefined): string {
+  return value?.trim() || '—'
+}
+
+function formatClientName(client: ReservationManagementClientSummary): string {
+  return displayValue(`${client.first_name} ${client.last_name}`.trim())
+}
+
+function formatAmount(value: string | null | undefined): string {
+  return value?.trim() ? `${value} EUR` : '—'
+}
+
+function formatCurrency(value: string | null | undefined): string {
+  if (!value?.trim()) {
+    return '—'
+  }
+
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) {
+    return `${value} EUR`
+  }
+
+  return new Intl.NumberFormat('fr-FR', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 2,
+  }).format(amount)
+}
+
+function getParkingLabel(vehicle: ReservationManagementVehicleSummary): string {
+  const parkingParts = [vehicle.parking_name, vehicle.parking_space_number]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+
+  return parkingParts.length > 0 ? parkingParts.join(' / ') : '—'
+}
+
+function SummaryGroup({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`border-t border-[#E5E7EB] pt-4 first:border-t-0 first:pt-0 md:border-t-0 md:pt-0 lg:border-l lg:pl-4 lg:first:border-l-0 lg:first:pl-0 ${className}`}>
+      {children}
+    </div>
+  )
+}
+
+interface ReservationSummaryCardProps {
+  title: string
+  vehicle: ReservationManagementVehicleSummary
+  client: ReservationManagementClientSummary
+  rentalAmount: string
+  depositAmount: string
+  startAt: string
+  endAt: string
+  departureInspection: ManagementInspection | null
+  returnInspection: ManagementInspection | null
+}
+
+function ReservationSummaryCard({
+  title,
+  vehicle,
+  client,
+  rentalAmount,
+  depositAmount,
+  startAt,
+  endAt,
+  departureInspection,
+  returnInspection,
+}: ReservationSummaryCardProps) {
+  const photoUrl = resolveMediaUrl(vehicle.main_photo?.file)
+  const vehicleName = displayValue(`${vehicle.brand} ${vehicle.model_name}`.trim())
+
+  return (
+    <Card
+      className="rounded-2xl"
+      header={(
+        <div className="flex items-center gap-2.5">
+          <UserRound className="h-5 w-5 text-[#0F766E]" aria-hidden="true" />
+          <h2 className="text-lg font-semibold text-[#0F172A]">{title}</h2>
+        </div>
+      )}
+    >
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-[1.4fr_1.05fr_.8fr_1.55fr_.8fr] lg:gap-0">
+        <SummaryGroup>
+          <div className="flex items-center gap-3">
+            <div className="h-20 w-28 shrink-0 overflow-hidden rounded-lg border border-[#E2E8F0] bg-[#F8FAFC]">
+              {photoUrl ? (
+                <img src={photoUrl} alt={vehicleName} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full items-center justify-center text-slate-400">
+                  <CarFront className="h-7 w-7" aria-hidden="true" />
+                  <span className="sr-only">Photo indisponible</span>
+                </div>
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[#0F172A]">{vehicleName}</p>
+              <p className="mt-1 text-sm text-slate-500">{displayValue(vehicle.category)}</p>
+              <p className="mt-1 text-sm text-[#1F2937]">{displayValue(vehicle.registration_plate)}</p>
+            </div>
+          </div>
+        </SummaryGroup>
+
+        <SummaryGroup>
+          <Field label="Client" value={formatClientName(client)} />
+          <div className="mt-4">
+            <Field label="E-mail" value={displayValue(client.email)} />
+          </div>
+        </SummaryGroup>
+
+        <SummaryGroup>
+          <Field label="Montant location" value={formatAmount(rentalAmount)} />
+          <div className="mt-4">
+            <Field label="Caution" value={formatAmount(depositAmount)} />
+          </div>
+        </SummaryGroup>
+
+        <SummaryGroup>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Période réservée</p>
+              <p className="mt-1 text-sm text-[#1F2937]">{formatDateTime(startAt)}</p>
+              <p className="mt-1 text-sm text-[#1F2937]">{formatDateTime(endAt)}</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Période réelle</p>
+              <p className="mt-1 text-sm text-[#1F2937]">{formatDateTime(departureInspection?.completed_at ?? null)}</p>
+              <p className="mt-1 text-sm text-[#1F2937]">{formatDateTime(returnInspection?.completed_at ?? null)}</p>
+            </div>
+          </div>
+        </SummaryGroup>
+
+        <SummaryGroup>
+          <Field label="Parking / Place" value={getParkingLabel(vehicle)} />
+        </SummaryGroup>
+      </div>
+    </Card>
+  )
+}
+
 function SectionHeader({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle?: string }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#E0F2FE] text-[#0F766E]">
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#E0F2FE] text-[#0F766E]">
         {icon}
       </div>
       <div>
-        <h2 className="text-lg font-semibold text-[#0F172A]">{title}</h2>
+        <h2 className="text-xl font-semibold text-[#0F172A]">{title}</h2>
         {subtitle ? <p className="text-sm text-slate-500">{subtitle}</p> : null}
       </div>
     </div>
@@ -170,11 +287,11 @@ type PhotoComparisonSlot = {
 const RETURN_COMPARISON_SLOTS: PhotoComparisonSlot[] = [
   { label: 'Avant gauche', photoType: 'AVANT' },
   { label: 'Avant droit', photoType: 'COTE_DROIT' },
-  { label: 'Arriere gauche', photoType: 'COTE_GAUCHE' },
-  { label: 'Arriere droit', photoType: 'ARRIERE' },
+  { label: 'Arrière gauche', photoType: 'COTE_GAUCHE' },
+  { label: 'Arrière droit', photoType: 'ARRIERE' },
   { label: 'Tableau de bord', photoType: 'TABLEAU_DE_BORD' },
-  { label: 'Sieges avant', photoType: 'INTERIEUR', position: 1 },
-  { label: 'Sieges arriere', photoType: 'INTERIEUR', position: 2 },
+  { label: 'Sièges avant', photoType: 'INTERIEUR', position: 1 },
+  { label: 'Sièges arrière', photoType: 'INTERIEUR', position: 2 },
   { label: 'Coffre', photoType: 'AUTRE', position: 1 },
 ]
 
@@ -196,77 +313,142 @@ function findPhotoBySlot(inspection: ManagementInspection | null, slot: PhotoCom
   }) ?? null
 }
 
-function PhotoCell({ photo, alt }: { photo: InspectionPhoto | null; alt: string }) {
+function InspectionPhotoThumbnail({ photo, label }: { photo: InspectionPhoto | null; label: string }) {
   const src = resolveMediaUrl(photo?.file)
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white">
-      <div className="aspect-4/3 bg-[#E5E7EB]">
+    <div className="min-w-0">
+      <div className="aspect-square overflow-hidden rounded-lg border border-[#E2E8F0] bg-[#F8FAFC]">
         {src ? (
-          <img src={src} alt={alt} className="h-full w-full object-cover" />
+          <img src={src} alt={label} className="h-full w-full object-cover" loading="lazy" />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-slate-500">Photo indisponible</div>
+          <div className="flex h-full items-center justify-center px-1 text-center text-xs leading-tight text-slate-500">
+            Non disponible
+          </div>
         )}
       </div>
+      <p className="mt-1 min-h-8 text-center text-xs font-medium leading-4 text-slate-600">{label}</p>
     </div>
   )
 }
 
-function DamageList({ damages, emptyLabel }: { damages: ManagementInspection['damages']; emptyLabel: string }) {
-  if (damages.length === 0) {
-    return <p className="text-sm text-slate-500">{emptyLabel}</p>
-  }
-
-  return (
-    <div className="space-y-3">
-      {damages.map((damage) => (
-        <article key={damage.id} className="rounded-3xl border border-[#FECACA] bg-[#FEF2F2] p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-[#7F1D1D]">{damage.location}</p>
-            <StatusBadge variant={damage.severity === 'CRITIQUE' || damage.severity === 'MAJEUR' ? 'danger' : 'warning'} label={damage.severity} />
-          </div>
-          <p className="mt-2 text-sm text-[#991B1B]">{damage.description}</p>
-        </article>
-      ))}
-    </div>
-  )
+interface InspectionComparisonCardProps {
+  title: string
+  inspection: ManagementInspection | null
+  headerClassName: string
 }
 
-function InspectionSummary({ inspection, title, accent }: { inspection: ManagementInspection | null; title: string; accent: string }) {
-  return (
-    <Card
-      className="h-full"
-      header={
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-[#0F172A]">{title}</h3>
-            <p className="text-sm text-slate-500">Lecture rapide des elements saisis.</p>
-          </div>
-          {inspection ? <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${accent}`}>{inspection.status ?? '—'}</span> : null}
-        </div>
-      }
-    >
-      {inspection ? (
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Kilometrage" value={formatNullableNumber(inspection.mileage, ' km')} />
-            <Field label="Energie / carburant" value={formatNullableNumber(inspection.energy_level_percent, ' %')} />
-            <Field label="Declaration du client" value={inspection.comments?.trim() ? inspection.comments : 'Aucune declaration'} />
-            <Field label="Cloture" value={formatDateTime(inspection.completed_at ?? null)} />
-          </div>
+function InspectionComparisonCard({ title, inspection, headerClassName }: InspectionComparisonCardProps) {
+  const inspectionDate = inspection?.completed_at ?? inspection?.started_at ?? null
+  const completedByName = inspection?.completed_by_name?.trim() || 'Non disponible'
 
-          {inspection.has_critical_issue ? (
-            <Alert
-              variant="warning"
-              title="Anomalie declaree par le client"
-              message={inspection.critical_issue_description?.trim() || 'Une anomalie critique a ete signalee sans detail complementaire.'}
+  return (
+    <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+      <header className={`h-24 shrink-0 border-b px-4 py-3 ${headerClassName}`}>
+        <h3 className="flex h-10 items-start text-[15px] font-semibold leading-5 text-[#0F172A]">{title}</h3>
+        <p className="mt-1 h-5 text-sm leading-5 text-slate-600">{inspectionDate ? formatDateTime(inspectionDate) : 'Non disponible'}</p>
+      </header>
+      <div className="flex flex-1 flex-col p-4">
+        <div className="grid grid-cols-4 gap-2">
+          {RETURN_COMPARISON_SLOTS.map((slot) => (
+            <InspectionPhotoThumbnail
+              key={`${slot.photoType}-${slot.position ?? 0}`}
+              photo={findPhotoBySlot(inspection, slot)}
+              label={slot.label}
             />
-          ) : null}
+          ))}
         </div>
-      ) : (
-        <p className="text-sm text-slate-500">Inspection indisponible.</p>
-      )}
-    </Card>
+        <p className="mt-4 border-t border-[#E5E7EB] pt-3 text-sm text-[#1F2937]">
+          <span className="font-semibold">Par :</span> {completedByName}
+        </p>
+      </div>
+    </article>
+  )
+}
+
+function getSeverityBadge(severity: ManagementInspection['damages'][number]['severity']): { label: string; variant: 'warning' | 'danger' } {
+  switch (severity) {
+    case 'GRAVE':
+      return { label: 'Dangereux', variant: 'danger' }
+    case 'ACCEPTABLE':
+      return { label: 'Acceptable', variant: 'warning' }
+    case 'CRITIQUE':
+      return { label: 'Critique', variant: 'danger' }
+    case 'MAJEUR':
+      return { label: 'Majeur', variant: 'danger' }
+    case 'MODERE':
+      return { label: 'Modéré', variant: 'warning' }
+    case 'MINEUR':
+      return { label: 'Mineur', variant: 'warning' }
+  }
+}
+
+interface InspectionMetricsCardProps {
+  title: string
+  inspection: ManagementInspection | null
+  headerClassName: string
+}
+
+function InspectionMetricsCard({ title, inspection, headerClassName }: InspectionMetricsCardProps) {
+  const inspectionDate = inspection?.completed_at ?? inspection?.started_at ?? null
+  const damages = inspection?.damages ?? []
+
+  return (
+    <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+      <header className={`min-h-20 border-b px-4 py-3 ${headerClassName}`}>
+        <h3 className="text-[15px] font-semibold leading-5 text-[#0F172A]">{title}</h3>
+        <p className="mt-1 text-sm text-slate-600">{inspectionDate ? formatDateTime(inspectionDate) : 'Non disponible'}</p>
+      </header>
+      <div className="flex flex-1 flex-col p-4">
+        <div className="grid h-32 shrink-0 grid-cols-2 grid-rows-2 gap-x-3 gap-y-4">
+          <div className="min-h-13">
+            <Field label="Kilométrage" value={formatNullableNumber(inspection?.mileage, ' km')} />
+          </div>
+          <div className="min-h-13">
+            <Field label="Carburant / énergie" value={formatNullableNumber(inspection?.energy_level_percent, ' %')} />
+          </div>
+          <div className="col-span-2 min-h-13">
+            <Field label="Propreté / état général" value={formatGeneralCondition(inspection?.general_condition)} />
+          </div>
+        </div>
+
+        <div className="mt-5 border-t border-[#E5E7EB] pt-4">
+          <h4 className="text-sm font-semibold text-[#0F172A]">Dommages relevés</h4>
+          {damages.length === 0 ? (
+            <p className="mt-3 text-sm text-slate-500">Aucun dommage constaté</p>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {damages.map((damage) => {
+                const severity = getSeverityBadge(damage.severity)
+                const evidencePhoto = inspection?.photos.find((photo) => damage.photo_ids.includes(photo.id)) ?? null
+                const evidencePhotoUrl = resolveMediaUrl(evidencePhoto?.file)
+
+                return (
+                  <div key={damage.id} className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                    <div className="flex items-start gap-3">
+                      {evidencePhotoUrl ? (
+                        <img
+                          src={evidencePhotoUrl}
+                          alt={`Preuve du dommage : ${damage.description}`}
+                          className="h-14 w-14 shrink-0 rounded-lg border border-[#E2E8F0] object-cover"
+                          loading="lazy"
+                        />
+                      ) : null}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm leading-5 text-[#1F2937]">{displayValue(damage.description)}</p>
+                        <div className="mt-2">
+                          <StatusBadge label={severity.label} variant={severity.variant} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
   )
 }
 
@@ -278,8 +460,6 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
   const queryClient = useQueryClient()
   const reservationId = Number(id)
   const isValidReservationId = Number.isInteger(reservationId) && reservationId > 0
-  const [decisionInfo, setDecisionInfo] = useState<string | null>(null)
-  const [isVehicleUnavailableCancellationOpen, setIsVehicleUnavailableCancellationOpen] = useState(false)
   const toastMessage = (location.state as { toast?: string } | null)?.toast ?? null
 
   useEffect(() => {
@@ -298,10 +478,9 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
     enabled: isValidReservationId,
   })
 
-  const vehicleUnavailableCancellationMutation = useMutation({
-    mutationFn: () => cancelVehicleUnavailableManagementReservation(reservationId),
+  const depositReleaseMutation = useMutation({
+    mutationFn: () => releaseManagementReservationDeposit(reservationId),
     onSuccess: async () => {
-      setIsVehicleUnavailableCancellationOpen(false)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['manager-reservations'] }),
         queryClient.invalidateQueries({ queryKey: ['manager-reservation-detail', reservationId] }),
@@ -353,247 +532,182 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
     return <ReservationReassignmentPanel reservation={reservation} basePath={basePath} />
   }
 
-  const reservationStatus = mapStatusToUi(reservation.status)
-  const depositStatus = mapDepositStatus(reservation.deposit_status)
+  const reservationStatusLabel = getReservationStatusLabel(reservation.status)
   const departureInspection = reservation.departure_inspection
   const returnInspection = reservation.return_inspection
-  const isManagerActionable = reservation.status === 'A_CONTROLER'
-  const departureMileage = departureInspection?.mileage ?? null
-  const returnMileage = returnInspection?.mileage ?? null
-  const mileageDelta =
-    typeof departureMileage === 'number' && typeof returnMileage === 'number'
-      ? returnMileage - departureMileage
-      : null
+  const isDepositDecisionPending = reservation.deposit_status === 'AUTORISEE' || reservation.deposit_status === 'A_VERIFIER'
 
   return (
-    <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+    <section className="mx-auto w-full max-w-[1250px] space-y-5 px-3 py-6 sm:px-4 lg:px-5">
       {toastMessage ? (
         <div role="status" className="fixed right-4 top-20 z-50 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-medium text-white shadow-lg">
           {toastMessage}
         </div>
       ) : null}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#0F766E]">Espace gestionnaire</p>
-          <h1 className="mt-2 text-3xl font-bold text-[#0F172A]">
-            {isManagerActionable ? 'Contrôle du retour' : 'Détail de la réservation'}
-          </h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-600">
-            {isManagerActionable
-              ? 'Analysez l’état du véhicule au retour avant de prendre une décision.'
-              : 'Consultez les informations de la réservation, du client et du véhicule.'}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <StatusBadge variant={reservationStatus.variant} label={`Reservation ${reservationStatus.label}`} />
-          <StatusBadge variant={depositStatus.variant} label={`Caution ${depositStatus.label}`} />
-          <Link to={`${basePath}/reservations`}>
-            <Button variant="secondary">Retour a la liste</Button>
+      <header className="flex flex-col gap-3 pb-1 md:flex-row md:items-center md:justify-between">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+          <Link to={`${basePath}/reservations`} className="shrink-0 self-start sm:self-auto">
+            <Button variant="secondary" size="sm">
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              Retour à la liste
+            </Button>
           </Link>
+          <h1 className="text-3xl font-bold text-[#0F172A]">Détail de la réservation</h1>
         </div>
-      </div>
-
-      {decisionInfo ? <Alert variant="info" title="Decision preparee" message={decisionInfo} /> : null}
-
-      {reservation.status === 'CONFIRMEE' ? (
-        <Card className="border-red-200 bg-red-50" header={<h2 className="text-base font-semibold text-[#991B1B]">Indisponibilité du véhicule</h2>}>
-          <p className="text-sm leading-6 text-[#7F1D1D]">Annulez cette réservation uniquement si le véhicule est indisponible. Aucun véhicule de remplacement ne sera proposé automatiquement.</p>
-          {vehicleUnavailableCancellationMutation.isError ? <Alert className="mt-4" variant="danger" title="Annulation impossible" message={toErrorState(vehicleUnavailableCancellationMutation.error).message} /> : null}
-          <div className="mt-4 flex flex-wrap justify-end gap-2">
-            <Button variant="danger" onClick={() => setIsVehicleUnavailableCancellationOpen(true)}>Annuler pour indisponibilité du véhicule</Button>
-          </div>
-          {isVehicleUnavailableCancellationOpen ? (
-            <div className="mt-4 border-t border-red-200 pt-4">
-              <p className="text-sm leading-6 text-[#7F1D1D]">Confirmez l’annulation de la réservation {reservation.reference}. Le remboursement des sommes éligibles et la libération de la caution seront déclenchés.</p>
-              <div className="mt-4 flex flex-wrap justify-end gap-2">
-                <Button variant="secondary" onClick={() => setIsVehicleUnavailableCancellationOpen(false)} disabled={vehicleUnavailableCancellationMutation.isPending}>Retour</Button>
-                <Button variant="danger" onClick={() => vehicleUnavailableCancellationMutation.mutate()} disabled={vehicleUnavailableCancellationMutation.isPending}>{vehicleUnavailableCancellationMutation.isPending ? 'Annulation...' : 'Confirmer l’annulation'}</Button>
-              </div>
-            </div>
-          ) : null}
-        </Card>
-      ) : null}
-
-      {reservation.status !== 'A_CONTROLER' ? (
-        <Alert
-          variant="warning"
-          title="Reservation hors file de controle"
-          message="Cette reservation n'est pas actuellement dans le statut A verifier. Les donnees restent consultables pour comparaison."
-        />
-      ) : null}
-
-      <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
-        <Card
-          className="bg-[linear-gradient(135deg,#F8FAFC_0%,#EFF6FF_100%)]"
-          header={<SectionHeader icon={<FileWarning className="h-5 w-5" />} title="Synthese du retour" subtitle="Reservation, client, vehicule et periode de location." />}
-        >
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <Field label="Reference" value={reservation.reference} />
-            <Field label="Client" value={toClientLabel(reservation)} />
-            <Field label="E-mail" value={reservation.client_summary.email || 'Non renseigne'} />
-            <Field label="Vehicule" value={toVehicleLabel(reservation)} />
-            <Field label="Immatriculation" value={reservation.vehicle.registration_plate || 'Non renseignee'} />
-            <Field label="Dates de location" value={`${formatDateTime(reservation.start_at)} → ${formatDateTime(reservation.end_at)}`} />
-          </div>
-        </Card>
-
-        <Card
-          className="bg-[linear-gradient(135deg,#FFF7ED_0%,#FFFBEB_100%)]"
-          header={<SectionHeader icon={<AlertTriangle className="h-5 w-5" />} title="Caution" subtitle="Statut financier a verifier avant toute decision." />}
-        >
-          <div className="space-y-4">
-            <div className="rounded-3xl border border-[#F59E0B] bg-white/80 p-5">
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Lecture rapide</p>
-              <p className="mt-3 text-2xl font-bold text-[#9A3412]">Caution : {reservation.deposit_amount} EUR — {depositStatus.label}</p>
-              <p className="mt-2 text-sm text-slate-600">
-                Montant enregistré : {reservation.deposit_amount} EUR. Statut actuel : {depositStatus.label}.
-              </p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Montant location" value={`${reservation.rental_amount} EUR`} />
-              <Field label="Statut caution" value={depositStatus.label} />
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {isManagerActionable ? <Card
-        header={<SectionHeader icon={<CheckCircle2 className="h-5 w-5" />} title="Decision du gestionnaire" subtitle="Les consequences metier/financieres seront branchees dans une prochaine tache." />}
-      >
-        <div className="flex flex-wrap gap-3">
-          <Button
-            disabled={!isManagerActionable}
-            className="min-w-55 justify-center"
-            onClick={() => {
-              setDecisionInfo('Validation preparee. Cette action sera connectee plus tard a la liberation caution, cloture reservation, disponibilite vehicule et facture finale.')
-            }}
-          >
-            ✓ Valider le retour
-          </Button>
-          <Button
-            variant="danger"
-            disabled={!isManagerActionable}
-            className="min-w-55 justify-center"
-            onClick={() => {
-              setDecisionInfo('Signalement prepare. Cette action sera connectee plus tard au maintien caution et a l orientation maintenance/nettoyage.')
-            }}
-          >
-            ⚠ Signaler une anomalie
-          </Button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2 md:justify-end">
+          <StatusBadge variant="success" label={reservationStatusLabel} />
+          {isDepositDecisionPending ? <StatusBadge variant="info" label="Caution à décider" /> : null}
         </div>
-        <p className="mt-3 text-sm text-slate-500">Les actions sont reservees aux gestionnaires autorises.</p>
-      </Card> : null}
+      </header>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <InspectionSummary inspection={departureInspection} title="Etat des lieux depart" accent="bg-[#DBEAFE] text-[#1D4ED8]" />
-        <InspectionSummary inspection={returnInspection} title="Etat des lieux retour" accent="bg-[#FEF3C7] text-[#B45309]" />
-      </div>
-
-      <Card
-        header={<SectionHeader icon={<Camera className="h-5 w-5" />} title="Comparaison visuelle" subtitle="Etat au depart et au retour, photo par photo." />}
-      >
-        <div className="space-y-4">
-          {RETURN_COMPARISON_SLOTS.map((slot) => {
-            const departurePhoto = findPhotoBySlot(departureInspection, slot)
-            const returnPhoto = findPhotoBySlot(returnInspection, slot)
-
-            return (
-              <article key={`${slot.photoType}-${slot.position ?? 0}`} className="rounded-3xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
-                <p className="mb-3 text-sm font-semibold text-[#0F172A]">{slot.label}</p>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Etat au depart</p>
-                    <PhotoCell photo={departurePhoto} alt={`${slot.label} depart`} />
-                  </div>
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Etat au retour</p>
-                    <PhotoCell photo={returnPhoto} alt={`${slot.label} retour`} />
-                  </div>
-                </div>
-              </article>
-            )
-          })}
-        </div>
-      </Card>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card header={<SectionHeader icon={<Gauge className="h-5 w-5" />} title="Releves compares" subtitle="Kilometrage et energie declares au depart et au retour." />}>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-3xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
-              <div className="flex items-center gap-2 text-[#334155]">
-                <Gauge className="h-4 w-4" />
-                <p className="text-sm font-semibold">Kilometrage</p>
-              </div>
-              <p className="mt-3 text-sm text-slate-600">Depart: {formatNullableNumber(departureInspection?.mileage, ' km')}</p>
-              <p className="mt-1 text-sm text-slate-600">Retour: {formatNullableNumber(returnInspection?.mileage, ' km')}</p>
-              <p className="mt-1 text-sm text-slate-600">Difference: {mileageDelta === null ? 'Non calculee' : `${mileageDelta} km`}</p>
-            </div>
-            <div className="rounded-3xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
-              <div className="flex items-center gap-2 text-[#334155]">
-                <Fuel className="h-4 w-4" />
-                <p className="text-sm font-semibold">Carburant / energie</p>
-              </div>
-              <p className="mt-3 text-sm text-slate-600">Depart: {formatNullableNumber(departureInspection?.energy_level_percent, ' %')}</p>
-              <p className="mt-1 text-sm text-slate-600">Retour: {formatNullableNumber(returnInspection?.energy_level_percent, ' %')}</p>
-            </div>
-          </div>
-        </Card>
-
-        <Card header={<SectionHeader icon={<UserRound className="h-5 w-5" />} title="Declaration du client" subtitle="Synthese textuelle et signalements declares." />}>
-          <div className="space-y-4">
-            <div className="rounded-3xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 text-sm text-slate-700">
-              {returnInspection?.comments?.trim() ? returnInspection.comments : 'Aucune declaration client complementaire.'}
-            </div>
-            {returnInspection?.has_critical_issue ? (
-              <Alert
-                variant="warning"
-                title="Anomalie signalee"
-                message={returnInspection.critical_issue_description?.trim() || 'Une anomalie a ete signalee sans description detaillee.'}
-              />
-            ) : null}
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card header={<SectionHeader icon={<CarFront className="h-5 w-5" />} title="Dommages presents au depart" />}>
-          <DamageList
-            damages={departureInspection?.damages ?? []}
-            emptyLabel="Aucun dommage n'etait enregistre au depart."
+      <div className="space-y-4">
+        {reservation.previous_reservation ? (
+          <ReservationSummaryCard
+            title="Avant-dernier client"
+            vehicle={reservation.vehicle}
+            client={reservation.previous_reservation.client_summary}
+            rentalAmount={reservation.previous_reservation.rental_amount}
+            depositAmount={reservation.previous_reservation.deposit_amount}
+            startAt={reservation.previous_reservation.start_at}
+            endAt={reservation.previous_reservation.end_at}
+            departureInspection={reservation.previous_reservation.departure_inspection}
+            returnInspection={reservation.previous_reservation.return_inspection}
           />
-        </Card>
-        <Card header={<SectionHeader icon={<AlertTriangle className="h-5 w-5" />} title="Dommages declares au retour" />}>
-          <DamageList
-            damages={returnInspection?.damages ?? []}
-            emptyLabel="Aucun dommage n'a ete declare au retour."
-          />
-        </Card>
-      </div>
-
-      <Card header={<SectionHeader icon={<FileWarning className="h-5 w-5" />} title="Suivi gestionnaire" subtitle="Interventions et orientations en cours apres controle retour." />}>
-        {reservation.interventions.length > 0 ? (
-          <div className="space-y-3">
-            {reservation.interventions.map((intervention) => (
-              <article key={intervention.id} className="rounded-3xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-[#0F172A]">{intervention.reference}</p>
-                  <StatusBadge label={intervention.status} variant={intervention.status === 'TERMINEE' ? 'success' : 'warning'} />
-                </div>
-                <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{intervention.intervention_type}</p>
-                <p className="mt-2 whitespace-pre-line text-sm text-slate-700">{intervention.description || 'Aucune description.'}</p>
-              </article>
-            ))}
-          </div>
         ) : (
-          <p className="text-sm text-slate-500">Aucun suivi gestionnaire n'a encore ete ouvert pour ce retour.</p>
+          <Card
+            className="rounded-2xl"
+            header={(
+              <div className="flex items-center gap-2.5">
+                <UserRound className="h-5 w-5 text-[#0F766E]" aria-hidden="true" />
+                <h2 className="text-lg font-semibold text-[#0F172A]">Avant-dernier client</h2>
+              </div>
+            )}
+          >
+            <p className="text-sm text-slate-500">Aucune réservation précédente disponible</p>
+          </Card>
         )}
-      </Card>
 
-      {!departureInspection && !returnInspection ? (
-        <EmptyState
-          title="Aucune inspection a comparer"
-          description="Les etats des lieux de depart et de retour ne sont pas encore disponibles pour cette reservation."
+        <ReservationSummaryCard
+          title="Client actuel"
+          vehicle={reservation.vehicle}
+          client={reservation.client_summary}
+          rentalAmount={reservation.rental_amount}
+          depositAmount={reservation.deposit_amount}
+          startAt={reservation.start_at}
+          endAt={reservation.end_at}
+          departureInspection={departureInspection}
+          returnInspection={returnInspection}
         />
+      </div>
+
+      <section>
+        <SectionHeader icon={<Camera className="h-5 w-5" />} title="Comparaison des états des lieux" />
+        <div className="mt-3 grid items-stretch gap-3 md:grid-cols-2 lg:grid-cols-4">
+          <InspectionComparisonCard
+            title="Check-in avant-dernier client"
+            inspection={reservation.previous_reservation?.departure_inspection ?? null}
+            headerClassName="border-[#BBF7D0] bg-[#F0FDF4]"
+          />
+          <InspectionComparisonCard
+            title="Check-out avant-dernier client"
+            inspection={reservation.previous_reservation?.return_inspection ?? reservation.vehicle_reference_inspection}
+            headerClassName="border-[#BBF7D0] bg-[#F0FDF4]"
+          />
+          <InspectionComparisonCard
+            title="Check-in client actuel"
+            inspection={departureInspection}
+            headerClassName="border-[#BFDBFE] bg-[#EFF6FF]"
+          />
+          <InspectionComparisonCard
+            title="Check-out client actuel"
+            inspection={returnInspection}
+            headerClassName="border-[#BFDBFE] bg-[#EFF6FF]"
+          />
+        </div>
+      </section>
+
+      <section>
+        <SectionHeader icon={<Gauge className="h-5 w-5" />} title="Métriques et dommages" />
+        <div className="mt-3 grid items-stretch gap-3 md:grid-cols-2 lg:grid-cols-4">
+          <InspectionMetricsCard
+            title="Métriques check-in avant-dernier client"
+            inspection={reservation.previous_reservation?.departure_inspection ?? null}
+            headerClassName="border-[#BBF7D0] bg-[#F0FDF4]"
+          />
+          <InspectionMetricsCard
+            title="Métriques check-out avant-dernier client"
+            inspection={reservation.previous_reservation?.return_inspection ?? reservation.vehicle_reference_inspection}
+            headerClassName="border-[#BBF7D0] bg-[#F0FDF4]"
+          />
+          <InspectionMetricsCard
+            title="Métriques check-in client actuel"
+            inspection={departureInspection}
+            headerClassName="border-[#BFDBFE] bg-[#EFF6FF]"
+          />
+          <InspectionMetricsCard
+            title="Métriques check-out client actuel"
+            inspection={returnInspection}
+            headerClassName="border-[#BFDBFE] bg-[#EFF6FF]"
+          />
+        </div>
+      </section>
+
+      {reservation.deposit_status === 'AUTORISEE' || reservation.deposit_status === 'A_VERIFIER' ? (
+        <Card header={<h2 className="text-xl font-semibold text-[#0F172A]">Décision sur la caution</h2>}>
+          {depositReleaseMutation.isError ? (
+            <Alert
+              className="mb-4"
+              variant="danger"
+              title="Libération impossible"
+              message={toErrorState(depositReleaseMutation.error).message}
+            />
+          ) : null}
+          {depositReleaseMutation.isSuccess ? (
+            <Alert className="mb-4" variant="success" title="Caution libérée" message="La caution a été libérée avec succès." />
+          ) : null}
+
+          <div className="flex flex-col gap-4 border-b border-[#E5E7EB] pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="shrink-0">
+              <p className="text-sm font-medium text-slate-500">Caution</p>
+              <p className="mt-1 text-2xl font-bold text-[#0F172A]">{formatCurrency(reservation.deposit_amount)}</p>
+            </div>
+            <div className="max-w-2xl rounded-xl border border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3 text-sm leading-6 text-[#1E40AF]">
+              Comparez les 4 inspections (photos, métriques et dommages) pour décider du montant à rembourser ou à conserver.
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <button
+              type="button"
+              className="flex min-h-24 flex-col items-start justify-center rounded-xl bg-[#16A34A] px-5 py-4 text-left text-white shadow-sm transition-colors hover:bg-[#15803D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#16A34A] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={depositReleaseMutation.isPending}
+              onClick={() => depositReleaseMutation.mutate()}
+            >
+              <span className="text-base font-semibold">
+                {depositReleaseMutation.isPending ? 'Remboursement en cours...' : 'Rembourser la caution'}
+              </span>
+              <span className="mt-1 text-sm text-white/85">Remboursement intégral</span>
+            </button>
+            <button
+              type="button"
+              className="flex min-h-24 cursor-not-allowed flex-col items-start justify-center rounded-xl bg-[#F59E0B] px-5 py-4 text-left text-white opacity-60 shadow-sm"
+              disabled
+              title="Le remboursement partiel n'est pas disponible avec les actions existantes."
+            >
+              <span className="text-base font-semibold">Rembourser partiellement</span>
+              <span className="mt-1 text-sm text-white/85">Montant personnalisé</span>
+            </button>
+            <button
+              type="button"
+              className="flex min-h-24 cursor-not-allowed flex-col items-start justify-center rounded-xl bg-[#DC2626] px-5 py-4 text-left text-white opacity-60 shadow-sm"
+              disabled
+              title="Le blocage de caution n'est pas disponible avec les actions existantes."
+            >
+              <span className="text-base font-semibold">Bloquer la caution</span>
+              <span className="mt-1 text-sm text-white/85">Conserver tout ou partie</span>
+            </button>
+          </div>
+        </Card>
       ) : null}
     </section>
   )

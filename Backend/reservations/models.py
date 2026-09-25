@@ -34,6 +34,7 @@ class Reservation(models.Model):
 		PAIEMENT_ECHOUE = "PAIEMENT_ECHOUE", "Paiement echoue"
 
 	REFERENCE_HELP_TEXT = "Reference generee automatiquement par le backend."
+	DRAFT_HOLD_MINUTES = 15
 	ACTIVE_BOOKING_STATUSES = {
 		Status.EN_ATTENTE_CAUTION,
 		Status.EN_ATTENTE_PAIEMENT,
@@ -93,6 +94,11 @@ class Reservation(models.Model):
 	confirmed_at = models.DateTimeField(null=True, blank=True)
 	cancelled_at = models.DateTimeField(null=True, blank=True)
 	cancellation_reason = models.TextField(blank=True)
+	review_resolved_at = models.DateTimeField(
+		null=True,
+		blank=True,
+		help_text="Date a laquelle un gestionnaire a resolu l'indicateur d'anomalie au check-in (badge 'A verifier').",
+	)
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)
 

@@ -1142,7 +1142,7 @@ export default function ReservationPage() {
                         </div>
 
                         <div className="flex flex-wrap gap-3">
-                          <Button variant="primary" onClick={() => navigate(`/client/reservations/${confirmedReservation.id}`)}>
+                          <Button variant="primary" onClick={() => navigate(`/client/reservations?highlight=${confirmedReservation.id}`)}>
                             Voir ma réservation
                           </Button>
                           <Button variant="secondary" onClick={() => navigate('/')}>

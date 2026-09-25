@@ -240,7 +240,7 @@ function ReservationPanel({
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <Link to={`/client/reservations/${reservation.id}`}>
+          <Link to={`/client/reservations?highlight=${reservation.id}`}>
             <Button>
               Voir le detail
               <ChevronRight className="h-4 w-4" />
@@ -310,7 +310,7 @@ function CurrentReservationCard({
               </div>
             </div>
 
-            <Link to={`/client/reservations/${reservation.id}`}>
+            <Link to={`/client/reservations?highlight=${reservation.id}`}>
               <Button className={primaryButtonClassName}>
                 Voir les détails
                 <ChevronRight className="h-4 w-4" />
@@ -378,7 +378,7 @@ function FutureReservationCard({
               </div>
             </div>
 
-            <Link to={`/client/reservations/${reservation.id}`}>
+            <Link to={`/client/reservations?highlight=${reservation.id}`}>
               <Button className={primaryButtonClassName}>
                 Voir les détails
                 <ChevronRight className="h-4 w-4" />

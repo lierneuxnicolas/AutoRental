@@ -32,7 +32,6 @@ import ClientDashboardPage from '../pages/client/ClientDashboardPage'
 import PaymentPage from '../pages/client/PaymentPage'
 import ClientProfilePage from '../pages/client/ClientProfilePage'
 import ClientReservationsPage from '../pages/client/ClientReservationsPage'
-import ClientReservationDetailPage from '../pages/client/ClientReservationDetailPage'
 import ClientVehicleUnlockPage from '../pages/client/ClientVehicleUnlockPage'
 import DepartureInspectionPage, { DepartureInspectionInteriorPage } from '../pages/client/DepartureInspectionPage'
 import DepartureInspectionVehicleStatePage from '../pages/client/DepartureInspectionVehicleStatePage'
@@ -353,10 +352,6 @@ export default function AppRouter() {
             <Route
               path="reservations"
               element={<ClientReservationsPage />}
-            />
-            <Route
-              path="reservations/:id"
-              element={<ClientReservationDetailPage />}
             />
             <Route
               path="reservations/:id/unlock"

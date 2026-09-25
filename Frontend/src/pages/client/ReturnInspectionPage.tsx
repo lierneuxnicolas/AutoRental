@@ -67,10 +67,8 @@ const INTERIOR_PHOTO_SLOTS: InspectionStepPhotoSlot[] = [
 ]
 
 const SEVERITY_OPTIONS: Array<{ value: Severity; label: string }> = [
-  { value: 'MINEUR', label: 'Mineure' },
-  { value: 'MODERE', label: 'Moderee' },
-  { value: 'MAJEUR', label: 'Majeure' },
-  { value: 'CRITIQUE', label: 'Critique' },
+  { value: 'ACCEPTABLE', label: 'Acceptable' },
+  { value: 'GRAVE', label: 'Grave' },
 ]
 
 const ANOMALY_PHOTO_SLOTS = [
@@ -443,7 +441,7 @@ function ReturnInspectionStepOne() {
 
     initializationAttemptRef.current.attempted = true
     void startMutation.mutate()
-  }, [inspection, isReservationIdValid, reservationId, reservationQuery.isFetching, reservationQuery.isLoading, startMutation, startMutation.isPending])
+  }, [inspection, isReservationIdValid, reservationId, reservationQuery.isError, reservationQuery.isFetching, reservationQuery.isLoading, startMutation, startMutation.isPending])
 
   useEffect(() => {
     if (!reservationQuery.data?.return_inspection) {
@@ -573,7 +571,7 @@ function ReturnInspectionStepOne() {
           header={(
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat des lieux - Extérieur</h2>
-              <Link to={`/client/reservations/${reservationId}`}>
+              <Link to={`/client/reservations?highlight=${reservationId}`}>
                 <Button variant="secondary">Retour a la reservation</Button>
               </Link>
             </div>
@@ -728,7 +726,7 @@ export function ReturnInspectionInteriorPage() {
         header={(
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat des lieux - Intérieur</h2>
-            <Link to={`/client/reservations/${reservationId}`}>
+            <Link to={`/client/reservations?highlight=${reservationId}`}>
               <Button variant="secondary">Retour a la reservation</Button>
             </Link>
           </div>

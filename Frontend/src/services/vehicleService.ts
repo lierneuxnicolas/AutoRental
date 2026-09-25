@@ -41,3 +41,8 @@ export async function simulatePrice(payload: PriceSimulationRequest): Promise<Pr
   const { data } = await api.post<PriceSimulationResponse>('/simulations/', payload)
   return data
 }
+
+export async function getPopularVehicles(): Promise<PublicVehicle[]> {
+  const { data } = await api.get<PublicVehicle[]>('/vehicles/popular/')
+  return data
+}

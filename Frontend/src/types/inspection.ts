@@ -12,7 +12,7 @@ export type PhotoType =
   | 'DOMMAGE'
   | 'AUTRE'
 
-export type Severity = 'MINEUR' | 'MODERE' | 'MAJEUR' | 'CRITIQUE'
+export type Severity = 'MINEUR' | 'MODERE' | 'MAJEUR' | 'CRITIQUE' | 'ACCEPTABLE' | 'GRAVE'
 
 export interface Inspection {
   id: number
@@ -21,12 +21,14 @@ export interface Inspection {
   status?: InspectionStatus
   mileage?: number | null
   energy_level_percent?: number | null
+  general_condition?: 'BON' | 'A_SURVEILLER' | 'MAUVAIS' | null
   comments?: string
   has_critical_issue?: boolean
   critical_issue_description?: string
   started_at?: string | null
   completed_at?: string | null
   completed_by?: number | null
+  completed_by_name?: string | null
   created_at: string
   updated_at: string
 }

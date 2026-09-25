@@ -224,6 +224,9 @@ class InspectionDamageReadSerializer(serializers.ModelSerializer):
 
 
 class InspectionDamageCreateSerializer(serializers.ModelSerializer):
+	severity = serializers.ChoiceField(
+		choices=[Damage.Severity.ACCEPTABLE, Damage.Severity.GRAVE],
+	)
 	photo_ids = serializers.ListField(
 		child=serializers.IntegerField(min_value=1),
 		required=False,

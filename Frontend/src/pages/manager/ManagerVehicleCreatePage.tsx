@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import Button from '../../components/ui/Button'
 import VehicleManagementForm from '../../components/vehicles/VehicleManagementForm'
 import { createVehicle, getBrands, getParkingSpaceOptions, getVehicleCategoryOptions, getVehicleEquipmentCatalog, uploadVehiclePhoto } from '../../services/managementVehicleService'
-import type { VehicleManagementCreateRequest } from '../../types/managementVehicle'
+import type { VehicleInitialStateDraft, VehicleManagementCreateRequest } from '../../types/managementVehicle'
 
 interface ManagerVehicleCreatePageProps {
   basePath?: string
@@ -122,10 +122,12 @@ export default function ManagerVehicleCreatePage({ basePath = '/manager' }: Mana
   const equipmentQuery = useQuery({ queryKey: ['manager-vehicle-equipment-catalog'], queryFn: getVehicleEquipmentCatalog })
 
   const createMutation = useMutation({
-    mutationFn: (payload: VehicleManagementCreateRequest) => createVehicle(payload),
+    mutationFn: ({ payload, initialState }: { payload: VehicleManagementCreateRequest; initialState: VehicleInitialStateDraft }) => (
+      createVehicle(payload, initialState)
+    ),
   })
 
-  const handleSubmit = async (payload: VehicleManagementCreateRequest) => {
+  const handleSubmit = async (payload: VehicleManagementCreateRequest, initialState: VehicleInitialStateDraft) => {
     setApiError(null)
     setFieldErrors({})
 
@@ -135,7 +137,7 @@ export default function ManagerVehicleCreatePage({ basePath = '/manager' }: Mana
     }
 
     try {
-      const createdVehicle = await createMutation.mutateAsync(normalizedPayload)
+      const createdVehicle = await createMutation.mutateAsync({ payload: normalizedPayload, initialState })
 
       let uploadedPhotos = 0
       if (selectedPhotos.length > 0) {

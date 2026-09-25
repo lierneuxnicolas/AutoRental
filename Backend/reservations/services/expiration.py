@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
@@ -17,10 +18,11 @@ from payments.services.deposits import (
 )
 from reservations.models import Reservation
 from vehicles.models import Vehicle
-from vehicles.services import get_blocking_reservation_statuses
+from vehicles.services import get_blocking_reservation_filter
 
 
 SYSTEM_CANCELLATION_REASON = "Reservation annulee automatiquement : delai de prise en charge depasse."
+DRAFT_CANCELLATION_REASON = "Paiement non finalisé dans le délai imparti"
 
 
 @dataclass
@@ -40,8 +42,8 @@ def _has_initial_inspection(*, reservation_id: int) -> bool:
 
 def _has_other_blocking_reservations(*, reservation: Reservation, reference_time) -> bool:
     return Reservation.objects.filter(
+        get_blocking_reservation_filter(reference_time=reference_time),
         vehicle_id=reservation.vehicle_id,
-        status__in=get_blocking_reservation_statuses(),
         end_at__gt=reference_time,
     ).exclude(pk=reservation.pk).exists()
 
@@ -142,6 +144,107 @@ def expire_missed_reservations(*, reference_time=None) -> ExpireMissedReservatio
             create_system_log(
                 action="MISSED_RESERVATION_EXPIRE_ERROR",
                 message=f"Reservation id={reservation_id}: echec expiration automatique ({exc}).",
+                level=SystemLog.Level.ERROR,
+                user=None,
+            )
+            continue
+
+        if cancelled:
+            stats.cancelled += 1
+        else:
+            stats.ignored += 1
+
+    return stats
+
+
+def _apply_draft_expiration(*, reservation: Reservation, vehicle: Vehicle, reference_time) -> bool:
+    """Cancel `reservation` in place if it is a BROUILLON past its hold window.
+
+    Callers must already hold row locks (select_for_update) on both
+    `reservation` and `vehicle` within an active transaction.
+    """
+
+    if reservation.status != Reservation.Status.BROUILLON:
+        return False
+
+    hold_cutoff = reservation.created_at + timedelta(minutes=Reservation.DRAFT_HOLD_MINUTES)
+    if reference_time < hold_cutoff:
+        return False
+
+    reservation.status = Reservation.Status.ANNULEE
+    reservation.cancelled_at = reference_time
+    reservation.cancellation_reason = DRAFT_CANCELLATION_REASON
+    reservation.save(update_fields=["status", "cancelled_at", "cancellation_reason", "updated_at"])
+
+    vehicle_unblocked = False
+    if vehicle.status == Vehicle.Status.RESERVE and not _has_other_blocking_reservations(
+        reservation=reservation,
+        reference_time=reference_time,
+    ):
+        vehicle.status = Vehicle.Status.DISPONIBLE
+        vehicle.save(update_fields=["status", "updated_at"])
+        vehicle_unblocked = True
+
+    create_system_log(
+        action="DRAFT_RESERVATION_EXPIRED",
+        message=(
+            f"Reservation {reservation.reference} (id={reservation.id}) annulee automatiquement : "
+            f"brouillon expire (delai de {Reservation.DRAFT_HOLD_MINUTES} minutes depasse). "
+            f"Vehicle id={vehicle.id}, status={vehicle.status}, unblocked={vehicle_unblocked}."
+        ),
+        level=SystemLog.Level.WARNING,
+        user=None,
+    )
+
+    return True
+
+
+def expire_draft_reservation_if_stale(*, reservation: Reservation, reference_time=None) -> bool:
+    """Expire `reservation` immediately if it is a stale BROUILLON draft.
+
+    Intended for call sites (e.g. deposit authorization, payment-intent
+    creation) that already hold a row lock on `reservation` within an active
+    transaction. Returns True if the reservation was just cancelled.
+    """
+
+    now = reference_time or timezone.now()
+    vehicle = Vehicle.objects.select_for_update().get(pk=reservation.vehicle_id)
+    return _apply_draft_expiration(reservation=reservation, vehicle=vehicle, reference_time=now)
+
+
+def _expire_single_draft(*, reservation_id: int, reference_time) -> bool:
+    with transaction.atomic():
+        reservation = (
+            Reservation.objects.select_for_update()
+            .select_related("client", "client__user", "vehicle")
+            .get(pk=reservation_id)
+        )
+        vehicle = Vehicle.objects.select_for_update().get(pk=reservation.vehicle_id)
+        return _apply_draft_expiration(reservation=reservation, vehicle=vehicle, reference_time=reference_time)
+
+
+def expire_stale_draft_reservations(*, reference_time=None) -> ExpireMissedReservationsStats:
+    """Cancel BROUILLON reservations whose 15-minute hold window has elapsed."""
+
+    now = reference_time or timezone.now()
+    stats = ExpireMissedReservationsStats()
+
+    hold_cutoff = now - timedelta(minutes=Reservation.DRAFT_HOLD_MINUTES)
+    reservation_ids = list(
+        Reservation.objects.filter(status=Reservation.Status.BROUILLON, created_at__lt=hold_cutoff)
+        .order_by("id")
+        .values_list("id", flat=True)
+    )
+
+    for reservation_id in reservation_ids:
+        stats.analyzed += 1
+        try:
+            cancelled = _expire_single_draft(reservation_id=reservation_id, reference_time=now)
+        except Exception as exc:
+            stats.errors += 1
+            create_system_log(
+                action="DRAFT_RESERVATION_EXPIRE_ERROR",
+                message=f"Reservation id={reservation_id}: echec expiration brouillon ({exc}).",
                 level=SystemLog.Level.ERROR,
                 user=None,
             )

@@ -261,6 +261,14 @@ class Vehicle(models.Model):
 	required_license = models.CharField(max_length=100, blank=True, null=True)
 	recommended_use = models.TextField(blank=True)
 	status = models.CharField(max_length=20, choices=Status.choices, default=Status.DISPONIBLE)
+	needs_supervision = models.BooleanField(
+		default=False,
+		help_text="Signale une anomalie ACCEPTABLE relevee au check-in : le vehicule reste utilisable mais doit etre surveille par le gestionnaire.",
+	)
+	has_urgent_checkin_anomaly = models.BooleanField(
+		default=False,
+		help_text="Signale que le statut A_CONTROLER provient d'une anomalie GRAVE relevee au check-in client.",
+	)
 	description = models.TextField(blank=True)
 	is_active = models.BooleanField(default=True)
 	created_at = models.DateTimeField(auto_now_add=True)

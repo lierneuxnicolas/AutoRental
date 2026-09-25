@@ -10,12 +10,14 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
+from django.db.models import Q
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from accounts.models import ClientProfile, Role
+from inspections.models import Damage, Inspection, InspectionPhoto
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment, VehiclePhoto
 from interventions.models import Intervention
 from notifications.models import Notification
@@ -318,10 +320,62 @@ class VehicleModelTests(VehicleTestDataMixin, TestCase):
 class VehiclePublicCatalogTests(VehicleTestDataMixin, TestCase):
 	def setUp(self):
 		self.client_api = APIClient()
+		self.client_profile, _ = ClientProfile.objects.get_or_create(
+			user=self.client_user,
+			defaults={"profile_status": ClientProfile.ProfileStatus.VALIDE},
+		)
+
+	def _create_reservation(self, vehicle, status_value):
+		start_at = timezone.now() + timedelta(days=2)
+		return Reservation.objects.create(
+			client=self.client_profile,
+			vehicle=vehicle,
+			start_at=start_at,
+			end_at=start_at + timedelta(days=1),
+			status=status_value,
+			rental_amount=Decimal("100.00"),
+			deposit_amount=Decimal("300.00"),
+			confirmed_at=timezone.now() if status_value == Reservation.Status.CONFIRMEE else None,
+			cancelled_at=timezone.now() if status_value == Reservation.Status.ANNULEE else None,
+			cancellation_reason="Annulee" if status_value == Reservation.Status.ANNULEE else "",
+		)
 
 	def test_public_list_access_without_auth(self):
 		response = self.client_api.get("/api/v1/vehicles/")
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+	def test_popular_vehicles_are_ranked_by_non_cancelled_reservations(self):
+		space = ParkingSpace.objects.create(parking=self.parking_active, number="A4", is_active=True)
+		third_vehicle = Vehicle.objects.create(
+			brand=self.brand_active,
+			category=self.category_active,
+			parking_space=space,
+			registration_number="DD-444-DD",
+			model_name="Prius",
+			year=2024,
+			color="Black",
+			energy_type="Hybrid",
+			transmission="Auto",
+			seats=5,
+			doors=5,
+			mileage=1000,
+			status=Vehicle.Status.DISPONIBLE,
+			is_active=True,
+		)
+		for _ in range(2):
+			self._create_reservation(self.vehicle_loue, Reservation.Status.CONFIRMEE)
+			self._create_reservation(third_vehicle, Reservation.Status.CONFIRMEE)
+		self._create_reservation(self.vehicle_active, Reservation.Status.CONFIRMEE)
+		self._create_reservation(self.vehicle_active, Reservation.Status.ANNULEE)
+
+		response = self.client_api.get("/api/v1/vehicles/popular/")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(len(response.data), 3)
+		self.assertEqual(
+			[item["id"] for item in response.data],
+			sorted([self.vehicle_loue.id, third_vehicle.id]) + [self.vehicle_active.id],
+		)
 
 	def test_public_list_is_paginated(self):
 		response = self.client_api.get("/api/v1/vehicles/")
@@ -461,6 +515,16 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 			"seats": kwargs.pop("seats", 5),
 			"doors": kwargs.pop("doors", 5),
 			"mileage": kwargs.pop("mileage", 100),
+			"initial_energy_level_percent": kwargs.pop("initial_energy_level_percent", 80),
+			"initial_damages": kwargs.pop("initial_damages", "[]"),
+			"reference_front_left": kwargs.pop("reference_front_left", _create_test_image_file("front-left.jpg")),
+			"reference_front_right": kwargs.pop("reference_front_right", _create_test_image_file("front-right.jpg")),
+			"reference_rear_left": kwargs.pop("reference_rear_left", _create_test_image_file("rear-left.jpg")),
+			"reference_rear_right": kwargs.pop("reference_rear_right", _create_test_image_file("rear-right.jpg")),
+			"reference_dashboard": kwargs.pop("reference_dashboard", _create_test_image_file("dashboard.jpg")),
+			"reference_front_seats": kwargs.pop("reference_front_seats", _create_test_image_file("front-seats.jpg")),
+			"reference_rear_seats": kwargs.pop("reference_rear_seats", _create_test_image_file("rear-seats.jpg")),
+			"reference_trunk": kwargs.pop("reference_trunk", _create_test_image_file("trunk.jpg")),
 			"description": kwargs.pop("description", "New vehicle"),
 			"status": kwargs.pop("status", Vehicle.Status.DISPONIBLE),
 			"is_active": kwargs.pop("is_active", True),
@@ -474,9 +538,121 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		response = self.client_api.post(
 			"/api/v1/management/vehicles/",
 			self._payload(parking_space=space.id, registration_number="MM-555-MM"),
-			format="json",
+			format="multipart",
 		)
 		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		vehicle = Vehicle.objects.get(registration_number="MM-555-MM")
+		reference = Inspection.objects.get(vehicle=vehicle, inspection_type=Inspection.Type.REFERENCE)
+		self.assertIsNone(reference.reservation_id)
+		self.assertEqual(reference.mileage, vehicle.mileage)
+		self.assertEqual(reference.energy_level_percent, 80)
+		self.assertEqual(reference.status, Inspection.Status.TERMINE)
+		self.assertEqual(reference.photos.count(), 8)
+
+	def test_create_requires_all_reference_photos(self):
+		space = ParkingSpace.objects.create(parking=self.parking_active, number="A5-PHOTOS", is_active=True)
+		self.client_api.force_authenticate(self.manager_user)
+		payload = self._payload(parking_space=space.id, registration_number="PHOTOS-001")
+		payload.pop("reference_trunk")
+
+		response = self.client_api.post("/api/v1/management/vehicles/", payload, format="multipart")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("reference_trunk", response.data)
+		self.assertFalse(Vehicle.objects.filter(registration_number="PHOTOS-001").exists())
+
+	def test_create_requires_initial_metrics(self):
+		self.client_api.force_authenticate(self.manager_user)
+		for index, field_name in enumerate(("mileage", "initial_energy_level_percent"), start=1):
+			with self.subTest(field_name=field_name):
+				space = ParkingSpace.objects.create(
+					parking=self.parking_active,
+					number=f"A5-METRIC-{index}",
+					is_active=True,
+				)
+				registration = f"METRIC-{index:03d}"
+				payload = self._payload(parking_space=space.id, registration_number=registration)
+				payload.pop(field_name)
+
+				response = self.client_api.post("/api/v1/management/vehicles/", payload, format="multipart")
+
+				self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+				self.assertIn(field_name, response.data)
+				self.assertFalse(Vehicle.objects.filter(registration_number=registration).exists())
+
+	def test_create_reference_with_existing_damage_and_evidence(self):
+		space = ParkingSpace.objects.create(parking=self.parking_active, number="A5-DAMAGE", is_active=True)
+		self.client_api.force_authenticate(self.manager_user)
+		payload = self._payload(
+			parking_space=space.id,
+			registration_number="DAMAGE-001",
+			initial_damages='[{"description":"Rayure portiere","severity":"ACCEPTABLE","photo_index":0}]',
+			initial_damage_photos=[_create_test_image_file("damage.jpg")],
+		)
+
+		response = self.client_api.post("/api/v1/management/vehicles/", payload, format="multipart")
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		vehicle = Vehicle.objects.get(registration_number="DAMAGE-001")
+		damage = Damage.objects.get(vehicle=vehicle)
+		vehicle.refresh_from_db()
+		self.assertFalse(damage.is_new)
+		self.assertEqual(damage.status, Damage.Status.CONFIRME)
+		self.assertEqual(damage.evidence_photos.count(), 1)
+		self.assertEqual(damage.evidence_photos.first().photo_type, InspectionPhoto.PhotoType.DOMMAGE)
+		self.assertTrue(vehicle.needs_supervision)
+		self.assertFalse(vehicle.has_urgent_checkin_anomaly)
+		self.assertEqual(vehicle.status, Vehicle.Status.DISPONIBLE)
+
+	def test_create_reference_rejects_legacy_damage_severity(self):
+		space = ParkingSpace.objects.create(parking=self.parking_active, number="A5-LEGACY", is_active=True)
+		self.client_api.force_authenticate(self.manager_user)
+		payload = self._payload(
+			parking_space=space.id,
+			registration_number="LEGACY-001",
+			initial_damages='[{"description":"Ancienne gravite","severity":"MINEUR"}]',
+		)
+
+		response = self.client_api.post("/api/v1/management/vehicles/", payload, format="multipart")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("initial_damages", response.data)
+		self.assertFalse(Vehicle.objects.filter(registration_number="LEGACY-001").exists())
+
+	def test_create_reference_rejects_multiple_initial_damages(self):
+		space = ParkingSpace.objects.create(parking=self.parking_active, number="A5-MULTI", is_active=True)
+		self.client_api.force_authenticate(self.manager_user)
+		payload = self._payload(
+			parking_space=space.id,
+			registration_number="MULTI-001",
+			initial_damages=(
+				'[{"description":"Rayure","severity":"ACCEPTABLE"},'
+				'{"description":"Freinage","severity":"GRAVE"}]'
+			),
+		)
+
+		response = self.client_api.post("/api/v1/management/vehicles/", payload, format="multipart")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("initial_damages", response.data)
+		self.assertFalse(Vehicle.objects.filter(registration_number="MULTI-001").exists())
+
+	def test_create_reference_with_grave_damage_marks_vehicle_urgent(self):
+		space = ParkingSpace.objects.create(parking=self.parking_active, number="A5-GRAVE", is_active=True)
+		self.client_api.force_authenticate(self.manager_user)
+		payload = self._payload(
+			parking_space=space.id,
+			registration_number="GRAVE-001",
+			initial_damages='[{"description":"Freinage dangereux","severity":"GRAVE"}]',
+		)
+
+		response = self.client_api.post("/api/v1/management/vehicles/", payload, format="multipart")
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		vehicle = Vehicle.objects.get(registration_number="GRAVE-001")
+		self.assertFalse(vehicle.needs_supervision)
+		self.assertTrue(vehicle.has_urgent_checkin_anomaly)
+		self.assertEqual(vehicle.status, Vehicle.Status.A_CONTROLER)
 
 	def test_create_forces_available_status(self):
 		space = ParkingSpace.objects.create(parking=self.parking_active, number="A5-STATUS", is_active=True)
@@ -489,7 +665,7 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 				registration_number="STATUS-001",
 				status=Vehicle.Status.MAINTENANCE,
 			),
-			format="json",
+			format="multipart",
 		)
 
 		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -501,7 +677,7 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		payload = self._payload(registration_number="NOPARK-001")
 		payload.pop("parking_space")
 
-		response = self.client_api.post("/api/v1/management/vehicles/", payload, format="json")
+		response = self.client_api.post("/api/v1/management/vehicles/", payload, format="multipart")
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertIn("parking_space", response.data)
@@ -513,7 +689,7 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		response = self.client_api.post(
 			"/api/v1/management/vehicles/",
 			self._payload(parking_space=space.id, registration_number="MILEAGE-001", mileage=-1),
-			format="json",
+			format="multipart",
 		)
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -530,13 +706,29 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		self.assertEqual(item["parking_name"], self.parking_active.name)
 		self.assertEqual(item["parking_space_number"], self.space_a1.number)
 
+	def test_manager_list_exposes_supervision_and_urgent_checkin_flags(self):
+		self.assertFalse(self.vehicle_active.needs_supervision)
+		self.assertFalse(self.vehicle_active.has_urgent_checkin_anomaly)
+
+		self.vehicle_active.needs_supervision = True
+		self.vehicle_active.has_urgent_checkin_anomaly = True
+		self.vehicle_active.save(update_fields=["needs_supervision", "has_urgent_checkin_anomaly", "updated_at"])
+
+		self.client_api.force_authenticate(self.manager_user)
+		response = self.client_api.get("/api/v1/management/vehicles/")
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		item = next(row for row in response.data["results"] if row["id"] == self.vehicle_active.id)
+		self.assertTrue(item["needs_supervision"])
+		self.assertTrue(item["has_urgent_checkin_anomaly"])
+
 	def test_admin_can_create_vehicle(self):
 		space = ParkingSpace.objects.create(parking=self.parking_active, number="A6", is_active=True)
 		self.client_api.force_authenticate(self.admin_user)
 		response = self.client_api.post(
 			"/api/v1/management/vehicles/",
 			self._payload(parking_space=space.id, registration_number="NN-666-NN"),
-			format="json",
+			format="multipart",
 		)
 		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
@@ -546,7 +738,7 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		response = self.client_api.post(
 			"/api/v1/management/vehicles/",
 			self._payload(parking_space=space.id, registration_number="CC-777-CC"),
-			format="json",
+			format="multipart",
 		)
 		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
@@ -556,7 +748,7 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		response = self.client_api.post(
 			"/api/v1/management/vehicles/",
 			self._payload(parking_space=space.id, registration_number="MC-888-MC"),
-			format="json",
+			format="multipart",
 		)
 		self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
@@ -565,7 +757,7 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		response = self.client_api.post(
 			"/api/v1/management/vehicles/",
 			self._payload(parking_space=self.space_a1.id, registration_number="OO-111-OO"),
-			format="json",
+			format="multipart",
 		)
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertIn("parking_space", response.data)
@@ -576,7 +768,7 @@ class VehicleManagementTests(VehicleTestDataMixin, TestCase):
 		response = self.client_api.post(
 			"/api/v1/management/vehicles/",
 			self._payload(parking_space=space.id, registration_number=self.vehicle_active.registration_number),
-			format="json",
+			format="multipart",
 		)
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertIn("registration_number", response.data)
@@ -825,13 +1017,47 @@ class AvailabilityServiceTests(TestCase):
 		self.assertEqual(result["duration_hours"], 3.0)
 
 
+def _evaluate_lookup(key, value, reservation):
+	if key == "status__in":
+		return reservation.get("status") in value
+	if key == "status":
+		return reservation.get("status") == value
+	if key == "start_at__lt":
+		return reservation.get("start") < value
+	if key == "end_at__gt":
+		return reservation.get("end") > value
+	if key == "created_at__gte":
+		created_at = reservation.get("created_at")
+		return created_at is not None and created_at >= value
+	if key == "vehicle_id":
+		return reservation.get("vehicle_id") == value
+	raise NotImplementedError(f"Unsupported fake queryset lookup: {key}")
+
+
+def _evaluate_q(q, reservation):
+	results = []
+	for child in q.children:
+		if isinstance(child, Q):
+			results.append(_evaluate_q(child, reservation))
+		else:
+			key, value = child
+			results.append(_evaluate_lookup(key, value, reservation))
+
+	result = all(results) if q.connector == "AND" else any(results)
+	if not results:
+		result = q.connector == "AND"
+	return not result if q.negated else result
+
+
 class _FakeReservationQuerySet:
 	def __init__(self, reservations):
 		self._reservations = list(reservations)
 
-	def filter(self, **kwargs):
+	def filter(self, *args, **kwargs):
 		filtered = []
 		for reservation in self._reservations:
+			if not all(_evaluate_q(q, reservation) for q in args):
+				continue
 			if "vehicle_id" in kwargs and reservation.get("vehicle_id") != kwargs["vehicle_id"]:
 				continue
 			if "status__in" in kwargs and reservation.get("status") not in kwargs["status__in"]:
@@ -1438,6 +1664,20 @@ class AvailabilityIntegrationDeferredTests(VehicleTestDataMixin, TestCase):
 			start_at=start + timedelta(minutes=5),
 			end_at=end - timedelta(minutes=5),
 			status=Reservation.Status.BROUILLON,
+		)
+		# A fresh BROUILLON still blocks during its temporary hold window (see
+		# Reservation.DRAFT_HOLD_MINUTES); it stops blocking once it expires.
+		self.assertFalse(self._is_available_with_real_reservations(start, end))
+		self.assertNotIn(self.vehicle_active.id, self._available_vehicle_ids_with_real_reservations(start, end))
+
+		Reservation.objects.all().delete()
+		stale_draft = self._create_reservation(
+			start_at=start + timedelta(minutes=5),
+			end_at=end - timedelta(minutes=5),
+			status=Reservation.Status.BROUILLON,
+		)
+		Reservation.objects.filter(pk=stale_draft.pk).update(
+			created_at=timezone.now() - timedelta(minutes=Reservation.DRAFT_HOLD_MINUTES + 1)
 		)
 		self.assertTrue(self._is_available_with_real_reservations(start, end))
 		self.assertIn(self.vehicle_active.id, self._available_vehicle_ids_with_real_reservations(start, end))
