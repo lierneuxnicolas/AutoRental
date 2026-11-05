@@ -2,6 +2,7 @@ from datetime import date
 from datetime import timedelta
 
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -79,6 +80,69 @@ class ProfileEndpointsTests(APITestCase):
         self.assertEqual(self.profile.date_of_birth, date(1992, 6, 30))
         self.assertEqual(self.profile.address, "Rue de la Loi 1")
 
+    def test_patch_accepts_compound_and_accented_names_and_trims_outer_spaces(self):
+        self._authenticate("profile-client@example.com", "StrongPass123!")
+
+        response = self.client.patch(
+            self.profile_url,
+            {"first_name": "  Jean-Pierre ", "last_name": " D'Hôtel  "},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.client_user.refresh_from_db()
+        self.assertEqual(self.client_user.first_name, "Jean-Pierre")
+        self.assertEqual(self.client_user.last_name, "D'Hôtel")
+
+    def test_patch_rejects_digits_in_names(self):
+        self._authenticate("profile-client@example.com", "StrongPass123!")
+
+        response = self.client.patch(
+            self.profile_url,
+            {"first_name": "Jean2"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("first_name", response.data)
+
+    def test_patch_accepts_phone_with_leading_zeroes(self):
+        self._authenticate("profile-client@example.com", "StrongPass123!")
+
+        response = self.client.patch(
+            self.profile_url,
+            {"phone": "0123456789"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.client_user.refresh_from_db()
+        self.assertEqual(self.client_user.phone, "0123456789")
+
+    def test_patch_rejects_letters_in_phone(self):
+        self._authenticate("profile-client@example.com", "StrongPass123!")
+
+        response = self.client.patch(
+            self.profile_url,
+            {"phone": "01234abc89"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("phone", response.data)
+
+    def test_patch_rejects_phone_with_invalid_length(self):
+        self._authenticate("profile-client@example.com", "StrongPass123!")
+
+        response = self.client.patch(
+            self.profile_url,
+            {"phone": "012345678"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("phone", response.data)
+
     def test_patch_role_change_is_ignored(self):
         self._authenticate("profile-client@example.com", "StrongPass123!")
 
@@ -137,10 +201,10 @@ class ProfileEndpointsTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(ClientProfile.objects.filter(user=legacy_user).exists())
 
-    def test_patch_rejects_date_of_birth_when_under_18(self):
+    def test_patch_rejects_date_of_birth_when_under_21(self):
         self._authenticate("profile-client@example.com", "StrongPass123!")
-        today = date.today()
-        underage_birth_date = self._subtract_years(today, 17)
+        today = timezone.localdate()
+        underage_birth_date = self._subtract_years(today, 20)
 
         response = self.client.patch(
             self.profile_url,
@@ -151,13 +215,13 @@ class ProfileEndpointsTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             response.data["date_of_birth"][0],
-            "Vous devez avoir au moins 18 ans pour utiliser GetACar.",
+            "Vous devez avoir au moins 21 ans pour utiliser GetaCar.",
         )
 
-    def test_patch_accepts_date_of_birth_when_exactly_18(self):
+    def test_patch_accepts_date_of_birth_when_exactly_21(self):
         self._authenticate("profile-client@example.com", "StrongPass123!")
-        today = date.today()
-        adult_birth_date = self._subtract_years(today, 18)
+        today = timezone.localdate()
+        adult_birth_date = self._subtract_years(today, 21)
 
         response = self.client.patch(
             self.profile_url,
@@ -169,9 +233,21 @@ class ProfileEndpointsTests(APITestCase):
         self.profile.refresh_from_db()
         self.assertEqual(self.profile.date_of_birth, adult_birth_date)
 
+    def test_patch_accepts_date_of_birth_when_over_21(self):
+        self._authenticate("profile-client@example.com", "StrongPass123!")
+        adult_birth_date = self._subtract_years(timezone.localdate(), 22)
+
+        response = self.client.patch(
+            self.profile_url,
+            {"date_of_birth": adult_birth_date.isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
     def test_patch_accepts_date_of_birth_when_exactly_90(self):
         self._authenticate("profile-client@example.com", "StrongPass123!")
-        today = date.today()
+        today = timezone.localdate()
         max_age_birth_date = self._subtract_years(today, 90)
 
         response = self.client.patch(
@@ -186,7 +262,7 @@ class ProfileEndpointsTests(APITestCase):
 
     def test_patch_rejects_date_of_birth_when_over_90(self):
         self._authenticate("profile-client@example.com", "StrongPass123!")
-        today = date.today()
+        today = timezone.localdate()
         over_max_age_birth_date = self._subtract_years(today, 90) - timedelta(days=1)
 
         response = self.client.patch(

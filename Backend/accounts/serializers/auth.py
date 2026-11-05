@@ -7,6 +7,7 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from accounts.models import User
+from accounts.validators import validate_person_name, validate_phone_number
 from common.models import SystemLog
 from common.services import create_system_log
 
@@ -18,6 +19,15 @@ class RegisterSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=150)
     last_name = serializers.CharField(max_length=150)
     phone = serializers.CharField(max_length=30, required=False, allow_blank=True)
+
+    def validate_first_name(self, value):
+        return validate_person_name(value, label="prénom")
+
+    def validate_last_name(self, value):
+        return validate_person_name(value, label="nom")
+
+    def validate_phone(self, value):
+        return validate_phone_number(value)
 
     def validate_email(self, value):
         email = value.strip().lower()

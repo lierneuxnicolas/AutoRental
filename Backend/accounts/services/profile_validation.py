@@ -1,7 +1,9 @@
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from accounts.models import ClientDocument, ClientProfile, Role
 
@@ -10,6 +12,13 @@ from accounts.models import ClientDocument, ClientProfile, Role
 class ClientEligibilityResult:
     is_eligible: bool
     errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class VehicleCompatibilityResult:
+    is_compatible: bool
+    code: str | None = None
+    message: str | None = None
 
 
 def calculate_age_on_date(date_of_birth: date, reference_date: date) -> int:
@@ -22,13 +31,96 @@ def calculate_age_on_date(date_of_birth: date, reference_date: date) -> int:
         raise ValidationError("DATE_OF_BIRTH_IN_FUTURE")
 
     years = reference_date.year - date_of_birth.year
-    if (reference_date.month, reference_date.day) < (date_of_birth.month, date_of_birth.day):
+    if date_of_birth > ClientProfile._subtract_years(reference_date, years):
         years -= 1
     return years
 
 
 def _is_blank(value) -> bool:
     return value is None or str(value).strip() == ""
+
+
+def _normalize_transmission(value: str | None) -> str | None:
+    if not value:
+        return None
+
+    normalized = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", value.casefold())
+        if character.isalnum()
+    )
+    if normalized in {"manuelle", "manual"}:
+        return "MANUAL"
+    if normalized in {"automatique", "automatic", "auto"}:
+        return "AUTOMATIC"
+    return None
+
+
+def check_vehicle_compatibility_for_client(
+    *,
+    client: ClientProfile,
+    vehicle,
+) -> VehicleCompatibilityResult:
+    license_document = ClientDocument.objects.filter(
+        client=client,
+        document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+        is_active=True,
+    ).first()
+    if (
+        license_document is None
+        or license_document.status != ClientDocument.Status.VALIDE
+        or license_document.driving_license_category not in ClientDocument.DrivingLicenseCategory.values
+        or not license_document.driving_license_transmission
+    ):
+        return VehicleCompatibilityResult(
+            is_compatible=False,
+            code="DRIVING_LICENSE_DETAILS_UNVERIFIED",
+            message=(
+                "La catégorie et la transmission autorisée de votre permis doivent être "
+                "vérifiées par un gestionnaire avant toute réservation."
+            ),
+        )
+
+    vehicle_transmission = _normalize_transmission(getattr(vehicle, "transmission", None))
+    if vehicle_transmission is None:
+        return VehicleCompatibilityResult(
+            is_compatible=False,
+            code="VEHICLE_TRANSMISSION_UNKNOWN",
+            message=(
+                "La transmission de ce véhicule n'est pas renseignée de manière fiable. "
+                "Veuillez contacter le gestionnaire."
+            ),
+        )
+
+    if (
+        license_document.driving_license_transmission
+        == ClientDocument.DrivingLicenseTransmission.AUTOMATIC_ONLY
+        and vehicle_transmission == "MANUAL"
+    ):
+        return VehicleCompatibilityResult(
+            is_compatible=False,
+            code="VEHICLE_INCOMPATIBLE_WITH_LICENSE",
+            message=(
+                "Votre permis de conduire autorise uniquement les véhicules automatiques. "
+                "Vous ne pouvez pas réserver ce véhicule à boîte manuelle. "
+                "Veuillez sélectionner un véhicule automatique."
+            ),
+        )
+
+    if license_document.driving_license_category not in {
+        ClientDocument.DrivingLicenseCategory.B,
+        ClientDocument.DrivingLicenseCategory.BE,
+    }:
+        return VehicleCompatibilityResult(
+            is_compatible=False,
+            code="DRIVING_LICENSE_CATEGORY_INCOMPATIBLE",
+            message=(
+                "La catégorie vérifiée de votre permis n'autorise pas la location "
+                "de ce véhicule. Une catégorie B est requise."
+            ),
+        )
+
+    return VehicleCompatibilityResult(is_compatible=True)
 
 
 def validate_client_for_reservation(
@@ -85,7 +177,7 @@ def validate_client_for_reservation(
 
     if client.date_of_birth is not None:
         age = calculate_age_on_date(client.date_of_birth, reservation_start_date)
-        if age < 21:
+        if age < ClientProfile.MINIMUM_AGE_YEARS:
             errors.append("UNDER_MINIMUM_AGE")
 
     if client.profile_status != ClientProfile.ProfileStatus.VALIDE:
@@ -112,11 +204,28 @@ def validate_client_for_reservation(
             document_type__in=required_types.keys(),
         )
     }
+    today = timezone.localdate()
 
     for doc_type, error_codes in required_types.items():
         doc = active_required_docs.get(doc_type)
         if doc is None:
             errors.append(error_codes["missing"])
+            continue
+
+        if (
+            doc.status == ClientDocument.Status.EXPIRE
+            or (
+                doc.status == ClientDocument.Status.VALIDE
+                and doc.expiration_date is not None
+                and doc.expiration_date < today
+            )
+        ):
+            errors.append(
+                "IDENTITY_CARD_EXPIRED"
+                if doc_type == ClientDocument.DocumentType.CARTE_IDENTITE
+                else "DRIVING_LICENSE_EXPIRED"
+            )
+            errors.append(error_codes["expires_too_soon"])
             continue
 
         if doc.status != ClientDocument.Status.VALIDE:

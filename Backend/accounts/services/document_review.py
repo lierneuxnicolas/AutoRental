@@ -1,6 +1,6 @@
-from django.db import transaction
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import ClientDocument, Role
@@ -85,7 +85,12 @@ def _send_rejected_document_email(*, document) -> None:
     )
 
 
-def validate_document(*, document, manager):
+def validate_document(
+    *,
+    document,
+    manager,
+    driving_license_transmission=None,
+):
     if not _is_manager(manager):
         raise ValueError("Seul un gestionnaire-comptable peut valider ce document.")
 
@@ -99,12 +104,50 @@ def validate_document(*, document, manager):
         if not locked_document.is_active:
             raise ValueError("Ce document est inactif et ne peut pas etre valide.")
 
-        if locked_document.status == ClientDocument.Status.VALIDE:
+        is_license = locked_document.document_type == ClientDocument.DocumentType.PERMIS_CONDUIRE
+        is_metadata_reverification = (
+            locked_document.status == ClientDocument.Status.VALIDE
+            and is_license
+            and (
+                not locked_document.driving_license_category
+                or not locked_document.driving_license_transmission
+            )
+        )
+        if locked_document.status == ClientDocument.Status.VALIDE and not is_metadata_reverification:
             raise ValueError("Ce document est deja valide.")
 
         today = timezone.localdate()
         if locked_document.expiration_date is None or locked_document.expiration_date <= today:
             raise ValueError("La date d'expiration du document doit etre strictement future.")
+
+        if is_license:
+            transmission = driving_license_transmission
+            if not transmission:
+                raise ValueError(
+                    "La restriction de transmission du permis doit etre renseignee avant validation."
+                )
+            if transmission not in ClientDocument.DrivingLicenseTransmission.values:
+                raise ValueError("La restriction de transmission du permis n'est pas reconnue.")
+            locked_document.driving_license_category = ClientDocument.DrivingLicenseCategory.B
+            locked_document.driving_license_transmission = transmission
+
+        if is_metadata_reverification:
+            locked_document.validated_at = timezone.now()
+            locked_document.validated_by = manager
+            locked_document.save(
+                update_fields=[
+                    "driving_license_category",
+                    "driving_license_transmission",
+                    "validated_at",
+                    "validated_by",
+                    "updated_at",
+                ]
+            )
+            document.driving_license_category = locked_document.driving_license_category
+            document.driving_license_transmission = locked_document.driving_license_transmission
+            document.validated_at = locked_document.validated_at
+            document.validated_by = locked_document.validated_by
+            return document
 
         locked_document.status = ClientDocument.Status.VALIDE
         locked_document.rejection_reason = ""
@@ -118,6 +161,8 @@ def validate_document(*, document, manager):
                 "validated_at",
                 "validated_by",
                 "is_active",
+                "driving_license_category",
+                "driving_license_transmission",
                 "updated_at",
             ]
         )
@@ -145,6 +190,8 @@ def validate_document(*, document, manager):
         document.validated_at = locked_document.validated_at
         document.validated_by = locked_document.validated_by
         document.is_active = locked_document.is_active
+        document.driving_license_category = locked_document.driving_license_category
+        document.driving_license_transmission = locked_document.driving_license_transmission
 
     return document
 

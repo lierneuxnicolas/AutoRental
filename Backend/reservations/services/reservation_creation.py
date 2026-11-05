@@ -8,12 +8,20 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from accounts.models import ClientProfile
-from accounts.services import validate_client_for_reservation
+from accounts.services import (
+    check_vehicle_compatibility_for_client,
+    validate_client_for_reservation,
+)
 from notifications.services import create_notification
 from reservations.models import Reservation
 from reservations.services.pricing import PricingError, calculate_price_simulation
 from vehicles.models import Vehicle
-from vehicles.services import AvailabilityValidationError, BOOKABLE_VEHICLE_STATUSES, is_vehicle_available, validate_availability_period
+from vehicles.services import (
+    BOOKABLE_VEHICLE_STATUSES,
+    AvailabilityValidationError,
+    is_vehicle_available,
+    validate_availability_period,
+)
 
 
 @dataclass(frozen=True)
@@ -87,9 +95,35 @@ def _validate_client_eligibility(*, client: ClientProfile, start_at: datetime, e
             details={"eligibility_errors": list(eligibility.errors)},
         )
 
+    if {"IDENTITY_CARD_EXPIRED", "DRIVING_LICENSE_EXPIRED"} & set(eligibility.errors):
+        _raise_reservation_creation_error(
+            "PROFILE_NOT_ELIGIBLE",
+            "Votre carte d'identité ou votre permis de conduire est expiré. "
+            "Veuillez remplacer ce document pour réserver.",
+            details={"eligibility_errors": list(eligibility.errors)},
+        )
+
+    document_messages = {
+        "IDENTITY_CARD_MISSING": "la carte d'identité est manquante",
+        "IDENTITY_CARD_NOT_VALID": "la carte d'identité est en attente ou a été refusée",
+        "IDENTITY_CARD_EXPIRES_TOO_SOON": "la carte d'identité expire avant la fin de la réservation",
+        "DRIVING_LICENSE_MISSING": "le permis de conduire est manquant",
+        "DRIVING_LICENSE_NOT_VALID": "le permis de conduire est en attente ou a été refusé",
+        "DRIVING_LICENSE_EXPIRES_TOO_SOON": "le permis de conduire expire avant la fin de la réservation",
+    }
+    document_errors = [
+        message for code, message in document_messages.items() if code in eligibility.errors
+    ]
+    message = (
+        f"Réservation impossible : {', '.join(document_errors)}. "
+        "Régularisez ce document depuis votre profil."
+        if document_errors
+        else "Le profil client ne remplit pas les conditions de réservation."
+    )
+
     _raise_reservation_creation_error(
         "PROFILE_NOT_ELIGIBLE",
-        "Le profil client ne remplit pas les conditions de reservation.",
+        message,
         details={"eligibility_errors": list(eligibility.errors)},
     )
 
@@ -119,6 +153,15 @@ def _ensure_vehicle_bookable(*, vehicle: Vehicle) -> None:
             "VEHICLE_NOT_BOOKABLE",
             "Le vehicule n'est pas reservable dans son statut actuel.",
             details={"vehicle_status": vehicle.status},
+        )
+
+
+def _ensure_vehicle_compatible(*, client: ClientProfile, vehicle: Vehicle) -> None:
+    compatibility = check_vehicle_compatibility_for_client(client=client, vehicle=vehicle)
+    if not compatibility.is_compatible:
+        _raise_reservation_creation_error(
+            compatibility.code or "VEHICLE_INCOMPATIBLE_WITH_LICENSE",
+            compatibility.message or "Le vehicule est incompatible avec le permis du client.",
         )
 
 
@@ -166,6 +209,7 @@ def create_draft_reservation(
         _raise_reservation_creation_error("VEHICLE_NOT_ACTIVE", "Le vehicule demande est introuvable.")
 
     _ensure_vehicle_bookable(vehicle=current_vehicle)
+    _ensure_vehicle_compatible(client=client, vehicle=current_vehicle)
 
     if not is_vehicle_available(vehicle=current_vehicle, start=normalized_start_at, end=normalized_end_at):
         _raise_reservation_creation_error(
@@ -188,6 +232,7 @@ def create_draft_reservation(
             _raise_reservation_creation_error("VEHICLE_NOT_ACTIVE", "Le vehicule demande est introuvable.")
 
         _ensure_vehicle_bookable(vehicle=locked_vehicle)
+        _ensure_vehicle_compatible(client=client, vehicle=locked_vehicle)
 
         existing_draft = _find_identical_draft(
             client=client,

@@ -1,6 +1,9 @@
 from datetime import date, timedelta
+from unittest.mock import MagicMock, patch
 
+from azure.core.exceptions import ResourceNotFoundError
 from django.core import mail
+from django.core.files.base import ContentFile
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -69,11 +72,133 @@ class DocumentManagementEndpointsTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data["results"]), 1)
 
+    def test_manager_sees_expired_status_and_incomplete_client_profile(self):
+        self.document.status = ClientDocument.Status.VALIDE
+        self.document.expiration_date = timezone.localdate() - timedelta(days=1)
+        self.document.save(update_fields=["status", "expiration_date"])
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+
+        list_response = self.client.get(self.management_list_url)
+        detail_response = self.client.get(
+            reverse("accounts:management-documents-detail", kwargs={"pk": self.document.pk})
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(list_response.data["results"][0]["status"], ClientDocument.Status.EXPIRE)
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["status"], ClientDocument.Status.EXPIRE)
+        self.assertEqual(
+            detail_response.data["client_profile_status"],
+            ClientProfile.ProfileStatus.INCOMPLET,
+        )
+        self.document.refresh_from_db()
+        self.assertEqual(self.document.status, ClientDocument.Status.VALIDE)
+
+    def test_manager_can_view_document_through_private_file_endpoint(self):
+        self.document.file.save("manager-preview.pdf", ContentFile(b"%PDF-1.4\n"), save=True)
+        self.addCleanup(self.document.file.delete, save=False)
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+
+        response = self.client.get(
+            reverse("accounts:management-documents-file", kwargs={"pk": self.document.pk})
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertEqual(response["Cache-Control"], "private, no-store")
+        self.assertTrue(b"".join(response.streaming_content).startswith(b"%PDF-"))
+
+    def test_manager_can_view_identity_and_license_images_through_private_endpoint(self):
+        image_bytes = b"\x89PNG\r\n\x1a\n"
+        self.document.file.save("manager-identity.png", ContentFile(image_bytes), save=True)
+        self.addCleanup(self.document.file.delete, save=False)
+        license_document = ClientDocument.objects.create(
+            client=self.client_profile,
+            document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            document_number="LIC-PREVIEW",
+            file="client_documents/manager-license.png",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            status=ClientDocument.Status.EN_ATTENTE,
+            is_active=True,
+        )
+        license_document.file.save("manager-license.png", ContentFile(image_bytes), save=True)
+        self.addCleanup(license_document.file.delete, save=False)
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+
+        for document in (self.document, license_document):
+            response = self.client.get(
+                reverse("accounts:management-documents-file", kwargs={"pk": document.pk})
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response["Content-Type"], "image/png")
+            self.assertEqual(b"".join(response.streaming_content), image_bytes)
+
+    def test_missing_manager_document_file_returns_explicit_not_found(self):
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+        file_name = self.document.file.name
+        self.document.file.delete(save=False)
+
+        response = self.client.get(
+            reverse("accounts:management-documents-file", kwargs={"pk": self.document.pk})
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data["detail"], "Le fichier du document est introuvable.")
+        self.document.file.name = file_name
+
+    def test_azure_missing_blob_returns_explicit_not_found(self):
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+        azure_file = MagicMock()
+        azure_file.read.side_effect = ResourceNotFoundError("BlobNotFound")
+        with patch(
+            "django.core.files.storage.Storage.open",
+            return_value=azure_file,
+        ):
+            response = self.client.get(
+                reverse("accounts:management-documents-file", kwargs={"pk": self.document.pk})
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data["detail"], "Le fichier du document est introuvable.")
+
+    def test_client_cannot_access_manager_document_file_endpoint(self):
+        self._authenticate("managed-client@example.com", "StrongPass123!")
+        response = self.client.get(
+            reverse("accounts:management-documents-file", kwargs={"pk": self.document.pk})
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_client_is_forbidden(self):
         self._authenticate("managed-client@example.com", "StrongPass123!")
         response = self.client.get(self.management_list_url)
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_client_cannot_set_driving_license_details(self):
+        license_document = ClientDocument.objects.create(
+            client=self.client_profile,
+            document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            document_number="LIC-CLIENT-CANNOT-EDIT",
+            file="client_documents/license-client-cannot-edit.pdf",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            status=ClientDocument.Status.EN_ATTENTE,
+            is_active=True,
+        )
+        self._authenticate("managed-client@example.com", "StrongPass123!")
+
+        response = self.client.post(
+            reverse("accounts:management-documents-validate", kwargs={"pk": license_document.pk}),
+            {
+                "driving_license_category": "B",
+                "driving_license_transmission": "MANUAL_AND_AUTOMATIC",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        license_document.refresh_from_db()
+        self.assertIsNone(license_document.driving_license_category)
+        self.assertIsNone(license_document.driving_license_transmission)
 
     def test_mechanic_is_forbidden(self):
         mechanic = create_user(
@@ -136,6 +261,171 @@ class DocumentManagementEndpointsTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(SystemLog.objects.filter(action__in=self.tracked_actions).count(), logs_before)
         self.assertEqual(len(mail.outbox), 0)
+
+    def test_validate_driving_license_requires_manager_to_select_transmission(self):
+        license_document = ClientDocument.objects.create(
+            client=self.client_profile,
+            document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            document_number="LIC-123",
+            file="client_documents/license.pdf",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            status=ClientDocument.Status.EN_ATTENTE,
+            is_active=True,
+        )
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+
+        response = self.client.post(
+            reverse("accounts:management-documents-validate", kwargs={"pk": license_document.pk}),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("transmission", response.data["detail"])
+        license_document.refresh_from_db()
+        self.assertEqual(license_document.status, ClientDocument.Status.EN_ATTENTE)
+        self.assertIsNone(license_document.driving_license_category)
+        self.assertIsNone(license_document.driving_license_transmission)
+
+    def test_validate_driving_license_persists_manual_and_automatic_restriction(self):
+        license_document = ClientDocument.objects.create(
+            client=self.client_profile,
+            document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            document_number="LIC-456",
+            file="client_documents/license-manual.pdf",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            status=ClientDocument.Status.EN_ATTENTE,
+            driving_license_transmission_declared=ClientDocument.DrivingLicenseTransmission.AUTOMATIC_ONLY,
+            is_active=True,
+        )
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+
+        response = self.client.post(
+            reverse("accounts:management-documents-validate", kwargs={"pk": license_document.pk}),
+            {
+                "driving_license_transmission": "MANUAL_AND_AUTOMATIC",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        license_document.refresh_from_db()
+        self.assertEqual(license_document.status, ClientDocument.Status.VALIDE)
+        self.assertEqual(license_document.driving_license_category, "B")
+        self.assertEqual(license_document.driving_license_transmission, "MANUAL_AND_AUTOMATIC")
+        self.assertEqual(license_document.validated_by, self.manager)
+        self.assertIsNotNone(license_document.validated_at)
+        self.assertEqual(
+            license_document.driving_license_transmission_declared,
+            "AUTOMATIC_ONLY",
+        )
+        self.assertEqual(response.data["driving_license_transmission_declared"], "AUTOMATIC_ONLY")
+
+    def test_validate_automatic_only_license_persists_code_78_restriction(self):
+        license_document = ClientDocument.objects.create(
+            client=self.client_profile,
+            document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            document_number="LIC-789",
+            file="client_documents/license-automatic.pdf",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            status=ClientDocument.Status.EN_ATTENTE,
+            is_active=True,
+        )
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+
+        response = self.client.post(
+            reverse("accounts:management-documents-validate", kwargs={"pk": license_document.pk}),
+            {
+                "driving_license_transmission": "AUTOMATIC_ONLY",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        license_document.refresh_from_db()
+        self.assertEqual(license_document.status, ClientDocument.Status.VALIDE)
+        self.assertEqual(license_document.driving_license_category, "B")
+        self.assertEqual(license_document.driving_license_transmission, "AUTOMATIC_ONLY")
+        self.assertEqual(license_document.validated_by, self.manager)
+        self.assertIsNotNone(license_document.validated_at)
+
+    def test_manager_can_reject_license_without_category_b(self):
+        license_document = ClientDocument.objects.create(
+            client=self.client_profile,
+            document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            document_number="LIC-NO-CATEGORY-B",
+            file="client_documents/license-no-category-b.pdf",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            status=ClientDocument.Status.EN_ATTENTE,
+            is_active=True,
+        )
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+
+        response = self.client.post(
+            reverse("accounts:management-documents-reject", kwargs={"pk": license_document.pk}),
+            {"reason": "La catégorie B n'est pas présente sur le permis."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        license_document.refresh_from_db()
+        self.assertEqual(license_document.status, ClientDocument.Status.REFUSE)
+        self.assertIsNone(license_document.driving_license_category)
+        self.assertIsNone(license_document.driving_license_transmission)
+        self.assertEqual(license_document.validated_by, self.manager)
+
+    def test_validate_driving_license_requires_transmission_even_with_saved_category(self):
+        license_document = ClientDocument.objects.create(
+            client=self.client_profile,
+            document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            document_number="LIC-SAVED",
+            file="client_documents/license-saved.pdf",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            status=ClientDocument.Status.EN_ATTENTE,
+            driving_license_category=ClientDocument.DrivingLicenseCategory.B,
+            driving_license_transmission=ClientDocument.DrivingLicenseTransmission.AUTOMATIC_ONLY,
+            is_active=True,
+        )
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+
+        response = self.client.post(
+            reverse("accounts:management-documents-validate", kwargs={"pk": license_document.pk}),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("transmission", response.data["detail"])
+        license_document.refresh_from_db()
+        self.assertEqual(license_document.status, ClientDocument.Status.EN_ATTENTE)
+        self.assertEqual(license_document.driving_license_category, "B")
+        self.assertEqual(license_document.driving_license_transmission, "AUTOMATIC_ONLY")
+
+    def test_manager_can_reverify_legacy_valid_license_with_missing_details(self):
+        license_document = ClientDocument.objects.create(
+            client=self.client_profile,
+            document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            document_number="LIC-LEGACY",
+            file="client_documents/license-legacy.pdf",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            status=ClientDocument.Status.VALIDE,
+            is_active=True,
+        )
+        self._authenticate("manager-docs@example.com", "StrongPass123!")
+
+        response = self.client.post(
+            reverse("accounts:management-documents-validate", kwargs={"pk": license_document.pk}),
+            {
+                "driving_license_transmission": "AUTOMATIC_ONLY",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        license_document.refresh_from_db()
+        self.assertEqual(license_document.status, ClientDocument.Status.VALIDE)
+        self.assertEqual(license_document.driving_license_category, "B")
+        self.assertEqual(license_document.driving_license_transmission, "AUTOMATIC_ONLY")
 
     def test_reject_success_with_reason(self):
         self._authenticate("manager-docs@example.com", "StrongPass123!")

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { Link, useParams } from 'react-router-dom'
@@ -7,14 +7,17 @@ import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
+import SecureDocumentPreview from '../../components/documents/SecureDocumentPreview'
 import {
   getManagementDocumentById,
+  getManagementDocumentFile,
   rejectManagementDocument,
   validateManagementDocument,
 } from '../../services/managementDocumentService'
 import type {
   DocumentStatus,
   DocumentType,
+  DrivingLicenseTransmission,
   ManagerClientDocumentDetail,
 } from '../../types/managementDocument'
 
@@ -22,6 +25,7 @@ interface ErrorPayload {
   detail?: string
   message?: string
   reason?: string[]
+  [field: string]: unknown
 }
 
 function toErrorMessage(error: unknown): string {
@@ -41,6 +45,15 @@ function toErrorMessage(error: unknown): string {
 
   if (Array.isArray(payload?.reason) && payload.reason.length > 0) {
     return payload.reason.join(' ')
+  }
+
+  const fieldErrors = payload
+    ? Object.values(payload)
+      .filter((value): value is string[] => Array.isArray(value) && value.every((item) => typeof item === 'string'))
+      .flat()
+    : []
+  if (fieldErrors.length > 0) {
+    return fieldErrors.join(' ')
   }
 
   return 'Une erreur est survenue. Veuillez reessayer.'
@@ -86,51 +99,34 @@ function mapStatus(status: DocumentStatus): { label: string; variant: StatusVari
     case 'EN_ATTENTE':
       return { label: 'En attente', variant: 'warning' }
     case 'VALIDE':
-      return { label: 'Valide', variant: 'success' }
+      return { label: 'Validé', variant: 'success' }
     case 'REFUSE':
-      return { label: 'Refuse', variant: 'danger' }
+      return { label: 'Refusé', variant: 'danger' }
     case 'EXPIRE':
-      return { label: 'Expire', variant: 'neutral' }
+      return { label: 'Expiré', variant: 'danger' }
   }
 }
 
 function mapDocumentType(type: DocumentType): string {
   switch (type) {
     case 'CARTE_IDENTITE':
-      return 'Carte d\'identite'
+      return 'Carte d’identité'
     case 'PERMIS_CONDUIRE':
       return 'Permis de conduire'
   }
 }
 
-function canManageDocument(status: DocumentStatus): boolean {
-  return status === 'EN_ATTENTE'
+function canManageDocument(document: ManagerClientDocumentDetail): boolean {
+  return document.status === 'EN_ATTENTE'
+    || (
+      document.document_type === 'PERMIS_CONDUIRE'
+      && document.status === 'VALIDE'
+      && (!document.driving_license_category || !document.driving_license_transmission)
+    )
 }
 
-type PreviewKind = 'image' | 'pdf' | 'none'
-
-function detectPreviewKind(fileUrl: string | null): PreviewKind {
-  if (!fileUrl) {
-    return 'none'
-  }
-
-  const normalized = fileUrl.toLowerCase()
-
-  if (
-    normalized.endsWith('.png')
-    || normalized.endsWith('.jpg')
-    || normalized.endsWith('.jpeg')
-    || normalized.endsWith('.webp')
-    || normalized.endsWith('.gif')
-  ) {
-    return 'image'
-  }
-
-  if (normalized.endsWith('.pdf')) {
-    return 'pdf'
-  }
-
-  return 'none'
+function canRejectDocument(document: ManagerClientDocumentDetail): boolean {
+    return document.status === 'EN_ATTENTE'
 }
 
 function DetailField({ label, value }: { label: string; value: string }) {
@@ -143,75 +139,42 @@ function DetailField({ label, value }: { label: string; value: string }) {
 }
 
 function DocumentPreview({ document }: { document: ManagerClientDocumentDetail }) {
-  const previewKind = useMemo(() => detectPreviewKind(document.file), [document.file])
-
   if (!document.file) {
     return (
-      <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Document</h2>}>
-        <Alert
-          variant="info"
-          title="Apercu indisponible"
-          message="Aucun fichier n'a ete retourne par l'API pour ce document."
-        />
-      </Card>
+      <Alert
+        variant="info"
+        title="Apercu indisponible"
+        message="Aucun fichier n'a ete retourne par l'API pour ce document."
+      />
     )
   }
 
   return (
-    <Card
-      header={
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-[#1F2937]">Document</h2>
-          <a
-            href={document.file}
-            target="_blank"
-            rel="noreferrer"
-            className="text-sm font-semibold text-[#2563EB] hover:underline"
-          >
-            Ouvrir le document
-          </a>
-        </div>
-      }
-    >
-      {previewKind === 'image' ? (
-        <img
-          src={document.file}
-          alt={`Document ${document.document_type.toLowerCase()}`}
-          className="max-h-[70vh] w-full rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] object-contain"
-          loading="lazy"
-        />
-      ) : null}
-
-      {previewKind === 'pdf' ? (
-        <iframe
-          src={document.file}
-          title="Apercu du document"
-          className="h-[70vh] w-full rounded-2xl border border-[#E5E7EB]"
-        />
-      ) : null}
-
-      {previewKind === 'none' ? (
-        <Alert
-          variant="info"
-          title="Apercu non supporte"
-          message="Le format du fichier ne permet pas un apercu integre. Utilisez le lien pour ouvrir le document."
-        />
-      ) : null}
-    </Card>
+    <SecureDocumentPreview
+      documentId={document.id}
+      title={`Document ${mapDocumentType(document.document_type)}`}
+      fetchFile={getManagementDocumentFile}
+    />
   )
 }
 
 export default function ManagerDocumentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [showRejectBlock, setShowRejectBlock] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [rejectReasonError, setRejectReasonError] = useState<string | null>(null)
+  const [licenseTransmissionSelection, setLicenseTransmissionSelection] = useState<{
+    documentId: number
+    value: DrivingLicenseTransmission | ''
+  }>({ documentId: 0, value: '' })
 
   const documentId = Number(id)
   const isValidDocumentId = Number.isInteger(documentId) && documentId > 0
+  const licenseTransmission = licenseTransmissionSelection.documentId === documentId
+    ? licenseTransmissionSelection.value
+    : ''
 
   const detailQuery = useQuery({
     queryKey: ['management-document-detail', documentId],
@@ -220,37 +183,39 @@ export default function ManagerDocumentDetailPage() {
   })
 
   const validateMutation = useMutation({
-    mutationFn: () => validateManagementDocument(documentId),
-    onSuccess: async () => {
+    mutationFn: () => {
+      const document = detailQuery.data
+      if (!document || document.document_type !== 'PERMIS_CONDUIRE') {
+        return validateManagementDocument(documentId)
+      }
+
+      const transmission = licenseTransmission || undefined
+      return validateManagementDocument(documentId, {
+        ...(transmission ? { driving_license_transmission: transmission } : {}),
+      })
+    },
+    onSuccess: async (updatedDocument) => {
       setActionError(null)
-      setSuccessMessage('Le document a ete valide avec succes.')
       setShowRejectBlock(false)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['management-document-detail', documentId] }),
-        queryClient.invalidateQueries({ queryKey: ['management-documents'] }),
-      ])
+      queryClient.setQueryData(['management-document-detail', documentId], updatedDocument)
+      await queryClient.invalidateQueries({ queryKey: ['management-documents'] })
     },
     onError: (error) => {
-      setSuccessMessage(null)
       setActionError(toErrorMessage(error))
     },
   })
 
   const rejectMutation = useMutation({
     mutationFn: () => rejectManagementDocument(documentId, { reason: rejectReason.trim() }),
-    onSuccess: async () => {
+    onSuccess: async (updatedDocument) => {
       setActionError(null)
       setRejectReasonError(null)
-      setSuccessMessage('Le document a ete refuse avec succes.')
       setShowRejectBlock(false)
       setRejectReason('')
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['management-document-detail', documentId] }),
-        queryClient.invalidateQueries({ queryKey: ['management-documents'] }),
-      ])
+      queryClient.setQueryData(['management-document-detail', documentId], updatedDocument)
+      await queryClient.invalidateQueries({ queryKey: ['management-documents'] })
     },
     onError: (error) => {
-      setSuccessMessage(null)
       setActionError(toErrorMessage(error))
     },
   })
@@ -300,192 +265,201 @@ export default function ManagerDocumentDetailPage() {
 
   const document = detailQuery.data
   const status = mapStatus(document.status)
-  const canAct = canManageDocument(document.status)
+  const canAct = canManageDocument(document)
+  const canReject = canRejectDocument(document)
   const isPendingAction = validateMutation.isPending || rejectMutation.isPending
-
+  const isDrivingLicense = document.document_type === 'PERMIS_CONDUIRE'
   return (
-    <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Documents clients</p>
-          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Detail d'un document</h1>
-        </div>
+    <section className="mx-auto max-w-6xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold text-[#0F172A]">Detail d'un document</h1>
         <Link to="/manager/documents">
           <Button variant="secondary">Retour a la liste</Button>
         </Link>
-      </div>
+      </header>
 
-      {successMessage ? <Alert variant="success" title="Operation reussie" message={successMessage} /> : null}
       {actionError ? <Alert variant="danger" title="Operation impossible" message={actionError} /> : null}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div>
-          <DocumentPreview document={document} />
-        </div>
-
-        <div className="space-y-6">
-          <Card
-            header={
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-[#1F2937]">Informations</h2>
-                <StatusBadge variant={status.variant} label={status.label} />
-              </div>
-            }
-          >
-            <div className="space-y-5">
-              <div className="space-y-3">
-                <p className="text-sm font-semibold text-[#1F2937]">Client</p>
-                <DetailField label="Prenom" value={document.client_first_name || '—'} />
-                <DetailField label="Nom" value={document.client_last_name || '—'} />
-                <DetailField label="E-mail" value={document.client_email || '—'} />
-              </div>
-
-              <div className="space-y-3">
-                <p className="text-sm font-semibold text-[#1F2937]">Document</p>
-                <DetailField label="Type" value={mapDocumentType(document.document_type)} />
-                <DetailField label="Statut" value={status.label} />
-                <DetailField label="Numero" value={document.document_number || '—'} />
-                <DetailField label="Date d'envoi" value={formatDateTime(document.uploaded_at)} />
-                <DetailField label="Date d'expiration" value={formatDate(document.expiration_date)} />
-                <DetailField label="Date de validation/refus" value={formatDateTime(document.validated_at)} />
-                <DetailField
-                  label="Motif de refus"
-                  value={document.rejection_reason && document.rejection_reason.trim().length > 0 ? document.rejection_reason : '—'}
-                />
-              </div>
-
-              <div className="space-y-3">
-                <p className="text-sm font-semibold text-[#1F2937]">Metadonnees</p>
-                <DetailField label="ID document" value={String(document.id)} />
-                <DetailField label="ID client" value={String(document.client)} />
-                <DetailField label="Valide par (id)" value={document.validated_by ? String(document.validated_by) : '—'} />
-                <DetailField label="Valide par (email)" value={document.validated_by_email || '—'} />
-                <DetailField label="Actif" value={document.is_active ? 'Oui' : 'Non'} />
-                <DetailField label="Cree le" value={formatDateTime(document.created_at)} />
-                <DetailField label="Mis a jour le" value={formatDateTime(document.updated_at)} />
-              </div>
+      <Card
+        className="mx-auto w-full max-w-[900px]"
+        header={
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-[#1F2937]">
+              {mapDocumentType(document.document_type)}
+            </h2>
+            <div className="flex flex-wrap items-center gap-2">
+              {document.client_profile_status === 'INCOMPLET' ? (
+                <StatusBadge variant="warning" label="Profil incomplet" />
+              ) : null}
+              <StatusBadge variant={status.variant} label={status.label} />
             </div>
-          </Card>
-
-          <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Actions</h2>}>
-            {canAct ? (
-              <div className="space-y-4">
-                <Button
-                  className="w-full"
-                  variant="success"
-                  disabled={isPendingAction}
-                  onClick={() => {
-                    setActionError(null)
-                    setSuccessMessage(null)
-
-                    const confirmed = window.confirm('Confirmer la validation de ce document ?')
-
-                    if (!confirmed) {
-                      return
-                    }
-
-                    void validateMutation.mutateAsync()
-                  }}
-                >
-                  {validateMutation.isPending ? (
-                    <span className="flex items-center gap-2">
-                      <LoadingSpinner size="sm" aria-label="Validation en cours" />
-                      Validation en cours...
-                    </span>
-                  ) : (
-                    'Valider le document'
-                  )}
-                </Button>
-
-                {!showRejectBlock ? (
-                  <Button
-                    className="w-full"
-                    variant="danger"
-                    disabled={isPendingAction}
-                    onClick={() => {
-                      setActionError(null)
-                      setSuccessMessage(null)
-                      setShowRejectBlock(true)
+          </div>
+        }
+        footer={
+          canAct ? (
+            <div className="space-y-4">
+              {canReject && showRejectBlock ? (
+                <div className="space-y-3">
+                  <label htmlFor="reject-reason" className="block text-sm font-medium text-[#1F2937]">
+                    Motif de refus<span className="ml-1 text-[#EF4444]">*</span>
+                  </label>
+                  <textarea
+                    id="reject-reason"
+                    rows={4}
+                    className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
+                    placeholder="Décrivez le motif de refus"
+                    value={rejectReason}
+                    onChange={(event) => {
+                      setRejectReason(event.target.value)
+                      if (rejectReasonError) setRejectReasonError(null)
                     }}
-                  >
-                    Refuser le document
-                  </Button>
-                ) : null}
+                  />
+                  {rejectReasonError ? <p className="text-sm text-[#EF4444]">{rejectReasonError}</p> : null}
+                </div>
+              ) : null}
 
-                {showRejectBlock ? (
-                  <div className="space-y-3 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] p-4">
-                    <label htmlFor="reject-reason" className="block text-sm font-medium text-[#1F2937]">
-                      Motif de refus<span className="ml-1 text-[#EF4444]">*</span>
-                    </label>
-                    <textarea
-                      id="reject-reason"
-                      rows={4}
-                      className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                      placeholder="Decrivez le motif de refus"
-                      value={rejectReason}
-                      onChange={(event) => {
-                        setRejectReason(event.target.value)
-                        if (rejectReasonError) {
-                          setRejectReasonError(null)
+              <div className={`grid grid-cols-1 gap-3 ${canReject ? 'sm:grid-cols-2' : 'sm:grid-cols-1'}`}>
+                {canReject && showRejectBlock ? (
+                  <>
+                    <Button
+                      variant="danger"
+                      className="w-full"
+                      disabled={isPendingAction}
+                      onClick={() => {
+                        setActionError(null)
+                        if (!rejectReason.trim()) {
+                          setRejectReasonError('Le motif de refus est obligatoire.')
+                          return
                         }
+                        setRejectReasonError(null)
+                        void rejectMutation.mutateAsync()
                       }}
-                    />
-                    {rejectReasonError ? <p className="text-sm text-[#EF4444]">{rejectReasonError}</p> : null}
+                    >
+                      {rejectMutation.isPending ? 'Refus en cours...' : 'Confirmer le refus'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="w-full"
+                      disabled={isPendingAction}
+                      onClick={() => {
+                        setShowRejectBlock(false)
+                        setRejectReason('')
+                        setRejectReasonError(null)
+                      }}
+                    >
+                      Annuler
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      className="w-full"
+                      variant="success"
+                      disabled={isPendingAction || (isDrivingLicense && !licenseTransmission)}
+                      onClick={() => {
+                        setActionError(null)
 
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        if (isDrivingLicense && !licenseTransmission) {
+                          setActionError('Sélectionnez le type de permis vérifié avant validation.')
+                          return
+                        }
+
+                        void validateMutation.mutateAsync()
+                      }}
+                    >
+                      {validateMutation.isPending ? (
+                        <span className="flex items-center gap-2">
+                          <LoadingSpinner size="sm" aria-label="Validation en cours" />
+                          Validation en cours...
+                        </span>
+                      ) : 'Valider le document'}
+                    </Button>
+
+                    {canReject ? (
                       <Button
-                        variant="danger"
                         className="w-full"
+                        variant="danger"
                         disabled={isPendingAction}
                         onClick={() => {
                           setActionError(null)
-                          setSuccessMessage(null)
-
-                          if (!rejectReason.trim()) {
-                            setRejectReasonError('Le motif de refus est obligatoire.')
-                            return
-                          }
-
-                          setRejectReasonError(null)
-                          void rejectMutation.mutateAsync()
+                          setShowRejectBlock(true)
                         }}
                       >
-                        {rejectMutation.isPending ? (
-                          <span className="flex items-center gap-2">
-                            <LoadingSpinner size="sm" aria-label="Refus en cours" />
-                            Refus en cours...
-                          </span>
-                        ) : (
-                          'Confirmer le refus'
-                        )}
+                        Refuser le document
                       </Button>
-
-                      <Button
-                        variant="secondary"
-                        className="w-full"
-                        disabled={isPendingAction}
-                        onClick={() => {
-                          setShowRejectBlock(false)
-                          setRejectReason('')
-                          setRejectReasonError(null)
-                        }}
-                      >
-                        Annuler
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
+                    ) : null}
+                  </>
+                )}
               </div>
-            ) : (
-              <Alert
-                variant="info"
-                title="Aucune action disponible"
-                message="Ce document est dans un etat final ou non modifiable. Les actions de validation et de refus ne sont plus disponibles."
-              />
-            )}
-          </Card>
+            </div>
+          ) : undefined
+        }
+      >
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <DetailField
+              label="Nom et prénom du client"
+              value={[document.client_first_name, document.client_last_name].filter(Boolean).join(' ') || '—'}
+            />
+            <DetailField label="Numéro officiel" value={document.document_number || '—'} />
+            <DetailField label="Date d’expiration" value={formatDate(document.expiration_date)} />
+            <DetailField label="Date d’envoi" value={formatDateTime(document.uploaded_at)} />
+          </div>
+
+          <div className="border-t border-slate-100 pt-4">
+            <DocumentPreview document={document} />
+          </div>
+
+          {canAct && isDrivingLicense ? (
+            <fieldset className="space-y-2 border-t border-slate-100 pt-4">
+              <legend className="text-sm font-medium text-[#1F2937]">Type de permis vérifié</legend>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="flex min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name={`license-transmission-${documentId}`}
+                    value="MANUAL_AND_AUTOMATIC"
+                    checked={licenseTransmission === 'MANUAL_AND_AUTOMATIC'}
+                    className="shrink-0 accent-violet-600"
+                    onChange={() => {
+                      setLicenseTransmissionSelection({
+                        documentId,
+                        value: 'MANUAL_AND_AUTOMATIC',
+                      })
+                    }}
+                  />
+                  Permis manuel
+                </label>
+                <label className="flex min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name={`license-transmission-${documentId}`}
+                    value="AUTOMATIC_ONLY"
+                    checked={licenseTransmission === 'AUTOMATIC_ONLY'}
+                    className="shrink-0 accent-violet-600"
+                    onChange={() => {
+                      setLicenseTransmissionSelection({
+                        documentId,
+                        value: 'AUTOMATIC_ONLY',
+                      })
+                    }}
+                  />
+                  Permis automatique
+                </label>
+              </div>
+            </fieldset>
+          ) : null}
+
+          {!canAct ? (
+            <div className="space-y-3 border-t border-slate-100 pt-4">
+              <DetailField label="Date de décision" value={formatDateTime(document.validated_at)} />
+              {document.status === 'REFUSE' ? (
+                <DetailField label="Motif de refus" value={document.rejection_reason || 'Aucun motif indiqué'} />
+              ) : null}
+            </div>
+          ) : null}
         </div>
-      </div>
+      </Card>
     </section>
   )
 }

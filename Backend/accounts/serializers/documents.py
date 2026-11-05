@@ -3,13 +3,18 @@ import uuid
 
 from django.conf import settings
 from django.db import transaction
+from django.urls import reverse
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 from rest_framework import serializers
 
 from accounts.models import ClientDocument
+from accounts.services.profile_status import (
+    get_effective_document_status,
+    get_effective_profile_status,
+    recalculate_profile_status,
+)
 from notifications.services import create_notification
-
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
 ALLOWED_MIME_TYPES = {
@@ -22,8 +27,16 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 PDF_EXTENSION = ".pdf"
 
 
+class PrivateClientDocumentFileField(serializers.FileField):
+    def to_representation(self, value):
+        if not value:
+            return None
+        return reverse("accounts:users-me-documents-file", kwargs={"pk": self.parent.instance.pk})
+
+
 class ClientDocumentReadSerializer(serializers.ModelSerializer):
-    file = serializers.FileField(read_only=True)
+    file = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
 
     class Meta:
         model = ClientDocument
@@ -34,15 +47,30 @@ class ClientDocumentReadSerializer(serializers.ModelSerializer):
             "expiration_date",
             "status",
             "rejection_reason",
+            "driving_license_category",
+            "driving_license_transmission",
             "uploaded_at",
             "validated_at",
             "is_active",
             "file",
         )
 
+    def get_file(self, obj):
+        if not obj.file:
+            return None
+        return reverse("accounts:users-me-documents-file", kwargs={"pk": obj.pk})
+
+    def get_status(self, obj):
+        return get_effective_document_status(obj)
+
 
 class ClientDocumentCreateSerializer(serializers.ModelSerializer):
-    file = serializers.FileField()
+    file = PrivateClientDocumentFileField()
+    driving_license_transmission_declared = serializers.ChoiceField(
+        choices=ClientDocument.DrivingLicenseTransmission.choices,
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = ClientDocument
@@ -51,7 +79,20 @@ class ClientDocumentCreateSerializer(serializers.ModelSerializer):
             "document_number",
             "file",
             "expiration_date",
+            "driving_license_transmission_declared",
         )
+
+    def validate(self, attrs):
+        document_type = attrs.get("document_type")
+        declared_transmission = attrs.get("driving_license_transmission_declared")
+        if (
+            document_type != ClientDocument.DocumentType.PERMIS_CONDUIRE
+            and declared_transmission
+        ):
+            raise serializers.ValidationError(
+                {"driving_license_transmission_declared": "Cette information concerne uniquement le permis."}
+            )
+        return attrs
 
     def validate_document_number(self, value):
         cleaned = value.strip()
@@ -120,12 +161,16 @@ class ClientDocumentCreateSerializer(serializers.ModelSerializer):
             document_number=validated_data["document_number"],
             file=uploaded_file,
             expiration_date=validated_data["expiration_date"],
+            driving_license_transmission_declared=validated_data.get(
+                "driving_license_transmission_declared"
+            ),
             status=ClientDocument.Status.EN_ATTENTE,
             rejection_reason="",
             validated_at=None,
             validated_by=None,
             is_active=True,
         )
+        recalculate_profile_status(client_profile)
 
         notification_message = (
             f"Votre document {document.get_document_type_display()} a ete transmis et est en attente de validation."
@@ -159,6 +204,7 @@ class ManagerClientDocumentListSerializer(serializers.ModelSerializer):
     client_first_name = serializers.CharField(source="client.user.first_name", read_only=True)
     client_last_name = serializers.CharField(source="client.user.last_name", read_only=True)
     validated_by_email = serializers.EmailField(source="validated_by.email", read_only=True, allow_null=True)
+    status = serializers.SerializerMethodField()
 
     class Meta:
         model = ClientDocument
@@ -178,15 +224,20 @@ class ManagerClientDocumentListSerializer(serializers.ModelSerializer):
             "validated_by_email",
         )
 
+    def get_status(self, obj):
+        return get_effective_document_status(obj)
+
 
 class ManagerClientDocumentDetailSerializer(serializers.ModelSerializer):
     client = serializers.IntegerField(source="client.id", read_only=True)
     client_email = serializers.EmailField(source="client.user.email", read_only=True)
     client_first_name = serializers.CharField(source="client.user.first_name", read_only=True)
     client_last_name = serializers.CharField(source="client.user.last_name", read_only=True)
+    client_profile_status = serializers.SerializerMethodField()
     validated_by = serializers.IntegerField(source="validated_by.id", read_only=True, allow_null=True)
     validated_by_email = serializers.EmailField(source="validated_by.email", read_only=True, allow_null=True)
-    file = serializers.FileField(read_only=True)
+    file = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
 
     class Meta:
         model = ClientDocument
@@ -196,10 +247,14 @@ class ManagerClientDocumentDetailSerializer(serializers.ModelSerializer):
             "client_email",
             "client_first_name",
             "client_last_name",
+            "client_profile_status",
             "document_type",
             "document_number",
             "file",
             "expiration_date",
+            "driving_license_category",
+            "driving_license_transmission",
+            "driving_license_transmission_declared",
             "status",
             "rejection_reason",
             "uploaded_at",
@@ -210,6 +265,17 @@ class ManagerClientDocumentDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+    def get_file(self, obj):
+        if not obj.file:
+            return None
+        return reverse("accounts:management-documents-file", kwargs={"pk": obj.pk})
+
+    def get_status(self, obj):
+        return get_effective_document_status(obj)
+
+    def get_client_profile_status(self, obj):
+        return get_effective_profile_status(obj.client)
 
 
 class ManagerRejectDocumentSerializer(serializers.Serializer):
@@ -227,3 +293,11 @@ class ManagerRejectDocumentSerializer(serializers.Serializer):
             )
 
         return cleaned
+
+
+class ManagerValidateDocumentSerializer(serializers.Serializer):
+    driving_license_transmission = serializers.ChoiceField(
+        choices=ClientDocument.DrivingLicenseTransmission.choices,
+        required=False,
+        allow_null=True,
+    )

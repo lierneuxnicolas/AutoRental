@@ -22,6 +22,7 @@ FORBIDDEN_CREATE_FIELDS = {
 
 class ReservationVehicleSummarySerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
+    mileage = serializers.IntegerField(read_only=True)
     brand = serializers.CharField(source="brand.name", read_only=True)
     model_name = serializers.CharField(read_only=True)
     category = serializers.CharField(source="category.name", read_only=True)
@@ -33,6 +34,7 @@ class ReservationVehicleSummarySerializer(serializers.Serializer):
     doors = serializers.IntegerField(read_only=True)
     registration_number = serializers.CharField(read_only=True)
     parking_name = serializers.CharField(source="parking_space.parking.name", read_only=True)
+    parking_address = serializers.CharField(source="parking_space.parking.address", read_only=True)
     parking_space_number = serializers.CharField(source="parking_space.number", read_only=True)
 
 

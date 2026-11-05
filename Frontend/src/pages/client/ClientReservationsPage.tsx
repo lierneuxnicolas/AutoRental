@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import axios from 'axios'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
@@ -148,7 +148,9 @@ export default function ClientReservationsPage() {
   const [downloadingReservationId, setDownloadingReservationId] = useState<number | null>(null)
   const [invoiceDownloadError, setInvoiceDownloadError] = useState<string | null>(null)
   const [cancelingReservationId, setCancelingReservationId] = useState<number | null>(null)
+  const [confirmingReturnReservationId, setConfirmingReturnReservationId] = useState<number | null>(null)
   const [unlockHintReservationId, setUnlockHintReservationId] = useState<number | null>(null)
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const highlightedReservationId = Number(searchParams.get('highlight'))
   const isHighlightValid = Number.isInteger(highlightedReservationId) && highlightedReservationId > 0
@@ -184,6 +186,9 @@ export default function ClientReservationsPage() {
   })
 
   const reservations = useMemo(() => reservationsQuery.data?.results ?? [], [reservationsQuery.data?.results])
+  const confirmingReturnReservation = reservations.find(
+    (reservation) => reservation.id === confirmingReturnReservationId,
+  )
 
   useEffect(() => {
     if (!isHighlightValid || reservations.length === 0) {
@@ -400,11 +405,14 @@ export default function ClientReservationsPage() {
                       </div>
                     ) : null}
                     {showReturnButton ? (
-                      <Link to={`/client/reservations/${reservation.id}/return-inspection`}>
-                        <Button size="sm" variant="success" className={actionButtonClassName}>
-                          Restituer le véhicule
-                        </Button>
-                      </Link>
+                      <Button
+                        size="sm"
+                        variant="success"
+                        className={actionButtonClassName}
+                        onClick={() => setConfirmingReturnReservationId(reservation.id)}
+                      >
+                        Restituer au parking
+                      </Button>
                     ) : null}
                   </div>
 
@@ -497,6 +505,50 @@ export default function ClientReservationsPage() {
                 }
               >
                 {cancelMutation.isPending ? 'Annulation en cours...' : 'Oui, annuler ma réservation'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {confirmingReturnReservation ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="return-confirmation-title"
+            className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl"
+          >
+            <h2 id="return-confirmation-title" className="text-xl font-semibold text-[#0F172A]">
+              Restitution du véhicule
+            </h2>
+            <div className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
+              <p>
+                Avant de commencer la restitution, assurez-vous d'avoir stationné le véhicule au parking GetaCar indiqué dans votre réservation.
+              </p>
+              <p>
+                Vous allez ensuite réaliser l'état des lieux de retour, puis verrouiller le véhicule avec votre smartphone.
+              </p>
+            </div>
+            <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+              <p className="font-semibold text-[#1F2937]">{confirmingReturnReservation.vehicle.parking_name}</p>
+              <p>
+                {confirmingReturnReservation.vehicle.parking_address || 'Adresse du parking non renseignée.'}
+              </p>
+            </div>
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" onClick={() => setConfirmingReturnReservationId(null)}>
+                Annuler
+              </Button>
+              <Button
+                variant="success"
+                onClick={() => {
+                  const reservationId = confirmingReturnReservation.id
+                  setConfirmingReturnReservationId(null)
+                  navigate(`/client/reservations/${reservationId}/return-inspection`)
+                }}
+              >
+                Commencer la restitution
               </Button>
             </div>
           </div>

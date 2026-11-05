@@ -8,13 +8,13 @@ import { Alert, LoadingSpinner } from '../../components/feedback'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import { useAuth } from '../../hooks/useAuth'
-import { getClientProfileMe, getClientProfileProgress } from '../../services/authService'
+import { getClientDocuments, getClientProfileMe, getClientProfileProgress } from '../../services/authService'
 import { createReservation } from '../../services/reservationService'
 import { getVehicleById, simulatePrice } from '../../services/vehicleService'
 import { createReservationDeposit, createReservationPaymentIntent } from '../../services/paymentService'
 import { getReservationById } from '../../services/reservationService'
 import type { ReservationCreateRequest, ReservationCreateResponse } from '../../types/reservation'
-import type { ClientProfileMe, ClientProfileProgress } from '../../types/auth'
+import type { ClientDocument, ClientProfileMe, ClientProfileProgress } from '../../types/auth'
 
 type ApiErrorPayload = {
   detail?: string
@@ -252,6 +252,7 @@ function toErrorMessage(error: unknown): string {
 function buildProfileEligibility(
   profile: ClientProfileMe | undefined,
   progress: ClientProfileProgress | undefined,
+  documents: ClientDocument[] | undefined,
 ): ProfileEligibility {
   if (!profile || !progress) {
     return {
@@ -267,6 +268,18 @@ function buildProfileEligibility(
   }
 
   const reasons: ProfileEligibilityReason[] = []
+  const hasExpiredRequiredDocument = Boolean(
+    documents?.some(
+      (document) => document.is_active && document.status === 'EXPIRE',
+    ),
+  )
+
+  if (hasExpiredRequiredDocument) {
+    reasons.push({
+      key: 'REQUIRED_DOCUMENT_EXPIRED',
+      label: 'Votre carte d’identité ou votre permis de conduire est expiré. Veuillez remplacer ce document pour réserver.',
+    })
+  }
 
   if (!progress.email_verified) {
     reasons.push({ key: 'EMAIL_NOT_VERIFIED', label: 'E-mail non verifie.' })
@@ -276,11 +289,11 @@ function buildProfileEligibility(
     reasons.push({ key: 'PROFILE_INCOMPLETE', label: 'Informations personnelles incompletes.' })
   }
 
-  if (!progress.identity_card_valid) {
+  if (!progress.identity_card_valid && !hasExpiredRequiredDocument) {
     reasons.push({ key: 'IDENTITY_CARD_INVALID', label: "Carte d'identite manquante ou non validee." })
   }
 
-  if (!progress.driving_license_valid) {
+  if (!progress.driving_license_valid && !hasExpiredRequiredDocument) {
     reasons.push({ key: 'DRIVING_LICENSE_INVALID', label: 'Permis manquant ou non valide.' })
   }
 
@@ -386,7 +399,6 @@ export default function ReservationPage() {
   const { isAuthenticated, isLoading: isAuthLoading } = useAuth()
   const stepRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const [currentStep, setCurrentStep] = useState(1)
-  const [selectedInsurance, setSelectedInsurance] = useState<InsuranceKey>('standard')
   const [createdReservation, setCreatedReservation] = useState<ReservationCreateResponse | null>(null)
   const [confirmedReservation, setConfirmedReservation] = useState<ReservationCreateResponse | null>(null)
   const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null)
@@ -398,13 +410,13 @@ export default function ReservationPage() {
   const [confirmationPollingActive, setConfirmationPollingActive] = useState(false)
 
   const flowPayload = useMemo(() => readReservationFlowParams(searchParams), [searchParams])
-
-  useEffect(() => {
-    if (flowPayload) {
-      setSelectedInsurance(flowPayload.insurance)
-      setConfirmedReservation(null)
-    }
-  }, [flowPayload])
+  const [insuranceSelection, setInsuranceSelection] = useState<{
+    flowPayload: ReservationFlowParams | null
+    value: InsuranceKey
+  }>(() => ({ flowPayload, value: flowPayload?.insurance ?? 'standard' }))
+  const selectedInsurance = insuranceSelection.flowPayload === flowPayload
+    ? insuranceSelection.value
+    : flowPayload?.insurance ?? 'standard'
 
   const reservationPayload = useMemo<ReservationCreateRequest | null>(() => {
     if (!flowPayload) {
@@ -440,6 +452,12 @@ export default function ReservationPage() {
   const profileProgressQuery = useQuery({
     queryKey: ['client-profile-progress', isAuthenticated],
     queryFn: getClientProfileProgress,
+    enabled: isAuthenticated,
+  })
+
+  const clientDocumentsQuery = useQuery({
+    queryKey: ['client-documents'],
+    queryFn: getClientDocuments,
     enabled: isAuthenticated,
   })
 
@@ -590,48 +608,71 @@ export default function ReservationPage() {
     { key: 'omnium' as const, label: 'Omnium', description: 'Protection renforcée + franchise réduite' },
   ]
 
-  if (!flowPayload || !reservationPayload) {
-    return (
-      <section className="py-8 sm:py-10" aria-labelledby="reservation-page-title">
-        <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-          <h1 id="reservation-page-title" className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
-            Reservation
-          </h1>
-          <div className="mt-6">
-            <Alert
-              variant="danger"
-              title="Parametres invalides"
-              message="Les parametres vehicleId, start, end, insurance, insurancePrice et estimatedTotal sont requis et doivent etre valides."
-            />
-          </div>
-        </div>
-      </section>
-    )
-  }
-
   const isLoadingData = vehicleQuery.isLoading || simulationQuery.isLoading
-  const isLoadingEligibility = isAuthenticated && (profileQuery.isLoading || profileProgressQuery.isLoading)
+  const isLoadingEligibility = isAuthenticated && (
+    profileQuery.isLoading || profileProgressQuery.isLoading || clientDocumentsQuery.isLoading
+  )
   const dataError = vehicleQuery.error ?? simulationQuery.error
-  const eligibilityError = isAuthenticated ? (profileQuery.error ?? profileProgressQuery.error) : null
-  const profileEligibility = isAuthenticated && !eligibilityError
-    ? buildProfileEligibility(profileQuery.data, profileProgressQuery.data)
+  const eligibilityError = isAuthenticated
+    ? (profileQuery.error ?? profileProgressQuery.error ?? clientDocumentsQuery.error)
     : null
+  const profileEligibility = isAuthenticated && !eligibilityError
+    ? buildProfileEligibility(
+      profileQuery.data,
+      profileProgressQuery.data,
+      clientDocumentsQuery.data?.results,
+    )
+    : null
+  const activeDrivingLicense = clientDocumentsQuery.data?.results.find(
+    (document) => document.document_type === 'PERMIS_CONDUIRE' && document.is_active,
+  )
+  const validLicenseCategories = [
+    'AM', 'A1', 'A2', 'A', 'B', 'BE', 'C1', 'C1E', 'C', 'CE', 'D1', 'D1E', 'D', 'DE',
+  ]
+  const licenseDetailsUnverified = Boolean(
+    activeDrivingLicense?.status === 'VALIDE'
+    && (
+      !activeDrivingLicense.driving_license_category
+      || !validLicenseCategories.includes(activeDrivingLicense.driving_license_category)
+      || !['MANUAL_AND_AUTOMATIC', 'AUTOMATIC_ONLY'].includes(
+        activeDrivingLicense.driving_license_transmission ?? '',
+      )
+    ),
+  )
+  const vehicleTransmission = vehicleQuery.data?.transmission.trim().toLocaleLowerCase('fr-FR')
+  const vehicleIsManual = vehicleTransmission === 'manuelle' || vehicleTransmission === 'manual'
+  const vehicleIsAutomatic = ['automatique', 'automatic', 'auto'].includes(vehicleTransmission ?? '')
+  const vehicleTransmissionUnknown = Boolean(vehicleQuery.data && !vehicleIsManual && !vehicleIsAutomatic)
+  const vehicleIncompatibleWithLicense = Boolean(
+    activeDrivingLicense?.status === 'VALIDE'
+    && activeDrivingLicense.driving_license_transmission === 'AUTOMATIC_ONLY'
+    && vehicleIsManual,
+  )
+  const transmissionCompatibilityError = licenseDetailsUnverified
+    ? 'La catégorie et la transmission autorisée de votre permis doivent être vérifiées par un gestionnaire avant toute réservation.'
+    : vehicleIncompatibleWithLicense
+      ? 'Votre permis de conduire autorise uniquement les véhicules automatiques. Vous ne pouvez pas réserver ce véhicule à boîte manuelle. Veuillez sélectionner un véhicule automatique.'
+      : vehicleTransmissionUnknown
+        ? 'La transmission de ce véhicule n’est pas renseignée de manière fiable. Veuillez sélectionner un autre véhicule ou contacter le gestionnaire.'
+        : null
   const canConfirmReservation = Boolean(
     isAuthenticated
     && !isAuthLoading
     && !isLoadingEligibility
     && !eligibilityError
-    && profileEligibility?.canReserve,
+    && profileEligibility?.canReserve
+    && !transmissionCompatibilityError,
   )
 
   const insuranceDays = simulationQuery.data ? computeInsuranceDays(simulationQuery.data.duration_hours) : null
   const computedInsuranceAmount = simulationQuery.data ? toFiniteNumber(simulationQuery.data.insurance_amount) : null
   const computedTotalAmount = simulationQuery.data ? toFiniteNumber(simulationQuery.data.total_amount) : null
   const insurancePriceDelta = computedInsuranceAmount !== null
-    ? Math.abs(computedInsuranceAmount - flowPayload.insurancePrice)
+    ? Math.abs(computedInsuranceAmount - (flowPayload?.insurancePrice ?? 0))
     : null
   const totalsMatchSimulationStep = computedTotalAmount !== null
     && insurancePriceDelta !== null
+    && flowPayload !== null
     && Math.abs(computedTotalAmount - flowPayload.estimatedTotal) < 0.001
     && insurancePriceDelta < 0.001
   const hasInsurancePricing = computedInsuranceAmount !== null
@@ -660,6 +701,25 @@ export default function ReservationPage() {
     paymentIntentMutation.isPending,
     reservationPayload,
   ])
+
+  if (!flowPayload || !reservationPayload) {
+    return (
+      <section className="py-8 sm:py-10" aria-labelledby="reservation-page-title">
+        <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
+          <h1 id="reservation-page-title" className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
+            Reservation
+          </h1>
+          <div className="mt-6">
+            <Alert
+              variant="danger"
+              title="Parametres invalides"
+              message="Les parametres vehicleId, start, end, insurance, insurancePrice et estimatedTotal sont requis et doivent etre valides."
+            />
+          </div>
+        </div>
+      </section>
+    )
+  }
 
   const selectedInsuranceLabel = insuranceOptions.find((option) => option.key === selectedInsurance)?.label ?? INSURANCE_LABELS[selectedInsurance as InsuranceKey]
   const confirmationReservation = confirmedReservation ?? createdReservation
@@ -732,7 +792,7 @@ export default function ReservationPage() {
                         <button
                           key={option.key}
                           type="button"
-                          onClick={() => setSelectedInsurance(option.key)}
+                          onClick={() => setInsuranceSelection({ flowPayload, value: option.key })}
                           className={[
                             'rounded-2xl border p-4 text-left transition-all',
                             isSelected
@@ -884,6 +944,18 @@ export default function ReservationPage() {
                       />
                     ) : null}
 
+                    {isAuthenticated && !isLoadingEligibility && !eligibilityError && transmissionCompatibilityError ? (
+                      <Alert
+                        variant="danger"
+                        title={
+                          vehicleIncompatibleWithLicense
+                            ? 'Véhicule incompatible avec votre permis'
+                            : 'Vérification de la transmission requise'
+                        }
+                        message={transmissionCompatibilityError}
+                      />
+                    ) : null}
+
                     {isAuthenticated && !isLoadingEligibility && !eligibilityError && profileEligibility?.canReserve ? (
                       <Alert
                         variant="success"
@@ -920,7 +992,16 @@ export default function ReservationPage() {
                       <Button
                         variant="danger"
                         onClick={() => advanceToStep(4)}
-                        disabled={createReservationMutation.isPending || isAuthLoading || (!isAuthenticated && !isAuthLoading)}
+                        disabled={
+                          createReservationMutation.isPending
+                          || isAuthLoading
+                          || (!isAuthenticated && !isAuthLoading)
+                          || (isAuthenticated && (
+                            isLoadingEligibility
+                            || Boolean(eligibilityError)
+                            || Boolean(transmissionCompatibilityError)
+                          ))
+                        }
                       >
                         Valider la confirmation
                       </Button>

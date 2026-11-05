@@ -18,11 +18,21 @@ Including another URLconf
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.http import HttpResponseNotFound
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
+
+def deny_public_client_document_access(_request, path):
+    return HttpResponseNotFound()
+
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path(
+        "media/client_documents/<path:path>",
+        deny_public_client_document_access,
+    ),
     path("api/schema/", SpectacularAPIView.as_view(), name="api-schema"),
     path(
         "api/docs/",

@@ -14,6 +14,7 @@ from interventions.services.vehicle_access import activate_vehicle_access
 from notifications.services import create_notification
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
+from vehicles.constants import MAX_VEHICLE_MILEAGE
 from vehicles.models import Vehicle
 
 
@@ -175,6 +176,13 @@ def _assert_measurements(*, inspection: Inspection, vehicle, mileage: int, energ
 def _assert_measurements_input(*, vehicle, mileage: int, energy_level_percent: int) -> None:
     if mileage is None:
         _raise_departure_error("MILEAGE_REQUIRED", "Le kilometrage est obligatoire.")
+
+    if mileage > MAX_VEHICLE_MILEAGE:
+        _raise_departure_error(
+            "INVALID_MILEAGE",
+            "Le kilometrage depasse la valeur maximale autorisee.",
+            details={"maximum_mileage": MAX_VEHICLE_MILEAGE, "provided_mileage": mileage},
+        )
 
     if mileage < vehicle.mileage:
         _raise_departure_error(

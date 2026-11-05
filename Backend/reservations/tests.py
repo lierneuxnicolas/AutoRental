@@ -12,8 +12,7 @@ from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import connection
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import resolve, reverse
@@ -33,8 +32,15 @@ from notifications.models import Notification
 from payments.models import Deposit, Payment, Refund
 from reservations.models import Reservation
 from reservations.services.cancellation import calculate_cancellation_financials
-from reservations.services.pricing import PricingError, _quantize_amount, calculate_price_simulation
-from reservations.services.reminders import REMINDER_NOTIFICATION_TYPE, send_reservation_24h_reminders
+from reservations.services.pricing import (
+	PricingError,
+	_quantize_amount,
+	calculate_price_simulation,
+)
+from reservations.services.reminders import (
+	REMINDER_NOTIFICATION_TYPE,
+	send_reservation_24h_reminders,
+)
 from reservations.services.reservation_creation import create_draft_reservation
 from reservations.views import (
 	PriceSimulationView,
@@ -43,11 +49,11 @@ from reservations.views import (
 	ReservationClientDetailView,
 	ReservationClientListCreateView,
 	ReservationClientPaymentIntentView,
+	ReservationLockView,
 	ReservationManagementCompleteView,
 	ReservationManagementDetailView,
 	ReservationManagementIssueView,
 	ReservationManagementListView,
-	ReservationLockView,
 	ReservationUnlockView,
 )
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory
@@ -996,6 +1002,8 @@ class ReservationTestDataMixin:
 			file=_doc_file(f"license-{suffix}.bin"),
 			expiration_date=expiration,
 			status=ClientDocument.Status.VALIDE,
+			driving_license_category=ClientDocument.DrivingLicenseCategory.B,
+			driving_license_transmission=ClientDocument.DrivingLicenseTransmission.MANUAL_AND_AUTOMATIC,
 			is_active=True,
 		)
 
@@ -1301,6 +1309,24 @@ class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertIn("DRIVING_LICENSE_MISSING", response.data.get("details", {}).get("eligibility_errors", []))
 
+	def test_document_en_attente_bloque_reservation_avec_un_message_explicite(self):
+		identity_card = ClientDocument.objects.get(
+			client=self.client_profile_1,
+			document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+			is_active=True,
+		)
+		identity_card.status = ClientDocument.Status.EN_ATTENTE
+		identity_card.save(update_fields=["status"])
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self.url, self._payload(), format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "PROFILE_NOT_ELIGIBLE")
+		self.assertIn("IDENTITY_CARD_NOT_VALID", response.data["details"]["eligibility_errors"])
+		self.assertIn("carte d'identité", response.data["message"])
+		self.assertIn("profil", response.data["message"])
+
 	def test_carte_expiree_avant_fin_refuse(self):
 		start, end = self._period()
 		card = ClientDocument.objects.filter(
@@ -1321,6 +1347,31 @@ class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertIn("IDENTITY_CARD_EXPIRES_TOO_SOON", response.data.get("details", {}).get("eligibility_errors", []))
 
+	def test_carte_deja_expiree_affiche_le_message_de_remplacement(self):
+		start, end = self._period()
+		card = ClientDocument.objects.filter(
+			client=self.client_profile_1,
+			document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+			is_active=True,
+		).first()
+		card.expiration_date = timezone.localdate() - timedelta(days=1)
+		card.save(update_fields=["expiration_date"])
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(
+			self.url,
+			self._payload(start_at=start, end_at=end),
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("IDENTITY_CARD_EXPIRED", response.data["details"]["eligibility_errors"])
+		self.assertEqual(
+			response.data["message"],
+			"Votre carte d'identité ou votre permis de conduire est expiré. "
+			"Veuillez remplacer ce document pour réserver.",
+		)
+
 	def test_permis_expire_avant_fin_refuse(self):
 		start, end = self._period()
 		license_doc = ClientDocument.objects.filter(
@@ -1340,6 +1391,22 @@ class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertIn("DRIVING_LICENSE_EXPIRES_TOO_SOON", response.data.get("details", {}).get("eligibility_errors", []))
+
+	def test_document_au_statut_expire_bloque_reservation(self):
+		identity_card = ClientDocument.objects.get(
+			client=self.client_profile_1,
+			document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+			is_active=True,
+		)
+		identity_card.status = ClientDocument.Status.EXPIRE
+		identity_card.save(update_fields=["status"])
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.post(self.url, self._payload(), format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("IDENTITY_CARD_EXPIRES_TOO_SOON", response.data["details"]["eligibility_errors"])
+		self.assertIn("carte d'identité", response.data["message"])
 
 	def test_vehicule_inactif_refuse(self):
 		self.client_api.force_authenticate(self.client_user_1)
@@ -1469,6 +1536,11 @@ class ReservationClientConsultationTests(ReservationTestDataMixin, TestCase):
 		response = self.client_api.get(url)
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(response.data["id"], self.owned_reservation.id)
+		self.assertEqual(response.data["vehicle"]["mileage"], self.owned_reservation.vehicle.mileage)
+		self.assertEqual(
+			response.data["vehicle"]["parking_address"],
+			self.owned_reservation.vehicle.parking_space.parking.address,
+		)
 
 	def test_liste_client_reste_disponible_avec_une_reservation_confirmee_passee(self):
 		past_reservation = self._create_reservation(
@@ -3299,6 +3371,101 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "PROFILE_NOT_ELIGIBLE")
+
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_expired_document_is_rejected_before_payment_intent_creation(self, mocked_create):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		identity_card = ClientDocument.objects.get(
+			client=self.client_profile_1,
+			document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+			is_active=True,
+		)
+		identity_card.expiration_date = timezone.localdate() - timedelta(days=1)
+		identity_card.save(update_fields=["expiration_date"])
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "PROFILE_NOT_ELIGIBLE")
+		self.assertEqual(
+			response.data["message"],
+			"Votre carte d'identité ou votre permis de conduire est expiré. "
+			"Veuillez remplacer ce document pour réserver.",
+		)
+		mocked_create.assert_not_called()
+
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_incompatible_vehicle_is_rejected_before_payment_intent_creation(self, mocked_create):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		reservation.vehicle.transmission = "Manuelle"
+		reservation.vehicle.save(update_fields=["transmission", "updated_at"])
+		license_document = ClientDocument.objects.get(
+			client=self.client_profile_1,
+			document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+			is_active=True,
+		)
+		license_document.driving_license_category = ClientDocument.DrivingLicenseCategory.B
+		license_document.driving_license_transmission = ClientDocument.DrivingLicenseTransmission.AUTOMATIC_ONLY
+		license_document.save(update_fields=["driving_license_category", "driving_license_transmission", "updated_at"])
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "VEHICLE_INCOMPATIBLE_WITH_LICENSE")
+		mocked_create.assert_not_called()
+		self.assertFalse(Payment.objects.filter(reservation=reservation).exists())
+
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_unverified_license_transmission_is_rejected_before_payment_intent_creation(self, mocked_create):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		license_document = ClientDocument.objects.get(
+			client=self.client_profile_1,
+			document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+			is_active=True,
+		)
+		license_document.driving_license_category = ClientDocument.DrivingLicenseCategory.B
+		license_document.driving_license_transmission = None
+		license_document.save(update_fields=["driving_license_category", "driving_license_transmission", "updated_at"])
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "DRIVING_LICENSE_DETAILS_UNVERIFIED")
+		mocked_create.assert_not_called()
+		self.assertFalse(Payment.objects.filter(reservation=reservation).exists())
+
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_license_without_car_authorizing_category_is_rejected_before_payment_intent_creation(self, mocked_create):
+		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
+		license_document = ClientDocument.objects.get(
+			client=self.client_profile_1,
+			document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+			is_active=True,
+		)
+		license_document.driving_license_category = ClientDocument.DrivingLicenseCategory.A
+		license_document.driving_license_transmission = (
+			ClientDocument.DrivingLicenseTransmission.MANUAL_AND_AUTOMATIC
+		)
+		license_document.save(update_fields=["driving_license_category", "driving_license_transmission", "updated_at"])
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "DRIVING_LICENSE_CATEGORY_INCOMPATIBLE")
+		mocked_create.assert_not_called()
+		self.assertFalse(Payment.objects.filter(reservation=reservation).exists())
 
 	@patch(
 		"payments.services.payment_intents.calculate_price_simulation",

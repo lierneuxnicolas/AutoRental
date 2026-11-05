@@ -11,8 +11,10 @@ from .auth import (
 from .admin_users import AdminUserListView, AdminUserStatusUpdateView
 from .documents import (
 	ClientDocumentDetailView,
+	ClientDocumentFileView,
 	ClientDocumentListCreateView,
 	ManagementClientDocumentDetailView,
+	ManagementClientDocumentFileView,
 	ManagementClientDocumentListView,
 	ManagementClientDocumentRejectView,
 	ManagementClientDocumentValidateView,
@@ -32,8 +34,10 @@ __all__ = [
 	"AdminUserStatusUpdateView",
 	"ClientDocumentListCreateView",
 	"ClientDocumentDetailView",
+	"ClientDocumentFileView",
 	"ManagementClientDocumentListView",
 	"ManagementClientDocumentDetailView",
+	"ManagementClientDocumentFileView",
 	"ManagementClientDocumentValidateView",
 	"ManagementClientDocumentRejectView",
 	"ClientProfileMeView",

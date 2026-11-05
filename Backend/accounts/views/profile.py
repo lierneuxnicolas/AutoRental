@@ -6,9 +6,12 @@ from rest_framework.views import APIView
 
 from accounts.models import ClientProfile
 from accounts.permissions import IsClient
-from accounts.serializers.profile import ClientProfileMeSerializer, ClientProfileProgressSerializer
+from accounts.serializers.profile import (
+    ClientProfileMeSerializer,
+    ClientProfileProgressSerializer,
+)
 from accounts.services.profile_progress import calculate_profile_progress
-
+from accounts.services.profile_status import recalculate_profile_status
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou d'autorisation.")
 
@@ -36,6 +39,7 @@ class ClientProfileMeView(APIView):
     )
     def get(self, request):
         profile = self._get_client_profile(request.user)
+        recalculate_profile_status(profile)
         serializer = ClientProfileMeSerializer(profile)
         return Response(serializer.data, status=status.HTTP_200_OK)
 

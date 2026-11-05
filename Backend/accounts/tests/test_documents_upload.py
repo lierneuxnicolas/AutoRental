@@ -53,13 +53,18 @@ class ClientDocumentsUploadTests(APITestCase):
         content = b"%PDF-1.4\n%test\n" if valid else b"NOTPDF"
         return SimpleUploadedFile("test.pdf", content, content_type=content_type)
 
-    def _payload(self, uploaded_file, doc_type=ClientDocument.DocumentType.CARTE_IDENTITE):
-        return {
+    def _payload(
+        self,
+        uploaded_file,
+        doc_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+    ):
+        payload = {
             "document_type": doc_type,
             "document_number": "DOC-123",
             "expiration_date": (timezone.localdate() + timedelta(days=30)).isoformat(),
             "file": uploaded_file,
         }
+        return payload
 
     def test_accepts_jpg(self):
         self._authenticate()
@@ -97,6 +102,83 @@ class ClientDocumentsUploadTests(APITestCase):
                 related_object_id=document.id,
             ).exists()
         )
+        self.assertEqual(
+            response.data["file"],
+            reverse("accounts:users-me-documents-file", kwargs={"pk": document.id}),
+        )
+
+    def test_license_upload_without_declared_type_stays_pending_and_unverified(self):
+        self._authenticate()
+        payload = self._payload(
+            self._make_pdf_file(valid=True),
+            doc_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+        )
+        response = self.client.post(self.documents_url, payload)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        document = ClientDocument.objects.latest("id")
+        self.addCleanup(document.file.delete, save=False)
+        self.assertEqual(document.status, ClientDocument.Status.EN_ATTENTE)
+        self.assertIsNone(document.driving_license_transmission_declared)
+        self.assertIsNone(document.driving_license_transmission)
+        self.assertIsNone(document.driving_license_category)
+
+    def test_license_upload_accepts_optional_declaration_without_validating_it(self):
+        self._authenticate()
+        payload = self._payload(
+            self._make_pdf_file(valid=True),
+            doc_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+        )
+        payload["driving_license_transmission_declared"] = (
+            ClientDocument.DrivingLicenseTransmission.AUTOMATIC_ONLY
+        )
+
+        response = self.client.post(self.documents_url, payload)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        document = ClientDocument.objects.latest("id")
+        self.addCleanup(document.file.delete, save=False)
+        self.assertEqual(
+            document.driving_license_transmission_declared,
+            ClientDocument.DrivingLicenseTransmission.AUTOMATIC_ONLY,
+        )
+        self.assertEqual(document.status, ClientDocument.Status.EN_ATTENTE)
+        self.assertIsNone(document.driving_license_transmission)
+        self.assertIsNone(document.driving_license_category)
+
+    def test_owner_can_view_uploaded_document_through_private_endpoint(self):
+        self._authenticate()
+        response = self.client.post(
+            self.documents_url,
+            self._payload(self._make_image_file(ext="png", content_type="image/png")),
+        )
+        document = ClientDocument.objects.latest("id")
+        self.addCleanup(document.file.delete, save=False)
+
+        file_url = reverse("accounts:users-me-documents-file", kwargs={"pk": document.id})
+        preview = self.client.get(file_url)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(preview.status_code, status.HTTP_200_OK)
+        self.assertEqual(preview["Content-Type"], "image/png")
+        self.assertEqual(preview["Cache-Control"], "private, no-store")
+        self.assertEqual(preview["X-Content-Type-Options"], "nosniff")
+        self.assertTrue(b"".join(preview.streaming_content).startswith(b"\x89PNG"))
+
+    def test_document_file_is_not_available_from_public_media_url(self):
+        self._authenticate()
+        response = self.client.post(
+            self.documents_url,
+            self._payload(self._make_pdf_file(valid=True)),
+        )
+        document = ClientDocument.objects.latest("id")
+        self.addCleanup(document.file.delete, save=False)
+
+        public_url = f"/media/{document.file.name}"
+        response = self.client.get(public_url)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
 
     def test_rejects_forbidden_extension(self):
         self._authenticate()
@@ -162,6 +244,91 @@ class ClientDocumentsUploadTests(APITestCase):
         old_doc.refresh_from_db()
         self.assertFalse(old_doc.is_active)
 
+    def test_replacing_valid_document_creates_a_new_pending_document(self):
+        manager = create_user(
+            email="docs-manager@example.com",
+            password="StrongPass123!",
+            role=self.roles[Role.Code.GESTIONNAIRE_COMPTABLE],
+        )
+        old_document = ClientDocument.objects.create(
+            client=self.profile,
+            document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+            document_number="APPROVED-OLD",
+            file="client_documents/approved-old.pdf",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            status=ClientDocument.Status.VALIDE,
+            validated_at=timezone.now(),
+            validated_by=manager,
+            is_active=True,
+        )
+        ClientDocument.objects.create(
+            client=self.profile,
+            document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            document_number="LICENSE-APPROVED",
+            file="client_documents/approved-license.pdf",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            status=ClientDocument.Status.VALIDE,
+            validated_at=timezone.now(),
+            validated_by=manager,
+            is_active=True,
+        )
+        self._authenticate()
+
+        response = self.client.post(
+            self.documents_url,
+            self._payload(self._make_pdf_file(valid=True)),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        old_document.refresh_from_db()
+        replacement = ClientDocument.objects.latest("id")
+        self.addCleanup(replacement.file.delete, save=False)
+        self.assertFalse(old_document.is_active)
+        self.assertEqual(replacement.status, ClientDocument.Status.EN_ATTENTE)
+        self.assertIsNone(replacement.validated_at)
+        self.assertIsNone(replacement.validated_by)
+        self.assertTrue(replacement.is_active)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.profile_status, ClientProfile.ProfileStatus.EN_ATTENTE)
+
+    def test_replacing_valid_license_requires_new_license_details(self):
+        manager = create_user(
+            email="license-manager@example.com",
+            password="StrongPass123!",
+            role=self.roles[Role.Code.GESTIONNAIRE_COMPTABLE],
+        )
+        old_license = ClientDocument.objects.create(
+            client=self.profile,
+            document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            document_number="LICENSE-OLD",
+            file="client_documents/license-old.pdf",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            status=ClientDocument.Status.VALIDE,
+            driving_license_category=ClientDocument.DrivingLicenseCategory.B,
+            driving_license_transmission=ClientDocument.DrivingLicenseTransmission.AUTOMATIC_ONLY,
+            validated_at=timezone.now(),
+            validated_by=manager,
+            is_active=True,
+        )
+        self._authenticate()
+
+        response = self.client.post(
+            self.documents_url,
+            self._payload(
+                self._make_pdf_file(valid=True),
+                doc_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            ),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        old_license.refresh_from_db()
+        replacement = ClientDocument.objects.latest("id")
+        self.addCleanup(replacement.file.delete, save=False)
+        self.assertFalse(old_license.is_active)
+        self.assertEqual(replacement.status, ClientDocument.Status.EN_ATTENTE)
+        self.assertIsNone(replacement.driving_license_category)
+        self.assertIsNone(replacement.driving_license_transmission)
+
     def test_client_sees_only_own_documents(self):
         other_user = create_user(
             email="docs-other@example.com",
@@ -196,6 +363,33 @@ class ClientDocumentsUploadTests(APITestCase):
         self.assertEqual(len(response.data["results"]), 1)
         self.assertEqual(response.data["results"][0]["document_number"], "OWN-1")
 
+    def test_expired_valid_document_is_reported_without_changing_document_history(self):
+        today = timezone.localdate()
+        document = ClientDocument.objects.create(
+            client=self.profile,
+            document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+            document_number="EXPIRED-IDENTITY",
+            file="client_documents/expired-identity.pdf",
+            expiration_date=today - timedelta(days=1),
+            status=ClientDocument.Status.VALIDE,
+            is_active=True,
+        )
+        self.profile.profile_status = ClientProfile.ProfileStatus.VALIDE
+        self.profile.save(update_fields=["profile_status"])
+        self._authenticate()
+
+        documents_response = self.client.get(self.documents_url)
+        profile_response = self.client.get(reverse("accounts:users-me"))
+
+        self.assertEqual(documents_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(documents_response.data["results"][0]["status"], ClientDocument.Status.EXPIRE)
+        self.assertEqual(profile_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(profile_response.data["profile_status"], ClientProfile.ProfileStatus.INCOMPLET)
+        document.refresh_from_db()
+        self.profile.refresh_from_db()
+        self.assertEqual(document.status, ClientDocument.Status.VALIDE)
+        self.assertEqual(self.profile.profile_status, ClientProfile.ProfileStatus.INCOMPLET)
+
     def test_client_cannot_access_another_client_document_detail(self):
         other_user = create_user(
             email="docs-other2@example.com",
@@ -217,5 +411,28 @@ class ClientDocumentsUploadTests(APITestCase):
         self._authenticate()
         detail_url = reverse("accounts:users-me-documents-detail", kwargs={"pk": foreign_doc.pk})
         response = self.client.get(detail_url)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_client_cannot_view_another_clients_document_file(self):
+        other_user = create_user(
+            email="docs-other-file@example.com",
+            password="StrongPass123!",
+            role=self.roles[Role.Code.CLIENT],
+        )
+        other_profile = ClientProfile.objects.create(user=other_user)
+        foreign_doc = ClientDocument.objects.create(
+            client=other_profile,
+            document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+            document_number="OTHER-FILE",
+            file="client_documents/other-file.pdf",
+            expiration_date=timezone.localdate() + timedelta(days=90),
+            is_active=True,
+        )
+
+        self._authenticate()
+        response = self.client.get(
+            reverse("accounts:users-me-documents-file", kwargs={"pk": foreign_doc.pk})
+        )
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

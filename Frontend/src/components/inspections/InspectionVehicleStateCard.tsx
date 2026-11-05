@@ -6,6 +6,10 @@ interface InspectionVehicleStateCardProps {
   title?: string
   mileageLabel: string
   mileage: string
+  mileageMin?: number
+  mileageMax?: number
+  mileageHint?: string
+  mileageError?: string | null
   onMileageChange: (value: string) => void
   energy: string
   onEnergyChange: (value: string) => void
@@ -25,6 +29,10 @@ export default function InspectionVehicleStateCard({
   title = 'État du véhicule',
   mileageLabel,
   mileage,
+  mileageMin,
+  mileageMax,
+  mileageHint,
+  mileageError,
   onMileageChange,
   energy,
   onEnergyChange,
@@ -43,7 +51,26 @@ export default function InspectionVehicleStateCard({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <label className="block text-sm font-medium text-[#1F2937]">{mileageLabel}</label>
-            <input type="number" min={0} step={1} value={mileage} onChange={(event) => onMileageChange(event.target.value)} disabled={disabled} className={fieldClassName} />
+            <input
+              type="number"
+              min={mileageMin ?? 0}
+              max={mileageMax}
+              step={1}
+              value={mileage}
+              onChange={(event) => {
+                const value = event.target.value
+                if (
+                  value === ''
+                  || (/^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && (mileageMax === undefined || Number(value) <= mileageMax))
+                ) {
+                  onMileageChange(value)
+                }
+              }}
+              disabled={disabled}
+              className={fieldClassName}
+            />
+            {mileageHint ? <p className="text-xs text-slate-500">{mileageHint}</p> : null}
+            {mileageError ? <p className="text-sm text-red-600">{mileageError}</p> : null}
           </div>
           <div className="space-y-2">
             <label className="block text-sm font-medium text-[#1F2937]">Niveau carburant / batterie (%)</label>
