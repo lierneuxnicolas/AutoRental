@@ -1,10 +1,12 @@
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from azure.core.exceptions import ResourceNotFoundError
 from django.db.models import Q
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
-from rest_framework.parsers import FormParser, MultiPartParser
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import generics
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,6 +19,7 @@ from accounts.serializers.documents import (
     ManagerClientDocumentDetailSerializer,
     ManagerClientDocumentListSerializer,
     ManagerRejectDocumentSerializer,
+    ManagerValidateDocumentSerializer,
 )
 from accounts.services.document_review import reject_document, validate_document
 from common.models import SystemLog
@@ -88,6 +91,10 @@ class ClientDocumentListCreateView(_ClientProfileMixin, generics.ListCreateAPIVi
                     "document_number": {"type": "string", "maxLength": 120},
                     "file": {"type": "string", "format": "binary"},
                     "expiration_date": {"type": "string", "format": "date", "nullable": True},
+                    "driving_license_transmission_declared": {
+                        "type": "string",
+                        "enum": [choice[0] for choice in ClientDocument.DrivingLicenseTransmission.choices],
+                    },
                 },
                 "required": ["document_type", "document_number", "file"],
             }
@@ -124,6 +131,71 @@ class ClientDocumentDetailView(generics.RetrieveAPIView):
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+
+
+class _DocumentFileResponseMixin:
+    allowed_content_types = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".pdf": "application/pdf",
+    }
+
+    def _file_response(self, document):
+        if not document.file:
+            return Response({"detail": "Aucun fichier n'est associé à ce document."}, status=status.HTTP_404_NOT_FOUND)
+
+        extension = document.file.name.rsplit(".", 1)[-1].lower() if "." in document.file.name else ""
+        content_type = self.allowed_content_types.get(f".{extension}")
+        if content_type is None:
+            return Response(
+                {"detail": "Le format du document n'est pas pris en charge."},
+                status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            )
+
+        file_handle = None
+        try:
+            file_handle = document.file.open("rb")
+            file_handle.read(1)
+            file_handle.seek(0)
+        except (FileNotFoundError, ResourceNotFoundError):
+            if file_handle is not None:
+                file_handle.close()
+            return Response(
+                {"detail": "Le fichier du document est introuvable."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        response = FileResponse(
+            file_handle,
+            content_type=content_type,
+            as_attachment=False,
+            filename=f"document.{extension}",
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cross-Origin-Resource-Policy"] = "same-origin"
+        return response
+
+
+class ClientDocumentFileView(_DocumentFileResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsClient]
+
+    def get(self, request, pk):
+        document = get_object_or_404(
+            ClientDocument.objects.filter(client__user=request.user),
+            pk=pk,
+        )
+        return self._file_response(document)
+
+
+class ManagementClientDocumentFileView(_DocumentFileResponseMixin, APIView):
+    permission_classes = [IsAuthenticated, IsManager]
+
+    def get(self, request, pk):
+        document = get_object_or_404(ClientDocument.objects.all(), pk=pk)
+        return self._file_response(document)
 
 
 class ManagementClientDocumentListView(generics.ListAPIView):
@@ -201,11 +273,11 @@ class ManagementClientDocumentDetailView(generics.RetrieveAPIView):
 
 class ManagementClientDocumentValidateView(APIView):
     permission_classes = [IsAuthenticated, IsManager]
-    serializer_class = ManagerClientDocumentDetailSerializer
+    serializer_class = ManagerValidateDocumentSerializer
 
     @extend_schema(
         tags=["Document Management"],
-        request=None,
+        request=ManagerValidateDocumentSerializer,
         responses={
             200: ManagerClientDocumentDetailSerializer,
             400: ErrorDetailResponseSerializer,
@@ -215,13 +287,19 @@ class ManagementClientDocumentValidateView(APIView):
         },
     )
     def post(self, request, pk):
+        request_serializer = ManagerValidateDocumentSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
         document = get_object_or_404(
             ClientDocument.objects.select_related("client", "client__user", "validated_by"),
             pk=pk,
         )
 
         try:
-            validate_document(document=document, manager=request.user)
+            validate_document(
+                document=document,
+                manager=request.user,
+                **request_serializer.validated_data,
+            )
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)})
 

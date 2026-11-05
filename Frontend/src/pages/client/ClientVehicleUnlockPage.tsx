@@ -93,7 +93,8 @@ export default function ClientVehicleUnlockPage() {
     { order: 1, label: 'Deverrouillage', status: 'active' as const },
     { order: 2, label: 'Exterieur', status: 'future' as const },
     { order: 3, label: 'Interieur', status: 'future' as const },
-    { order: 4, label: 'Confirmation', status: 'future' as const },
+    { order: 4, label: 'Etat du vehicule', status: 'future' as const },
+    { order: 5, label: 'Confirmation', status: 'future' as const },
   ]
 
   const unlockMutation = useMutation({
@@ -145,34 +146,27 @@ export default function ClientVehicleUnlockPage() {
       </div>
 
       <div className="mb-6 flex items-center justify-center gap-3">
-        <div className="w-full text-center">
-          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Déverrouiller le véhicule</h1>
-          <p className="mt-2 text-base sm:text-lg text-slate-600">
-            Vous êtes à proximité du véhicule. Appuyez sur le bouton pour déverrouiller.
-          </p>
-        </div>
+        <h1 className="mt-2 w-full text-center text-2xl font-semibold leading-snug text-[#0F172A] sm:text-3xl">
+          Déverrouillez votre véhicule avec votre smartphone.
+        </h1>
       </div>
 
       <div className="mx-auto flex max-w-xl flex-col items-center gap-5">
         <UnlockDetectionIllustration isDetected={unlockAvailability.isEnabled} />
 
-        <div className={`w-full max-w-md rounded-2xl border px-4 py-3 text-center ${unlockAvailability.isEnabled ? 'border-[#86EFAC] bg-[#DCFCE7] text-[#166534]' : 'border-[#E2E8F0] bg-[#F8FAFC] text-slate-600'}`}>
-          <p className="text-sm font-semibold">{unlockAvailability.isEnabled ? 'Signal détecté' : 'Signal non détecté'}</p>
-          <p className="mt-1 text-sm">{unlockAvailability.isEnabled ? 'Vous pouvez déverrouiller le véhicule.' : 'Approchez-vous du véhicule pour lancer le déverrouillage.'}</p>
-        </div>
-
         {isAlreadyUnlocked ? (
-          <div className="w-full max-w-md rounded-2xl border border-[#86EFAC] bg-[#DCFCE7] px-4 py-3 text-center text-[#166534]">
-            <p className="text-sm font-semibold">Véhicule déjà déverrouillé</p>
-            <p className="mt-1 text-sm">Vous pouvez maintenant effectuer l'état des lieux de départ.</p>
+          <div className="w-full max-w-md rounded-2xl border border-[#86EFAC] bg-[#DCFCE7] px-4 py-3 text-center text-sm font-semibold text-[#166534]">
+            Véhicule déverrouillé.
           </div>
-        ) : unlockMutation.isError ? (
+        ) : null}
+
+        {unlockMutation.isError && !isAlreadyUnlocked ? (
           <Alert variant="danger" title="Deverrouillage impossible" message={toErrorMessage(unlockMutation.error)} />
         ) : null}
 
         <Button
           className="h-[52px] w-full max-w-md border-0 bg-[#F97316] text-base text-white hover:bg-[#EA580C] focus-visible:ring-[#F97316]"
-          disabled={!unlockAvailability.isEnabled || unlockMutation.isPending}
+          disabled={(!unlockAvailability.isEnabled && !isAlreadyUnlocked) || unlockMutation.isPending}
           onClick={() => {
             if (isAlreadyUnlocked) {
               navigate(`/client/reservations/${reservationId}/departure-inspection`)
@@ -188,6 +182,10 @@ export default function ClientVehicleUnlockPage() {
               ? 'Deverrouillage en cours...'
               : 'Déverrouiller le véhicule'}
         </Button>
+
+        <p className="-mt-1 max-w-md text-center text-base leading-6 text-slate-700">
+          Après le déverrouillage, prenez les photos et complétez l'état du véhicule. Récupérez ensuite les clés dans le boîtier sécurisé de la boîte à gants.
+        </p>
       </div>
     </section>
   )

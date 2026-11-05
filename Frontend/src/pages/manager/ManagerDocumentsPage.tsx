@@ -6,20 +6,9 @@ import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
-import Input from '../../components/ui/Input'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import { getManagementDocuments } from '../../services/managementDocumentService'
 import type { DocumentStatus, DocumentType, ManagerClientDocumentList } from '../../types/managementDocument'
-
-// ── Types locaux ─────────────────────────────────────────────────────────────
-
-type DocTypeFilter = 'all' | DocumentType
-type StatusFilter = 'all' | DocumentStatus
-
-interface ActiveFilters {
-  docType: DocTypeFilter
-  status: StatusFilter
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -32,7 +21,7 @@ function mapStatusToUi(status: DocumentStatus): { label: string; variant: Status
     case 'REFUSE':
       return { label: 'Refusé', variant: 'danger' }
     case 'EXPIRE':
-      return { label: 'Expiré', variant: 'neutral' }
+      return { label: 'Expiré', variant: 'danger' }
   }
 }
 
@@ -63,22 +52,10 @@ function formatDateTime(value: string): string {
   }).format(new Date(value))
 }
 
-// ── Filtres frontend ──────────────────────────────────────────────────────────
-
-function applyFilters(
-  docs: ManagerClientDocumentList[],
-  search: string,
-  filters: ActiveFilters,
-): ManagerClientDocumentList[] {
-  const q = search.trim().toLowerCase()
-  return docs.filter((doc) => {
-    if (filters.docType !== 'all' && doc.document_type !== filters.docType) return false
-    if (filters.status !== 'all' && doc.status !== filters.status) return false
-    if (q) {
-      const haystack = `${doc.client_first_name} ${doc.client_last_name} ${doc.client_email}`.toLowerCase()
-      if (!haystack.includes(q)) return false
-    }
-    return true
+function sortDocuments(docs: ManagerClientDocumentList[]): ManagerClientDocumentList[] {
+  return [...docs].sort((a, b) => {
+    const pendingOrder = Number(b.status === 'EN_ATTENTE') - Number(a.status === 'EN_ATTENTE')
+    return pendingOrder || Date.parse(b.uploaded_at) - Date.parse(a.uploaded_at)
   })
 }
 
@@ -163,86 +140,37 @@ const PAGE_SIZE = 20
 
 export default function ManagerDocumentsPage() {
   const [page, setPage] = useState(1)
-  const [search, setSearch] = useState('')
-  const [filters, setFilters] = useState<ActiveFilters>({ docType: 'all', status: 'all' })
 
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['management-documents', page],
-    queryFn: () => getManagementDocuments({ page, ordering: '-uploaded_at' }),
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
+    queryKey: ['management-documents'],
+    queryFn: async () => {
+      let response = await getManagementDocuments({ page: 1, ordering: '-uploaded_at' })
+      const results = [...response.results]
+      let nextPage = 2
+
+      while (response.next) {
+        response = await getManagementDocuments({ page: nextPage, ordering: '-uploaded_at' })
+        results.push(...response.results)
+        nextPage += 1
+      }
+
+      return { count: results.length, results }
+    },
   })
 
-  const filtered = useMemo(
-    () => applyFilters(data?.results ?? [], search, filters),
-    [data?.results, search, filters],
+  const sortedDocuments = useMemo(
+    () => sortDocuments(data?.results ?? []),
+    [data?.results],
   )
 
-  const totalPages = data ? Math.ceil(data.count / PAGE_SIZE) : 1
-
-  // ── Boutons de filtre ─────────────────────────────────────────────────────
-
-  const docTypeButtons: { value: DocTypeFilter; label: string }[] = [
-    { value: 'all', label: 'Tous' },
-    { value: 'PERMIS_CONDUIRE', label: 'Permis de conduire' },
-    { value: 'CARTE_IDENTITE', label: 'Carte d\'identité' },
-  ]
-
-  const statusButtons: { value: StatusFilter; label: string }[] = [
-    { value: 'all', label: 'Tous' },
-    { value: 'EN_ATTENTE', label: 'En attente' },
-    { value: 'VALIDE', label: 'Validés' },
-    { value: 'REFUSE', label: 'Refusés' },
-  ]
+  const totalPages = Math.ceil(sortedDocuments.length / PAGE_SIZE)
+  const paginatedDocuments = sortedDocuments.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   return (
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-      {/* En-tête */}
       <div>
         <h1 className="text-2xl font-bold text-[#0F172A]">Documents à valider</h1>
-        <p className="mt-1 text-sm text-slate-500">Vérifiez les documents transmis par les clients.</p>
       </div>
-
-      {/* Filtres */}
-      <div className="flex flex-wrap gap-2">
-        {docTypeButtons.map(({ value, label }) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setFilters((f) => ({ ...f, docType: value }))}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1 ${
-              filters.docType === value
-                ? 'bg-[#2563EB] text-white'
-                : 'bg-[#F5F5F5] text-[#1F2937] hover:bg-[#E5E7EB]'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {statusButtons.map(({ value, label }) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setFilters((f) => ({ ...f, status: value }))}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1 ${
-              filters.status === value
-                ? 'bg-[#2563EB] text-white'
-                : 'bg-[#F5F5F5] text-[#1F2937] hover:bg-[#E5E7EB]'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Recherche */}
-      <Input
-        type="search"
-        placeholder="Rechercher par nom, prénom ou e-mail…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
 
       {/* États */}
       {isLoading && (
@@ -252,30 +180,37 @@ export default function ManagerDocumentsPage() {
       )}
 
       {isError && !isLoading && (
-        <Alert
-          variant="danger"
-          title="Erreur de chargement"
-          message="Impossible de récupérer les documents. Veuillez réessayer."
-        />
+        <div className="space-y-3">
+          <Alert
+            variant="danger"
+            title="Erreur de chargement"
+            message="Impossible de récupérer les documents. Veuillez réessayer."
+          />
+          <Button
+            variant="secondary"
+            disabled={isFetching}
+            onClick={() => void refetch()}
+          >
+            {isFetching ? 'Chargement...' : 'Réessayer'}
+          </Button>
+        </div>
       )}
 
-      {!isLoading && !isError && filtered.length === 0 && (
+      {!isLoading && !isError && sortedDocuments.length === 0 && (
         <EmptyState
-          title="Aucun document à valider"
-          description="Il n'y a actuellement aucun document en attente de traitement."
+          title="Aucun document"
+          description="Aucun document n’a été transmis."
         />
       )}
 
-      {/* Liste — mobile */}
-      {!isLoading && !isError && filtered.length > 0 && (
+      {!isLoading && !isError && sortedDocuments.length > 0 && (
         <>
           <div className="flex flex-col gap-4 lg:hidden">
-            {filtered.map((doc) => (
+            {paginatedDocuments.map((doc) => (
               <DocumentCard key={doc.id} doc={doc} />
             ))}
           </div>
 
-          {/* Tableau — desktop */}
           <div className="hidden overflow-hidden rounded-3xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)] lg:block">
             <table className="w-full border-collapse text-left">
               <thead className="border-b border-[#E5E7EB] bg-[#F5F5F5]">
@@ -289,14 +224,13 @@ export default function ManagerDocumentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((doc) => (
+                {paginatedDocuments.map((doc) => (
                   <DocumentRow key={doc.id} doc={doc} />
                 ))}
               </tbody>
             </table>
           </div>
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between gap-4">
               <Button
@@ -313,7 +247,7 @@ export default function ManagerDocumentsPage() {
               <Button
                 variant="secondary"
                 size="sm"
-                disabled={!data?.next}
+                disabled={page >= totalPages}
                 onClick={() => setPage((p) => p + 1)}
               >
                 Suivant

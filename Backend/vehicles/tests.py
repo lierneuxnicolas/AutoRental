@@ -1,4 +1,5 @@
-from io import BytesIO
+from io import BytesIO, StringIO
+import os
 import unittest
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -9,6 +10,7 @@ from PIL import Image
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.db import IntegrityError
 from django.db.models import Q
 from django.test import TestCase, override_settings
@@ -1841,3 +1843,31 @@ class VehiclePhotoManagementTests(VehicleTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 		backup.refresh_from_db()
 		self.assertTrue(backup.is_primary)
+
+
+@override_settings(DEBUG=True)
+class ResetVehicleMileageCommandTests(VehicleTestDataMixin, TestCase):
+	def setUp(self):
+		Vehicle.objects.all().update(mileage=200)
+		Vehicle.objects.filter(pk=self.vehicle_active.pk).update(mileage=12000)
+
+	def test_command_previews_without_changing_vehicle(self):
+		output = StringIO()
+
+		with patch.dict(os.environ, {"DJANGO_SETTINGS_MODULE": "config.settings.local"}):
+			call_command("reset_vehicle_mileage", stdout=output)
+
+		self.vehicle_active.refresh_from_db()
+		self.assertEqual(self.vehicle_active.mileage, 12000)
+		self.assertIn("1 véhicule(s)", output.getvalue())
+		self.assertIn("Aucune modification effectuée.", output.getvalue())
+
+	def test_command_updates_only_when_apply_is_passed(self):
+		original_status = self.vehicle_active.status
+
+		with patch.dict(os.environ, {"DJANGO_SETTINGS_MODULE": "config.settings.local"}):
+			call_command("reset_vehicle_mileage", "--apply", stdout=StringIO())
+
+		self.vehicle_active.refresh_from_db()
+		self.assertEqual(self.vehicle_active.mileage, 200)
+		self.assertEqual(self.vehicle_active.status, original_status)

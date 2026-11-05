@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from accounts.models import Role, User
@@ -63,17 +63,6 @@ def _assert_return_creation_eligibility(*, reservation: Reservation) -> None:
             "L'inspection INITIAL doit etre terminee avant de creer l'etat des lieux de retour.",
             details={"initial_inspection_status": initial_inspection.status},
         )
-
-    final_exists = Inspection.objects.filter(
-        reservation=reservation,
-        inspection_type=Inspection.Type.FINAL,
-    ).exists()
-    if final_exists:
-        _raise_return_error(
-            "RETURN_INSPECTION_ALREADY_EXISTS",
-            "Une inspection FINAL existe deja pour cette reservation.",
-        )
-
 
 def _assert_return_completion_eligibility(*, inspection: Inspection, mileage: int, energy_level_percent: int) -> None:
     if inspection.inspection_type != Inspection.Type.FINAL:
@@ -290,15 +279,32 @@ def create_return_inspection(*, reservation: Reservation, requested_by) -> Inspe
         )
 
         _assert_request_context(reservation=reservation_locked, requested_by=requested_by)
-        _assert_return_creation_eligibility(reservation=reservation_locked)
-
-        inspection = Inspection.objects.create(
+        existing_inspection = Inspection.objects.filter(
             reservation=reservation_locked,
             inspection_type=Inspection.Type.FINAL,
-            status=Inspection.Status.BROUILLON,
-            started_at=timezone.now(),
-            completed_by=None,
-        )
+        ).first()
+        if existing_inspection is not None:
+            return existing_inspection
+
+        _assert_return_creation_eligibility(reservation=reservation_locked)
+
+        try:
+            with transaction.atomic():
+                inspection = Inspection.objects.create(
+                    reservation=reservation_locked,
+                    inspection_type=Inspection.Type.FINAL,
+                    status=Inspection.Status.BROUILLON,
+                    started_at=timezone.now(),
+                    completed_by=None,
+                )
+        except IntegrityError:
+            existing_inspection = Inspection.objects.filter(
+                reservation=reservation_locked,
+                inspection_type=Inspection.Type.FINAL,
+            ).first()
+            if existing_inspection is None:
+                raise
+            return existing_inspection
 
     return inspection
 

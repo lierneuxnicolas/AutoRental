@@ -1,46 +1,22 @@
-from django.utils import timezone
-
-from accounts.models import ClientDocument
-
-
-def _has_text(value) -> bool:
-    if value is None:
-        return False
-    return str(value).strip() != ""
+from accounts.models import ClientDocument, ClientProfile
+from accounts.services.profile_status import (
+    get_effective_profile_status,
+    get_required_documents_state,
+    is_personal_information_complete,
+)
 
 
 def calculate_profile_progress(client_profile):
-    today = timezone.localdate()
-
     account_created = True
     email_verified = bool(client_profile.user.email_verified)
-    personal_information_complete = all(
-        [
-            _has_text(client_profile.user.first_name),
-            _has_text(client_profile.user.last_name),
-            _has_text(client_profile.user.phone),
-            client_profile.date_of_birth is not None,
-            _has_text(client_profile.address),
-        ]
-    )
+    personal_information_complete = is_personal_information_complete(client_profile)
 
-    valid_document_types = set(
-        ClientDocument.objects.filter(
-            client=client_profile,
-            is_active=True,
-            status=ClientDocument.Status.VALIDE,
-            expiration_date__gte=today,
-            document_type__in=[
-                ClientDocument.DocumentType.CARTE_IDENTITE,
-                ClientDocument.DocumentType.PERMIS_CONDUIRE,
-            ],
-        )
-        .values_list("document_type", flat=True)
-        .distinct()
-    )
-
-    identity_card_valid = ClientDocument.DocumentType.CARTE_IDENTITE in valid_document_types
-    driving_license_valid = ClientDocument.DocumentType.PERMIS_CONDUIRE in valid_document_types
+    required_state = get_required_documents_state(client_profile)
+    document_issues = required_state["document_issues"]
+    identity_issue = document_issues[ClientDocument.DocumentType.CARTE_IDENTITE]
+    license_issue = document_issues[ClientDocument.DocumentType.PERMIS_CONDUIRE]
+    identity_card_valid = identity_issue is None
+    driving_license_valid = license_issue is None
 
     criteria = [
         account_created,
@@ -49,7 +25,43 @@ def calculate_profile_progress(client_profile):
         identity_card_valid,
         driving_license_valid,
     ]
-    percentage = max(0, min(100, sum(1 for criterion in criteria if criterion) * 20))
+    percentage = round(sum(1 for criterion in criteria if criterion) / len(criteria) * 100)
+
+    def document_issue_label(document_type, issue):
+        if issue is None:
+            return None
+        if document_type == ClientDocument.DocumentType.CARTE_IDENTITE:
+            title = "Carte d'identité"
+            issue_labels = {
+                "MISSING": "manquante",
+                "EXPIRED": "expirée",
+                "REFUSED": "refusée",
+                "PENDING": "en attente de validation",
+                "INVALID": "à régulariser",
+                "VERIFICATION_PENDING": "en attente de vérification par un gestionnaire",
+            }
+        else:
+            title = "Permis de conduire"
+            issue_labels = {
+                "MISSING": "manquant",
+                "EXPIRED": "expiré",
+                "REFUSED": "refusé",
+                "PENDING": "en attente de validation",
+                "INVALID": "à régulariser",
+                "VERIFICATION_PENDING": "en attente de vérification par un gestionnaire",
+            }
+        return f"{title} {issue_labels[issue]}"
+
+    needs_client_action = (
+        not personal_information_complete
+        or required_state["has_client_document_action"]
+    )
+    profile_status = get_effective_profile_status(
+        client_profile,
+        required_state=required_state,
+    )
+    if needs_client_action:
+        profile_status = ClientProfile.ProfileStatus.INCOMPLET
 
     return {
         "percentage": percentage,
@@ -58,4 +70,15 @@ def calculate_profile_progress(client_profile):
         "personal_information_complete": personal_information_complete,
         "identity_card_valid": identity_card_valid,
         "driving_license_valid": driving_license_valid,
+        "identity_card_issue": document_issue_label(
+            ClientDocument.DocumentType.CARTE_IDENTITE,
+            identity_issue,
+        ),
+        "driving_license_issue": document_issue_label(
+            ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            license_issue,
+        ),
+        "profile_status": profile_status,
+        "needs_client_action": needs_client_action,
+        "documents_need_action": required_state["has_client_document_action"],
     }

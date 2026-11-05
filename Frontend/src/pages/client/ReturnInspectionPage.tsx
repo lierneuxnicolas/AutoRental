@@ -6,7 +6,7 @@ import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import DepartureFlowProgress from '../../components/inspections/DepartureFlowProgress'
 import InspectionVehicleStateCard from '../../components/inspections/InspectionVehicleStateCard'
-import { validateInspectionVehicleState } from '../../components/inspections/inspectionVehicleState'
+import { MAX_VEHICLE_MILEAGE, validateInspectionVehicleState } from '../../components/inspections/inspectionVehicleState'
 import ReservationProgressBanner from '../../components/reservations/ReservationProgressBanner'
 import InspectionPhotoSlot from '../../components/inspections/InspectionPhotoSlot'
 import Button from '../../components/ui/Button'
@@ -74,10 +74,6 @@ const ANOMALY_PHOTO_SLOTS = [
 ] as const
 
 type AnomalyPhotoSlotKey = (typeof ANOMALY_PHOTO_SLOTS)[number]['key']
-
-// Real backend/DB constraint: `Inspection.mileage` is a Django PositiveIntegerField, stored as
-// an unsigned INT column in MySQL, whose maximum representable value is 4294967295.
-const MAX_VEHICLE_MILEAGE = 4294967295
 
 type AnomalyPhotoSlotState = {
   photoId: number | null
@@ -391,7 +387,9 @@ function ReturnInspectionStepOne() {
     enabled: isReservationIdValid,
   })
 
-  const inspection = reservationQuery.data?.return_inspection ?? null
+  const [createdInspection, setCreatedInspection] = useState<{ reservationId: number, inspection: Inspection } | null>(null)
+  const inspection = reservationQuery.data?.return_inspection
+    ?? (createdInspection?.reservationId === reservationId ? createdInspection.inspection : null)
 
   const [photoState, setPhotoState] = useState<Record<string, PhotoSlotState>>(buildInitialPhotoState)
   const [globalError, setGlobalError] = useState<string | null>(null)
@@ -401,12 +399,10 @@ function ReturnInspectionStepOne() {
   const startMutation = useMutation({
     mutationFn: () => createReturnInspection(reservationId),
     onSuccess: (response) => {
-      const nextInspection = response.inspection
-      setPhotoState(buildPhotoStateFromInspection(response.inspection as unknown as ReservationInspectionDetail))
-      if (nextInspection && nextInspection.id) {
-        void reservationQuery.refetch()
-      }
+      setCreatedInspection({ reservationId, inspection: response.inspection })
+      setPhotoState(buildInitialPhotoState())
       setGlobalError(null)
+      void reservationQuery.refetch()
     },
     onError: (error) => {
       const axiosError = error as AxiosError<ApiErrorPayload>
@@ -552,7 +548,23 @@ function ReturnInspectionStepOne() {
       showInspectionSummary={false}
     >
       {reservationLoadErrorMessage ? <Alert className="mb-4" variant="danger" title="Chargement impossible" message={reservationLoadErrorMessage} /> : null}
-      {initializationErrorMessage ? <Alert className="mb-4" variant="danger" title="Initialisation impossible" message={initializationErrorMessage} /> : null}
+      {initializationErrorMessage ? (
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Alert className="flex-1" variant="danger" title="Initialisation impossible" message={initializationErrorMessage} />
+          <Button
+            variant="secondary"
+            onClick={() => {
+              initializationAttemptRef.current = { reservationId, attempted: true }
+              setGlobalError(null)
+              startMutation.reset()
+              startMutation.mutate()
+            }}
+            disabled={startMutation.isPending}
+          >
+            Réessayer
+          </Button>
+        </div>
+      ) : null}
 
       {isInitializingInspection ? (
         <Card>
@@ -804,7 +816,7 @@ export function ReturnInspectionVehicleStatePage() {
       return 'Le kilometrage saisi est trop eleve.'
     }
     if (departureMileage !== null && mileageValue < departureMileage) {
-      return 'Le kilometrage final ne peut pas etre inferieur au kilometrage de depart.'
+      return 'Le kilométrage final ne peut pas être inférieur au kilométrage de départ.'
     }
     return null
   }, [departureMileage, mileageInput, mileageValue])
@@ -834,6 +846,7 @@ export function ReturnInspectionVehicleStatePage() {
 
   const commonValidation = validateInspectionVehicleState({
     mileage: mileageInput,
+    maxMileage: MAX_VEHICLE_MILEAGE,
     energy: energyInput,
     anomalyPresent: hasDamage,
     anomalyDescription: damageDescription,
@@ -998,6 +1011,16 @@ export function ReturnInspectionVehicleStatePage() {
         <InspectionVehicleStateCard
           mileageLabel="Kilométrage final"
           mileage={mileageInput}
+          mileageMin={departureMileage ?? 0}
+          mileageMax={MAX_VEHICLE_MILEAGE}
+          mileageHint={
+            reservationQuery.isSuccess
+              ? typeof departureMileage === 'number'
+                ? `Dernier kilométrage enregistré : ${departureMileage} km`
+                : 'Kilométrage précédent indisponible'
+              : undefined
+          }
+          mileageError={mileageFieldError}
           onMileageChange={setMileageInput}
           energy={energyInput}
           onEnergyChange={setEnergyInput}

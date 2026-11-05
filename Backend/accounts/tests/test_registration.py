@@ -58,6 +58,37 @@ class RegistrationTests(APITestCase):
             ).exists()
         )
 
+    def test_registration_accepts_compound_and_accented_names_and_phone_with_leading_zero(self):
+        payload = {
+            **self.payload,
+            "email": "compound-name@example.com",
+            "first_name": "Jean-Pierre",
+            "last_name": "D'Hôtel",
+            "phone": "0123456789",
+        }
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        user = get_user_model().objects.get(email=payload["email"])
+        self.assertEqual(user.first_name, "Jean-Pierre")
+        self.assertEqual(user.last_name, "D'Hôtel")
+        self.assertEqual(user.phone, "0123456789")
+
+    def test_registration_rejects_digits_in_names_and_letters_in_phone(self):
+        payload = {
+            **self.payload,
+            "first_name": "Jean2",
+            "phone": "01234abc89",
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("first_name", response.data)
+        self.assertIn("phone", response.data)
+
     def test_registration_sends_verification_email(self):
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(self.url, self.payload, format="json")

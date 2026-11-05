@@ -1,11 +1,15 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AxiosError } from 'axios'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import InspectionVehicleStateCard from '../../components/inspections/InspectionVehicleStateCard'
-import { validateInspectionVehicleState } from '../../components/inspections/inspectionVehicleState'
+import {
+  getInspectionMileageError,
+  MAX_VEHICLE_MILEAGE,
+  validateInspectionVehicleState,
+} from '../../components/inspections/inspectionVehicleState'
 import ReservationProgressBanner from '../../components/reservations/ReservationProgressBanner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
@@ -117,6 +121,7 @@ export default function DepartureInspectionVehicleStatePage() {
     enabled: isReservationIdValid,
   })
 
+  const reservation = reservationQuery.data
   const inspection = reservationQuery.data?.departure_inspection ?? null
 
   const [mileageInput, setMileageInput] = useState('')
@@ -135,6 +140,20 @@ export default function DepartureInspectionVehicleStatePage() {
     slot1: null,
     slot2: null,
   })
+  const mileageInitializedForReservation = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (
+      !reservation
+      || mileageInitializedForReservation.current === reservation.id
+      || typeof reservation.vehicle.mileage !== 'number'
+    ) {
+      return
+    }
+
+    mileageInitializedForReservation.current = reservation.id
+    setMileageInput(String(reservation.vehicle.mileage))
+  }, [reservation])
 
   const progressSteps = useMemo(
     () => [
@@ -152,7 +171,7 @@ export default function DepartureInspectionVehicleStatePage() {
       return null
     }
     const parsed = Number(mileageInput)
-    return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+    return Number.isInteger(parsed) && parsed >= 0 && parsed <= MAX_VEHICLE_MILEAGE ? parsed : null
   }, [mileageInput])
 
   const parsedEnergy = useMemo(() => {
@@ -163,18 +182,40 @@ export default function DepartureInspectionVehicleStatePage() {
     return Number.isInteger(parsed) && parsed >= 0 && parsed <= 100 ? parsed : null
   }, [energyInput])
 
+  const mileageError = useMemo(() => {
+    if (!mileageInput.trim()) {
+      return null
+    }
+
+    return getInspectionMileageError(
+      mileageInput,
+      reservation?.vehicle.mileage,
+      MAX_VEHICLE_MILEAGE,
+    )
+  }, [mileageInput, reservation?.vehicle.mileage])
+
   const canSubmit = useMemo(() => {
     if (!inspection) {
       return false
     }
     return validateInspectionVehicleState({
       mileage: mileageInput,
+      minMileage: reservation?.vehicle.mileage,
+      maxMileage: MAX_VEHICLE_MILEAGE,
       energy: energyInput,
       anomalyPresent,
       anomalyDescription,
       anomalySeverity: anomalySeverity === 'ACCEPTABLE' || anomalySeverity === 'GRAVE' ? anomalySeverity : '',
     }).error === null
-  }, [anomalyDescription, anomalyPresent, anomalySeverity, energyInput, inspection, mileageInput])
+  }, [
+    anomalyDescription,
+    anomalyPresent,
+    anomalySeverity,
+    energyInput,
+    inspection,
+    mileageInput,
+    reservation?.vehicle.mileage,
+  ])
 
   const uploadedAnomalyPhotoIds = useMemo(
     () => Object.values(anomalyPhotoState).map((slot) => slot.photoId).filter((photoId): photoId is number => photoId !== null),
@@ -299,7 +340,6 @@ export default function DepartureInspectionVehicleStatePage() {
     )
   }
 
-  const reservation = reservationQuery.data
   const anomalyPhotoFields = (
     <div className="space-y-2">
       <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie (optionnel)</p>
@@ -370,6 +410,14 @@ export default function DepartureInspectionVehicleStatePage() {
           <InspectionVehicleStateCard
             mileageLabel="Kilométrage actuel"
             mileage={mileageInput}
+            mileageMin={reservation?.vehicle.mileage}
+            mileageMax={MAX_VEHICLE_MILEAGE}
+            mileageError={mileageError}
+            mileageHint={
+              typeof reservation?.vehicle.mileage === 'number'
+                ? `Dernier kilométrage enregistré : ${reservation.vehicle.mileage} km`
+                : undefined
+            }
             onMileageChange={setMileageInput}
             energy={energyInput}
             onEnergyChange={setEnergyInput}

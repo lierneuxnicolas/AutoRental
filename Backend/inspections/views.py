@@ -26,6 +26,7 @@ from inspections.services.departure import (
 )
 from inspections.services.return_inspection import complete_return_inspection, create_return_inspection, save_return_vehicle_state
 from reservations.models import Reservation
+from vehicles.constants import MAX_VEHICLE_MILEAGE
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou ressource introuvable.")
@@ -69,13 +70,13 @@ class DepartureInspectionResponseSerializer(serializers.Serializer):
 
 
 class CompleteDepartureInspectionRequestSerializer(serializers.Serializer):
-	mileage = serializers.IntegerField(min_value=0)
+	mileage = serializers.IntegerField(min_value=0, max_value=MAX_VEHICLE_MILEAGE)
 	energy_level_percent = serializers.IntegerField(min_value=0, max_value=100)
 	comments = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class DepartureVehicleStateRequestSerializer(serializers.Serializer):
-	mileage = serializers.IntegerField(min_value=0)
+	mileage = serializers.IntegerField(min_value=0, max_value=MAX_VEHICLE_MILEAGE)
 	energy_level_percent = serializers.IntegerField(min_value=0, max_value=100)
 	anomaly_present = serializers.BooleanField()
 	anomaly_description = serializers.CharField(required=False, allow_blank=True, default="")

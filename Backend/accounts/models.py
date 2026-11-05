@@ -115,7 +115,7 @@ class User(AbstractUser):
 
 
 class ClientProfile(models.Model):
-	MINIMUM_AGE_YEARS = 18
+	MINIMUM_AGE_YEARS = 21
 	MAXIMUM_AGE_YEARS = 90
 
 	class ProfileStatus(models.TextChoices):
@@ -164,7 +164,7 @@ class ClientProfile(models.Model):
 
 		youngest_allowed = cls._subtract_years(today, cls.MINIMUM_AGE_YEARS)
 		if date_of_birth > youngest_allowed:
-			raise ValidationError("Vous devez avoir au moins 18 ans pour utiliser GetACar.")
+			raise ValidationError("Vous devez avoir au moins 21 ans pour utiliser GetaCar.")
 
 		oldest_allowed = cls._subtract_years(today, cls.MAXIMUM_AGE_YEARS)
 		if date_of_birth < oldest_allowed:
@@ -195,6 +195,26 @@ class ClientDocument(models.Model):
 		CARTE_IDENTITE = "CARTE_IDENTITE", "Carte d'identite"
 		PERMIS_CONDUIRE = "PERMIS_CONDUIRE", "Permis de conduire"
 
+	class DrivingLicenseCategory(models.TextChoices):
+		AM = "AM", "AM"
+		A1 = "A1", "A1"
+		A2 = "A2", "A2"
+		A = "A", "A"
+		B = "B", "B"
+		BE = "BE", "BE"
+		C1 = "C1", "C1"
+		C1E = "C1E", "C1E"
+		C = "C", "C"
+		CE = "CE", "CE"
+		D1 = "D1", "D1"
+		D1E = "D1E", "D1E"
+		D = "D", "D"
+		DE = "DE", "DE"
+
+	class DrivingLicenseTransmission(models.TextChoices):
+		MANUAL_AND_AUTOMATIC = "MANUAL_AND_AUTOMATIC", "Manuelle et automatique"
+		AUTOMATIC_ONLY = "AUTOMATIC_ONLY", "Automatique uniquement (code 78)"
+
 	class Status(models.TextChoices):
 		EN_ATTENTE = "EN_ATTENTE", "En attente"
 		VALIDE = "VALIDE", "Valide"
@@ -210,6 +230,24 @@ class ClientDocument(models.Model):
 	document_number = models.CharField(max_length=120)
 	file = models.FileField(upload_to="client_documents/")
 	expiration_date = models.DateField(null=True, blank=True)
+	driving_license_category = models.CharField(
+		max_length=3,
+		choices=DrivingLicenseCategory.choices,
+		null=True,
+		blank=True,
+	)
+	driving_license_transmission = models.CharField(
+		max_length=20,
+		choices=DrivingLicenseTransmission.choices,
+		null=True,
+		blank=True,
+	)
+	driving_license_transmission_declared = models.CharField(
+		max_length=20,
+		choices=DrivingLicenseTransmission.choices,
+		null=True,
+		blank=True,
+	)
 	status = models.CharField(max_length=20, choices=Status.choices, default=Status.EN_ATTENTE)
 	rejection_reason = models.TextField(blank=True)
 	uploaded_at = models.DateTimeField(auto_now_add=True)

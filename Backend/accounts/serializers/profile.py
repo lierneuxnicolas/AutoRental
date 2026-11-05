@@ -1,8 +1,13 @@
-from django.db import transaction
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import serializers
 
 from accounts.models import ClientProfile
+from accounts.services.profile_status import (
+    get_effective_profile_status,
+    recalculate_profile_status,
+)
+from accounts.validators import validate_person_name, validate_phone_number
 
 
 class ClientProfileMeSerializer(serializers.ModelSerializer):
@@ -13,6 +18,7 @@ class ClientProfileMeSerializer(serializers.ModelSerializer):
     phone = serializers.CharField(source="user.phone", required=False, allow_blank=True, max_length=30)
     email_verified = serializers.BooleanField(source="user.email_verified", read_only=True)
     role = serializers.SerializerMethodField(read_only=True)
+    profile_status = serializers.SerializerMethodField(read_only=True)
     date_joined = serializers.DateTimeField(source="user.date_joined", read_only=True)
 
     class Meta:
@@ -50,17 +56,17 @@ class ClientProfileMeSerializer(serializers.ModelSerializer):
             return None
         return obj.user.role.code
 
+    def get_profile_status(self, obj) -> str:
+        return get_effective_profile_status(obj)
+
     def validate_first_name(self, value):
-        cleaned = value.strip()
-        if not cleaned:
-            raise serializers.ValidationError("Le prenom ne peut pas etre vide.")
-        return cleaned
+        return validate_person_name(value, label="prénom")
 
     def validate_last_name(self, value):
-        cleaned = value.strip()
-        if not cleaned:
-            raise serializers.ValidationError("Le nom ne peut pas etre vide.")
-        return cleaned
+        return validate_person_name(value, label="nom")
+
+    def validate_phone(self, value):
+        return validate_phone_number(value)
 
     def validate_address(self, value):
         cleaned = value.strip()
@@ -101,6 +107,7 @@ class ClientProfileMeSerializer(serializers.ModelSerializer):
                 profile_changed_fields.append("updated_at")
                 instance.save(update_fields=profile_changed_fields)
 
+        recalculate_profile_status(instance)
         return instance
 
 
@@ -111,3 +118,8 @@ class ClientProfileProgressSerializer(serializers.Serializer):
     personal_information_complete = serializers.BooleanField()
     identity_card_valid = serializers.BooleanField()
     driving_license_valid = serializers.BooleanField()
+    identity_card_issue = serializers.CharField(allow_null=True)
+    driving_license_issue = serializers.CharField(allow_null=True)
+    profile_status = serializers.ChoiceField(choices=ClientProfile.ProfileStatus.choices)
+    needs_client_action = serializers.BooleanField()
+    documents_need_action = serializers.BooleanField()

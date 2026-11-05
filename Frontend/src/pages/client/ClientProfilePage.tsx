@@ -2,7 +2,7 @@ import axios from 'axios'
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useForm } from 'react-hook-form'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
@@ -10,7 +10,7 @@ import Card from '../../components/ui/Card'
 import Input from '../../components/ui/Input'
 import ProfileDocumentsTab from '../../components/profile/ProfileDocumentsTab'
 import { getClientProfileMe, getClientProfileProgress, updateClientProfile } from '../../services/authService'
-import type { ClientProfileMe, ClientProfileProgress, ClientProfileUpdateRequest } from '../../types/auth'
+import type { ClientProfileProgress, ClientProfileUpdateRequest } from '../../types/auth'
 
 type ProfileFormValues = {
   first_name: string
@@ -22,76 +22,12 @@ type ProfileFormValues = {
 
 type ProfileTabId = 'personal' | 'documents'
 
-type ProfileStatusLabel = {
-  label: string
-  description: string
-  variant: 'info' | 'success' | 'warning' | 'danger'
-}
-
 function toDateInputValue(value: string | null | undefined): string {
   if (!value) {
     return ''
   }
 
   return value.slice(0, 10)
-}
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) {
-    return 'Non renseignée'
-  }
-
-  const normalized = value.slice(0, 10)
-  const [year, month, day] = normalized.split('-')
-
-  if (!year || !month || !day) {
-    return value
-  }
-
-  return `${day}/${month}/${year}`
-}
-
-function profileStatusDetails(profile: ClientProfileMe | undefined): ProfileStatusLabel {
-  if (!profile) {
-    return {
-      label: 'Statut indisponible',
-      description: 'Le statut du profil n’a pas encore été chargé.',
-      variant: 'warning',
-    }
-  }
-
-  switch (profile.profile_status) {
-    case 'VALIDE':
-      return {
-        label: 'Profil valide',
-        description: 'Votre profil est complètement validé.',
-        variant: 'success',
-      }
-    case 'EN_ATTENTE':
-      return {
-        label: 'Profil en attente',
-        description: 'Votre profil est en cours de validation par un gestionnaire.',
-        variant: 'warning',
-      }
-    case 'REFUSE':
-      return {
-        label: 'Profil refusé',
-        description: profile.rejection_reason ? `Motif de refus : ${profile.rejection_reason}` : 'Votre profil a été refusé.',
-        variant: 'danger',
-      }
-    case 'EXPIRE':
-      return {
-        label: 'Profil expiré',
-        description: 'Un document de votre profil a expiré et doit être remplacé.',
-        variant: 'danger',
-      }
-    default:
-      return {
-        label: 'Profil incomplet',
-        description: 'Des informations ou documents doivent encore être complétés.',
-        variant: 'info',
-      }
-  }
 }
 
 function profileProgressItems(progress: ClientProfileProgress | undefined) {
@@ -103,32 +39,24 @@ function profileProgressItems(progress: ClientProfileProgress | undefined) {
     { key: 'account_created', label: 'Compte créé', done: progress.account_created },
     { key: 'email_verified', label: 'E-mail vérifié', done: progress.email_verified },
     { key: 'personal_information_complete', label: 'Informations personnelles', done: progress.personal_information_complete },
-    { key: 'identity_card_valid', label: 'Carte d’identité', done: progress.identity_card_valid },
-    { key: 'driving_license_valid', label: 'Permis de conduire', done: progress.driving_license_valid },
+    { key: 'identity_card_valid', label: progress.identity_card_issue ?? 'Carte d’identité', done: progress.identity_card_valid },
+    { key: 'driving_license_valid', label: progress.driving_license_issue ?? 'Permis de conduire', done: progress.driving_license_valid },
   ]
-}
-
-function isProfileFullyValidated(progress: ClientProfileProgress | undefined): boolean {
-  if (!progress) {
-    return false
-  }
-
-  return progress.percentage >= 100
-    && progress.account_created
-    && progress.email_verified
-    && progress.personal_information_complete
-    && progress.identity_card_valid
-    && progress.driving_license_valid
 }
 
 type ApiErrorPayload = {
   detail?: string
+  first_name?: string | string[]
+  last_name?: string | string[]
+  phone?: string | string[]
   date_of_birth?: string | string[]
   [key: string]: unknown
 }
 
-const MINIMUM_AGE = 18
+const MINIMUM_AGE = 21
 const MAXIMUM_AGE = 90
+const NAME_PATTERN = /^[\p{L}]+(?:[ '\u2019-][\p{L}]+)*$/u
+const PHONE_PATTERN = /^\d{10}$/
 
 function subtractYears(referenceDate: Date, years: number): Date {
   const targetYear = referenceDate.getFullYear() - years
@@ -141,6 +69,29 @@ function subtractYears(referenceDate: Date, years: number): Date {
   }
 
   return candidate
+}
+
+function dateInputValue(value: Date): string {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function validatePersonName(value: string, label: string): true | string {
+  const normalized = value.trim().normalize('NFC')
+  if (!normalized || !NAME_PATTERN.test(normalized)) {
+    return `Le ${label} ne peut contenir que des lettres, des espaces, des apostrophes ou des traits d'union.`
+  }
+  return true
+}
+
+function validatePhoneNumber(value: string): true | string {
+  const normalized = value.trim()
+  if (normalized && !PHONE_PATTERN.test(normalized)) {
+    return 'Le numéro de téléphone doit contenir exactement 10 chiffres.'
+  }
+  return true
 }
 
 function parseDateInput(value: string): Date | null {
@@ -181,7 +132,7 @@ function validateDateOfBirth(value: string): true | string {
   }
 
   if (birthDate > youngestAllowedBirthDate) {
-    return 'Vous devez avoir au moins 18 ans pour utiliser GetACar.'
+    return 'Vous devez avoir au moins 21 ans pour utiliser GetaCar.'
   }
 
   if (birthDate < oldestAllowedBirthDate) {
@@ -226,11 +177,11 @@ function extractApiErrorMessage(error: unknown): string {
 }
 
 export default function ClientProfilePage() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [formError, setFormError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<ProfileTabId>('personal')
+  const activeTab: ProfileTabId = searchParams.get('tab') === 'documents' ? 'documents' : 'personal'
 
   const profileQuery = useQuery({
     queryKey: ['client-profile-me'],
@@ -247,6 +198,7 @@ export default function ClientProfilePage() {
     handleSubmit,
     reset,
     setError,
+    setFocus,
     clearErrors,
     formState: { errors, isSubmitting },
   } = useForm<ProfileFormValues>({
@@ -271,17 +223,13 @@ export default function ClientProfilePage() {
     }
   }, [profileQuery.data, reset])
 
-  useEffect(() => {
-    const requestedTab = searchParams.get('tab')
-    if (requestedTab === 'documents') {
-      setActiveTab('documents')
-      return
-    }
-
-    if (requestedTab === 'personal') {
-      setActiveTab('personal')
-    }
-  }, [searchParams])
+  const selectTab = (tab: ProfileTabId) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.set('tab', tab)
+      return next
+    }, { replace: true })
+  }
 
   const updateProfileMutation = useMutation({
     mutationFn: async (values: ProfileFormValues) => {
@@ -308,9 +256,23 @@ export default function ClientProfilePage() {
 
       if (axios.isAxiosError<ApiErrorPayload>(error)) {
         const payload = error.response?.data
-        const dateOfBirthError = extractFieldError(payload, 'date_of_birth')
-        if (dateOfBirthError) {
-          setError('date_of_birth', { type: 'server', message: dateOfBirthError })
+        const fieldErrors: Array<[keyof ProfileFormValues, string]> = []
+        const fields: Array<[keyof ProfileFormValues, string]> = [
+          ['first_name', 'first_name'],
+          ['last_name', 'last_name'],
+          ['phone', 'phone'],
+          ['date_of_birth', 'date_of_birth'],
+        ]
+        fields.forEach(([field, payloadField]) => {
+          const message = extractFieldError(payload, payloadField)
+          if (message) {
+            fieldErrors.push([field, message])
+          }
+        })
+        if (fieldErrors.length > 0) {
+          fieldErrors.forEach(([field, message]) => {
+            setError(field, { type: 'server', message })
+          })
           setFormError(null)
           return
         }
@@ -339,12 +301,45 @@ export default function ClientProfilePage() {
     void updateProfileMutation.mutateAsync(values)
   }
 
-  const profileStatus = useMemo(() => profileStatusDetails(profileQuery.data), [profileQuery.data])
   const progressItems = useMemo(() => profileProgressItems(progressQuery.data), [progressQuery.data])
   const isLoading = profileQuery.isLoading || progressQuery.isLoading
   const completion = progressQuery.data?.percentage ?? 0
-  const profileIsFullyValidated = isProfileFullyValidated(progressQuery.data)
   const progressCircleStyle = { '--progress': completion } as CSSProperties
+  const profileStatus = progressQuery.data?.profile_status
+  const profileStatusLabel = profileStatus === 'VALIDE'
+    ? 'Profil complet'
+    : profileStatus === 'EN_ATTENTE' || profileStatus === 'EN_ATTENTE_VALIDATION'
+      ? 'En attente de validation'
+      : 'Profil incomplet'
+  const profileStatusClass = profileStatus === 'VALIDE'
+    ? 'border-[#BBF7D0] bg-[#DCFCE7] text-[#166534]'
+    : profileStatus === 'EN_ATTENTE' || profileStatus === 'EN_ATTENTE_VALIDATION'
+      ? 'border-[#FDE68A] bg-[#FEF3C7] text-[#92400E]'
+      : 'border-[#FECACA] bg-[#FEE2E2] text-[#991B1B]'
+
+  const completeRequiredInformation = () => {
+    if (progressQuery.data?.documents_need_action) {
+      selectTab('documents')
+      return
+    }
+
+    const profile = profileQuery.data
+    const firstMissingField: keyof ProfileFormValues | undefined = !profile?.first_name.trim()
+      ? 'first_name'
+      : !profile?.last_name.trim()
+        ? 'last_name'
+        : !profile?.phone.trim()
+          ? 'phone'
+          : !profile?.date_of_birth
+            ? 'date_of_birth'
+            : !profile?.address.trim()
+              ? 'address'
+              : undefined
+
+    if (firstMissingField) {
+      setFocus(firstMissingField)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -368,7 +363,7 @@ export default function ClientProfilePage() {
             aria-selected={activeTab === 'personal'}
             aria-controls="profile-tab-personal"
             id="profile-tab-trigger-personal"
-            onClick={() => setActiveTab('personal')}
+            onClick={() => selectTab('personal')}
             className={`whitespace-nowrap rounded-full px-8 py-3.5 text-xl font-bold leading-none transition ${
               activeTab === 'personal' ? 'bg-[#2563EB] text-white shadow-sm' : 'bg-[#F3F4F6] text-[#374151] hover:bg-[#E5E7EB]'
             }`}
@@ -381,7 +376,7 @@ export default function ClientProfilePage() {
             aria-selected={activeTab === 'documents'}
             aria-controls="profile-tab-documents"
             id="profile-tab-trigger-documents"
-            onClick={() => setActiveTab('documents')}
+            onClick={() => selectTab('documents')}
             className={`whitespace-nowrap rounded-full px-8 py-3.5 text-xl font-bold leading-none transition ${
               activeTab === 'documents' ? 'bg-[#2563EB] text-white shadow-sm' : 'bg-[#F3F4F6] text-[#374151] hover:bg-[#E5E7EB]'
             }`}
@@ -392,29 +387,55 @@ export default function ClientProfilePage() {
       </div>
 
       {activeTab === 'personal' ? (
-        <div id="profile-tab-personal" role="tabpanel" aria-labelledby="profile-tab-trigger-personal" className="mt-8 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <Card header={<div className="flex items-center justify-between gap-2"><h2 className="text-lg font-semibold text-[#1F2937]">Profil client</h2><span className="text-sm text-slate-500">{profileQuery.data?.email ?? ''}</span></div>}>
-            <form className="space-y-5" onSubmit={handleSubmit(onSubmit)} noValidate>
+        <div id="profile-tab-personal" role="tabpanel" aria-labelledby="profile-tab-trigger-personal" className="mt-8 grid items-stretch gap-6 lg:grid-cols-2">
+          <Card
+            className="flex h-full flex-col"
+            contentClassName="flex flex-1 flex-col"
+            header={<h2 className="text-xl font-semibold text-[#1F2937]">Informations personnelles</h2>}
+          >
+            <form id="personal-information-form" className="flex flex-1 flex-col gap-6" onSubmit={handleSubmit(onSubmit)} noValidate>
               {formError ? <Alert variant="danger" title="Sauvegarde impossible" message={formError} /> : null}
-              {successMessage ? <Alert variant="success" title="Profil mis à jour" message={successMessage} /> : null}
+              {successMessage ? <p role="status" className="text-sm font-medium text-green-700">{successMessage}</p> : null}
 
-              <div className="grid gap-5 md:grid-cols-2">
-                <Input label="Prénom" error={errors.first_name?.message} {...register('first_name')} />
-                <Input label="Nom" error={errors.last_name?.message} {...register('last_name')} />
-              </div>
-
-              <Input label="Téléphone" error={errors.phone?.message} {...register('phone')} />
               <Input
-                label="Date de naissance"
-                type="date"
-                error={errors.date_of_birth?.message}
-                {...register('date_of_birth', {
-                  validate: validateDateOfBirth,
-                })}
+                label="Adresse e-mail"
+                value={profileQuery.data?.email ?? ''}
+                readOnly
+                helperText="La modification de l’adresse e-mail sécurisée sera disponible ultérieurement."
               />
-              <Input label="Adresse" error={errors.address?.message} {...register('address')} />
+              <div className="grid gap-5 md:grid-cols-2">
+                <Input
+                  label="Prénom"
+                  error={errors.first_name?.message}
+                  {...register('first_name', { validate: (value) => validatePersonName(value, 'prénom') })}
+                />
+                <Input
+                  label="Nom"
+                  error={errors.last_name?.message}
+                  {...register('last_name', { validate: (value) => validatePersonName(value, 'nom') })}
+                />
+                <Input
+                  label="Téléphone"
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
+                  error={errors.phone?.message}
+                  {...register('phone', { validate: validatePhoneNumber })}
+                />
+                <Input
+                  label="Date de naissance"
+                  type="date"
+                  min={dateInputValue(subtractYears(new Date(), MAXIMUM_AGE))}
+                  max={dateInputValue(subtractYears(new Date(), MINIMUM_AGE))}
+                  error={errors.date_of_birth?.message}
+                  {...register('date_of_birth', {
+                    validate: validateDateOfBirth,
+                  })}
+                />
+              </div>
+              <Input label="Adresse du domicile" error={errors.address?.message} {...register('address')} />
 
-              <Button type="submit" className="w-full" disabled={isSubmitting || updateProfileMutation.isPending}>
+              <Button type="submit" className="mt-auto w-full" disabled={isSubmitting || updateProfileMutation.isPending}>
                 {isSubmitting || updateProfileMutation.isPending ? (
                   <span className="flex items-center justify-center gap-2">
                     <LoadingSpinner size="sm" aria-label="Sauvegarde du profil" />
@@ -427,68 +448,49 @@ export default function ClientProfilePage() {
             </form>
           </Card>
 
-          <div className="space-y-6">
-            <Card header={<div><h2 className="text-lg font-semibold text-[#1F2937]">Statut du profil</h2><p className="text-sm text-slate-500">État actuel de votre dossier</p></div>}>
-              <div className="space-y-4">
-                <Alert variant={profileStatus.variant} title={profileStatus.label} message={profileStatus.description} />
-                <div className="rounded-2xl border border-[#E5E7EB] bg-[#F9FAFB] p-4 text-sm text-slate-600">
-                  <p className="font-medium text-[#1F2937]">E-mail</p>
-                  <p className="mt-1">{profileQuery.data?.email ?? 'Non renseigné'}</p>
-                  <p className="mt-3 font-medium text-[#1F2937]">Date de naissance</p>
-                  <p className="mt-1">{formatDate(profileQuery.data?.date_of_birth ?? null)}</p>
+          <Card
+            className="flex h-full flex-col"
+            contentClassName="flex flex-1 flex-col"
+            header={
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-xl font-semibold text-[#1F2937]">Mon profil</h2>
+                <span className={`rounded-full border px-4 py-2 text-center text-sm font-semibold ${profileStatusClass}`}>
+                  {profileStatusLabel}
+                </span>
+              </div>
+            }
+          >
+            <div className="flex flex-1 flex-col">
+              <div className="flex justify-center">
+                <div className="relative flex h-52 w-52 items-center justify-center rounded-full bg-[conic-gradient(#4F46E5_0deg,#4F46E5_calc(var(--progress)*3.6deg),#E2E8F0_calc(var(--progress)*3.6deg),#E2E8F0_360deg)] p-[1.4rem]" style={progressCircleStyle}>
+                  <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-white text-center">
+                    <span className="text-4xl font-semibold text-[#0F172A]">{completion}%</span>
+                    <span className="mt-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Complet</span>
+                  </div>
                 </div>
               </div>
-            </Card>
 
-            <Card className="rounded-4xl border-none bg-white shadow-[0_22px_60px_rgba(15,23,42,0.08)]">
-              <div className="flex flex-col gap-4">
-                <div>
-                  <h2 className="text-[1.85rem] font-semibold tracking-tight text-[#0F172A]">Progression de votre profil</h2>
-                </div>
+              <ul className="mt-10 flex flex-1 flex-col gap-2" aria-label="Critères de complétude du profil">
+                {progressItems.map((item) => (
+                  <li key={item.key} className="flex items-center gap-2 text-sm font-medium text-[#1F2937]">
+                    <span
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${item.done ? 'border-[#16A34A] bg-[#DCFCE7] text-[#16A34A]' : 'border-slate-300 bg-slate-100 text-transparent'}`}
+                      aria-hidden="true"
+                    >
+                      ✓
+                    </span>
+                    <span>{item.label}</span>
+                  </li>
+                ))}
+              </ul>
 
-                <div className="grid gap-x-10 gap-y-4 md:grid-cols-[192px_1fr] md:items-center">
-                  <div className="relative mx-auto flex h-38 w-38 items-center justify-center rounded-full bg-[conic-gradient(#4F46E5_0deg,#4F46E5_calc(var(--progress)*3.6deg),#E2E8F0_calc(var(--progress)*3.6deg),#E2E8F0_360deg)]" style={progressCircleStyle}>
-                    <div className="flex h-26 w-26 flex-col items-center justify-center rounded-full bg-white text-center shadow-[inset_0_1px_6px_rgba(15,23,42,0.08)]">
-                      <span className="text-3xl font-semibold text-[#0F172A]">{completion}%</span>
-                      <span className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Complet</span>
-                    </div>
-                  </div>
-
-                  <ul className="space-y-3">
-                    {progressItems.map((item) => (
-                      <li key={item.key} className="flex items-center gap-3 text-[0.92rem] font-semibold text-[#0F172A]">
-                        <span
-                          className={`flex h-5 w-5 items-center justify-center rounded-full border ${item.done ? 'border-[#16A34A] bg-[#DCFCE7] text-[#16A34A]' : 'border-slate-300 bg-slate-100 text-transparent'}`}
-                          aria-hidden="true"
-                        >
-                          ✓
-                        </span>
-                        <span>{item.label}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                {profileIsFullyValidated ? (
-                  <div className="w-full rounded-2xl border border-[#BBF7D0] bg-[#DCFCE7] px-4 py-2 text-sm font-medium text-[#166534]">
-                    ✓ Votre profil est complet. Vous pouvez réserver un véhicule.
-                  </div>
-                ) : (
-                  <div className="w-full rounded-2xl border border-[#FCD34D] bg-[#FFEDD5] px-4 py-2 text-sm text-[#9A3412]">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="font-medium">⚠ Votre profil doit être complété et vos documents validés avant de pouvoir réserver un véhicule.</p>
-                      <Link to="/client/profile?tab=documents" className="shrink-0">
-                        <Button className="bg-[#F97316] text-white hover:bg-[#EA580C] focus-visible:ring-[#F97316]">
-                          Compléter mon profil
-                        </Button>
-                      </Link>
-                    </div>
-                  </div>
-                )}
-
-              </div>
-            </Card>
-          </div>
+              {progressQuery.data?.needs_client_action ? (
+                <Button type="button" className="w-full" onClick={completeRequiredInformation}>
+                  Compléter mon profil
+                </Button>
+              ) : null}
+            </div>
+          </Card>
         </div>
       ) : (
         <div id="profile-tab-documents" role="tabpanel" aria-labelledby="profile-tab-trigger-documents" className="mt-8">

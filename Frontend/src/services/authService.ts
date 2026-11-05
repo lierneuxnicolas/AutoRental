@@ -84,3 +84,10 @@ export async function createClientDocument(formData: FormData): Promise<ClientDo
   })
   return data
 }
+
+export async function getClientDocumentFile(documentId: number): Promise<Blob> {
+  const { data } = await api.get<Blob>(`/users/me/documents/${documentId}/file/`, {
+    responseType: 'blob',
+  })
+  return data
+}

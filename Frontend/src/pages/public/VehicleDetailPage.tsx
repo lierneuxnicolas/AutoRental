@@ -22,6 +22,187 @@ const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : 
 const RESERVATION_CONFIRMATION_TIMEOUT_MS = 15000
 const RESERVATION_CONFIRMATION_POLL_DELAY_MS = 3000
 
+type ReservationApiErrorPayload = Record<string, unknown> & {
+  code?: unknown
+  message?: unknown
+  detail?: unknown
+  details?: unknown
+}
+
+const reservationErrorMessages: Record<string, string> = {
+  ACCOUNT_INACTIVE: 'Votre compte est désactivé. Contactez le support GetaCar.',
+  DATE_OF_BIRTH_IN_FUTURE: 'La date de naissance indiquée dans votre profil est invalide.',
+  DRIVING_LICENSE_CATEGORY_INCOMPATIBLE: 'La catégorie de votre permis ne permet pas de louer ce véhicule.',
+  DRIVING_LICENSE_DETAILS_UNVERIFIED: 'Les informations de votre permis doivent être vérifiées avant de réserver.',
+  DRIVING_LICENSE_EXPIRED: 'Votre permis de conduire est expiré. Mettez-le à jour dans votre profil.',
+  DRIVING_LICENSE_EXPIRES_TOO_SOON: 'Votre permis doit rester valide jusqu’à la fin de la location.',
+  DRIVING_LICENSE_MISSING: 'Ajoutez votre permis de conduire à votre profil pour réserver.',
+  DRIVING_LICENSE_NOT_VALID: 'Votre permis de conduire doit être validé avant de réserver.',
+  EMAIL_NOT_VERIFIED: 'Confirmez votre adresse e-mail avant de réserver.',
+  DURATION_TOO_SHORT: 'La période choisie est trop courte pour cette location.',
+  END_BEFORE_START: 'La date de fin doit être postérieure à la date de début.',
+  END_REQUIRED: 'Indiquez une date de fin pour la location.',
+  IDENTITY_CARD_EXPIRED: 'Votre carte d’identité est expirée. Mettez-la à jour dans votre profil.',
+  IDENTITY_CARD_EXPIRES_TOO_SOON: 'Votre carte d’identité doit rester valide jusqu’à la fin de la location.',
+  IDENTITY_CARD_MISSING: 'Ajoutez votre carte d’identité à votre profil pour réserver.',
+  IDENTITY_CARD_NOT_VALID: 'Votre carte d’identité doit être validée avant de réserver.',
+  INVALID_END: 'La date de fin indiquée est invalide.',
+  INVALID_PERIOD: 'La période choisie est invalide. Vérifiez les dates et heures de début et de fin.',
+  INVALID_START: 'La date de début indiquée est invalide.',
+  PRICING_ERROR: 'Le prix de cette réservation n’a pas pu être calculé. Veuillez réessayer.',
+  PROFILE_INCOMPLETE: 'Complétez les informations obligatoires de votre profil avant de réserver.',
+  PROFILE_NOT_ELIGIBLE: 'Votre profil ou vos documents ne remplissent pas les conditions de réservation.',
+  PROFILE_NOT_VALID: 'Votre profil doit être validé avant de réserver.',
+  START_REQUIRED: 'Indiquez une date de début pour la location.',
+  START_IN_PAST: 'La date de début ne peut pas être dans le passé.',
+  UNDER_MINIMUM_AGE: 'Vous devez avoir au moins 21 ans à la date de début de la location.',
+  VEHICLE_INCOMPATIBLE_WITH_LICENSE: 'Votre permis ne permet pas de conduire ce véhicule.',
+  VEHICLE_NOT_ACTIVE: 'Ce véhicule n’est actuellement pas disponible à la réservation.',
+  VEHICLE_NOT_BOOKABLE: 'Ce véhicule n’est actuellement pas réservable.',
+  VEHICLE_TRANSMISSION_UNKNOWN: 'La transmission de ce véhicule doit être vérifiée avant sa réservation.',
+  VEHICLE_UNAVAILABLE: 'Ce véhicule n’est plus disponible pour les dates choisies. Sélectionnez une autre période.',
+}
+
+const reservationValidationFieldLabels: Record<string, string> = {
+  end_at: 'Date de fin',
+  insurance_type: 'Assurance',
+  start_at: 'Date de début',
+  vehicle_id: 'Véhicule',
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function getErrorCodeMessage(code: unknown): string | null {
+  if (typeof code !== 'string') {
+    return null
+  }
+
+  return reservationErrorMessages[code] ?? null
+}
+
+function collectValidationMessages(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return value.trim() ? [value.trim()] : []
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap(collectValidationMessages)
+  }
+
+  if (isRecord(value)) {
+    return Object.values(value).flatMap(collectValidationMessages)
+  }
+
+  return []
+}
+
+function getReservationValidationMessage(payload: ReservationApiErrorPayload): string | null {
+  const validationEntries = Object.entries(payload).filter(
+    ([key, value]) => !['code', 'message', 'detail', 'details'].includes(key) && value !== undefined,
+  )
+
+  const validationMessages = validationEntries.flatMap(([, value]) => collectValidationMessages(value))
+  if (validationMessages.length === 0) {
+    return null
+  }
+
+  const descriptions = validationEntries.map(([field, value]) => {
+    const label = reservationValidationFieldLabels[field] ?? field
+    const messages = collectValidationMessages(value)
+    return `${label} : ${messages.join(' ')}`
+  })
+
+  return descriptions.join(' ')
+}
+
+function getReservationCreationErrorMessage(error: unknown): string {
+  if (error instanceof AxiosError) {
+    const payload = error.response?.data
+    if (isRecord(payload)) {
+      const errorPayload = payload as ReservationApiErrorPayload
+      const details = isRecord(errorPayload.details) ? errorPayload.details : {}
+      const eligibilityErrors = Array.isArray(details.eligibility_errors)
+        ? details.eligibility_errors
+        : []
+      const eligibilityMessages = eligibilityErrors
+        .map(getErrorCodeMessage)
+        .filter((message): message is string => message !== null)
+      if (eligibilityMessages.length > 0) {
+        return `Votre profil ne permet pas cette réservation : ${[...new Set(eligibilityMessages)].join(' ')}`
+      }
+
+      const codeMessage = getErrorCodeMessage(errorPayload.code)
+        ?? getErrorCodeMessage(details.availability_error)
+      if (codeMessage) {
+        return codeMessage
+      }
+
+      const nestedValidationErrors = isRecord(details.validation_errors)
+        ? getReservationValidationMessage(details.validation_errors)
+        : null
+      const validationMessage = nestedValidationErrors ?? getReservationValidationMessage(errorPayload)
+      if (validationMessage) {
+        return validationMessage
+      }
+
+      for (const candidate of [errorPayload.message, errorPayload.detail]) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+          return candidate.trim()
+        }
+
+        if (isRecord(candidate)) {
+          const nestedFieldErrors = getReservationValidationMessage(candidate)
+          if (nestedFieldErrors) {
+            return nestedFieldErrors
+          }
+        }
+
+        const nestedValidation = collectValidationMessages(candidate)
+        if (nestedValidation.length > 0) {
+          return nestedValidation.join(' ')
+        }
+      }
+    }
+
+    if (!error.response) {
+      return 'Le serveur est momentanément injoignable. Vérifiez votre connexion puis réessayez.'
+    }
+  }
+
+  return 'La réservation n’a pas pu être créée. Veuillez vérifier les informations et réessayer.'
+}
+
+function logReservationCreationError(error: unknown): void {
+  if (!import.meta.env.DEV) {
+    return
+  }
+
+  if (error instanceof AxiosError) {
+    const payload = isRecord(error.response?.data) ? error.response.data : {}
+    const details = isRecord(payload.details) ? payload.details : {}
+    const validationFields = Object.keys(payload).filter(
+      (key) => !['code', 'message', 'detail', 'details'].includes(key),
+    )
+
+    console.warn('Reservation creation request failed', {
+      endpoint: error.config?.url,
+      status: error.response?.status ?? null,
+      code: typeof payload.code === 'string' ? payload.code : null,
+      validationFields,
+      eligibilityErrorCodes: Array.isArray(details.eligibility_errors)
+        ? details.eligibility_errors.filter((code): code is string => typeof code === 'string')
+        : [],
+    })
+    return
+  }
+
+  console.warn('Reservation creation failed before an API response', {
+    errorType: error instanceof Error ? error.name : typeof error,
+  })
+}
+
 function statusToBadge(status: string): { label: string; variant: StatusVariant } {
   const upperStatus = status.toUpperCase()
 
@@ -329,18 +510,19 @@ function parseDateInput(value: string | null | undefined): Date | null {
   return parsed
 }
 
-function getAgeYears(dateOfBirth: string | null | undefined): number | null {
+function getAgeYears(dateOfBirth: string | null | undefined, reservationStart: string | null): number | null {
   const parsedBirthDate = parseDateInput(dateOfBirth)
   if (!parsedBirthDate) {
     return null
   }
 
   const today = new Date()
-  const currentDay = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-  let age = currentDay.getFullYear() - parsedBirthDate.getFullYear()
+  const referenceDate = parseDateInput(reservationStart?.slice(0, 10))
+    ?? new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  let age = referenceDate.getFullYear() - parsedBirthDate.getFullYear()
   const isBirthdayPassed =
-    currentDay.getMonth() > parsedBirthDate.getMonth()
-    || (currentDay.getMonth() === parsedBirthDate.getMonth() && currentDay.getDate() >= parsedBirthDate.getDate())
+    referenceDate.getMonth() > parsedBirthDate.getMonth()
+    || (referenceDate.getMonth() === parsedBirthDate.getMonth() && referenceDate.getDate() >= parsedBirthDate.getDate())
 
   if (!isBirthdayPassed) {
     age -= 1
@@ -370,6 +552,8 @@ export default function VehicleDetailPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const start = searchParams.get('start')
+  const end = searchParams.get('end')
   const { isAuthenticated } = useAuth()
   const reservationIdParam = searchParams.get('reservationId')
   const reservationIdFromQuery = reservationIdParam ? Number(reservationIdParam) : Number.NaN
@@ -394,6 +578,7 @@ export default function VehicleDetailPage() {
   const [hasConfirmationTimedOut, setHasConfirmationTimedOut] = useState(false)
   const [isRefreshingReservationStatus, setIsRefreshingReservationStatus] = useState(false)
   const finalizedPaymentClientSecretRef = useRef<string | null>(null)
+  const reservationCreationInFlightRef = useRef(false)
   const confirmationPollTimerRef = useRef<number | null>(null)
   const confirmationPollDeadlineRef = useRef<number | null>(null)
 
@@ -428,11 +613,11 @@ export default function VehicleDetailPage() {
     if (!dateOfBirth) {
       errors.push('Veuillez renseigner votre date de naissance dans votre profil.')
     } else {
-      const age = getAgeYears(dateOfBirth)
+      const age = getAgeYears(dateOfBirth, start)
       if (age === null) {
         errors.push('Veuillez renseigner votre date de naissance dans votre profil.')
-      } else if (age < 18) {
-        errors.push('Vous devez avoir au moins 18 ans pour louer un véhicule.')
+      } else if (age < 21) {
+        errors.push('Vous devez avoir au moins 21 ans pour louer un véhicule.')
       } else if (age > 90) {
         errors.push("L'âge maximum autorisé pour une location GetACar est de 90 ans.")
       }
@@ -447,7 +632,7 @@ export default function VehicleDetailPage() {
     }
 
     return errors
-  }, [isAuthenticated, profileProgressQuery.data, profileQuery.data])
+  }, [isAuthenticated, profileProgressQuery.data, profileQuery.data, start])
 
   const canProceedToPayment = isAuthenticated && !profileQuery.isLoading && !profileProgressQuery.isLoading && paymentErrors.length === 0
 
@@ -458,9 +643,6 @@ export default function VehicleDetailPage() {
     { order: 4, label: 'Paiement et vérifications' },
     { order: 5, label: 'Confirmation' },
   ]
-
-  const start = searchParams.get('start')
-  const end = searchParams.get('end')
 
   useEffect(() => {
     if (!id) {
@@ -637,8 +819,8 @@ export default function VehicleDetailPage() {
       setPaymentSetupMessage(null)
     },
     onError: (error) => {
-      const axiosError = error as AxiosError<{ detail?: string }>
-      setPaymentWorkflowError(axiosError.response?.data?.detail || 'La reservation n\'a pas pu etre creee.')
+      logReservationCreationError(error)
+      setPaymentWorkflowError(getReservationCreationErrorMessage(error))
     },
   })
 
@@ -878,6 +1060,7 @@ export default function VehicleDetailPage() {
 
     if (
       createReservationMutation.isPending
+      || reservationCreationInFlightRef.current
       || depositAuthorizationMutation.isPending
       || paymentIntentMutation.isPending
       || isPreparingPayment
@@ -904,7 +1087,19 @@ export default function VehicleDetailPage() {
           return
         }
 
-        const reservation = await createReservationMutation.mutateAsync(reservationPayload)
+        if (reservationCreationInFlightRef.current) {
+          return
+        }
+
+        reservationCreationInFlightRef.current = true
+        let reservation: ReservationCreateResponse
+        try {
+          reservation = await createReservationMutation.mutateAsync(reservationPayload)
+        } catch {
+          return
+        } finally {
+          reservationCreationInFlightRef.current = false
+        }
 
         if (reservation.status === 'EN_ATTENTE_PAIEMENT') {
           await loadExistingPaymentClientSecret(reservation.id)
@@ -1706,12 +1901,17 @@ export default function VehicleDetailPage() {
                               />
                             ) : paymentWorkflowError ? (
                               <div className="space-y-3">
-                                <Alert variant="danger" title="Paiement impossible" message={paymentWorkflowError} />
-                                <Button
-                                  variant="secondary"
-                                  onClick={() => {
-                                    setPaymentWorkflowError(null)
-                                  }}
+                              <Alert
+                                variant="danger"
+                                title={createReservationMutation.isError && !activeReservation ? 'Réservation impossible' : 'Paiement impossible'}
+                                message={paymentWorkflowError}
+                              />
+                              <Button
+                                variant="secondary"
+                                onClick={() => {
+                                  createReservationMutation.reset()
+                                  setPaymentWorkflowError(null)
+                                }}
                                 >
                                   Réessayer
                                 </Button>

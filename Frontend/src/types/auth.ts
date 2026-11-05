@@ -41,6 +41,11 @@ export interface ClientProfileProgress {
   personal_information_complete: boolean
   identity_card_valid: boolean
   driving_license_valid: boolean
+  identity_card_issue: string | null
+  driving_license_issue: string | null
+  profile_status: ClientProfileStatus
+  needs_client_action: boolean
+  documents_need_action: boolean
 }
 
 export type ClientDocumentType = 'CARTE_IDENTITE' | 'PERMIS_CONDUIRE'
@@ -53,6 +58,8 @@ export interface ClientDocument {
   expiration_date: string | null
   status: ClientDocumentStatus
   rejection_reason: string
+  driving_license_category: string | null
+  driving_license_transmission: 'MANUAL_AND_AUTOMATIC' | 'AUTOMATIC_ONLY' | null
   uploaded_at: string
   validated_at: string | null
   is_active: boolean

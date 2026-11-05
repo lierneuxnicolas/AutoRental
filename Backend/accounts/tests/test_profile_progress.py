@@ -34,7 +34,25 @@ class ProfileProgressEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         return response.data
 
-    def _create_document(self, *, doc_type, status_value, expiration_date, is_active=True):
+    def _create_document(
+        self,
+        *,
+        doc_type,
+        status_value,
+        expiration_date,
+        is_active=True,
+        verified_license=True,
+    ):
+        license_details = {}
+        if (
+            doc_type == ClientDocument.DocumentType.PERMIS_CONDUIRE
+            and status_value == ClientDocument.Status.VALIDE
+            and verified_license
+        ):
+            license_details = {
+                "driving_license_category": ClientDocument.DrivingLicenseCategory.B,
+                "driving_license_transmission": ClientDocument.DrivingLicenseTransmission.MANUAL_AND_AUTOMATIC,
+            }
         return ClientDocument.objects.create(
             client=self.profile,
             document_type=doc_type,
@@ -43,7 +61,18 @@ class ProfileProgressEndpointTests(APITestCase):
             expiration_date=expiration_date,
             status=status_value,
             is_active=is_active,
+            **license_details,
         )
+
+    def _complete_personal_information(self):
+        self.user.email_verified = True
+        self.user.first_name = "Alice"
+        self.user.last_name = "Martin"
+        self.user.phone = "0499123456"
+        self.user.save(update_fields=["email_verified", "first_name", "last_name", "phone"])
+        self.profile.date_of_birth = date(1990, 1, 1)
+        self.profile.address = "Rue Test"
+        self.profile.save(update_fields=["date_of_birth", "address"])
 
     def test_progress_is_20_percent_with_account_only(self):
         self._authenticate()
@@ -118,6 +147,55 @@ class ProfileProgressEndpointTests(APITestCase):
         self._authenticate()
         progress = self._get_progress()
         self.assertEqual(progress["percentage"], 100)
+        self.assertEqual(progress["profile_status"], ClientProfile.ProfileStatus.VALIDE)
+        self.assertFalse(progress["needs_client_action"])
+
+    def test_unverified_license_details_do_not_complete_the_profile(self):
+        today = timezone.localdate()
+        self._complete_personal_information()
+        self._create_document(
+            doc_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+            status_value=ClientDocument.Status.VALIDE,
+            expiration_date=today + timedelta(days=60),
+        )
+        self._create_document(
+            doc_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            status_value=ClientDocument.Status.VALIDE,
+            expiration_date=today + timedelta(days=60),
+            verified_license=False,
+        )
+
+        self._authenticate()
+        progress = self._get_progress()
+        self.assertEqual(progress["percentage"], 80)
+        self.assertFalse(progress["driving_license_valid"])
+        self.assertEqual(progress["profile_status"], ClientProfile.ProfileStatus.EN_ATTENTE)
+        self.assertFalse(progress["needs_client_action"])
+        self.assertEqual(
+            progress["driving_license_issue"],
+            "Permis de conduire en attente de vérification par un gestionnaire",
+        )
+
+    def test_refused_document_is_reported_as_incomplete(self):
+        today = timezone.localdate()
+        self._complete_personal_information()
+        self._create_document(
+            doc_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+            status_value=ClientDocument.Status.REFUSE,
+            expiration_date=today + timedelta(days=60),
+        )
+        self._create_document(
+            doc_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            status_value=ClientDocument.Status.VALIDE,
+            expiration_date=today + timedelta(days=60),
+        )
+
+        self._authenticate()
+        progress = self._get_progress()
+        self.assertEqual(progress["profile_status"], ClientProfile.ProfileStatus.INCOMPLET)
+        self.assertTrue(progress["needs_client_action"])
+        self.assertTrue(progress["documents_need_action"])
+        self.assertEqual(progress["identity_card_issue"], "Carte d'identité refusée")
 
     def test_expired_document_is_not_counted(self):
         today = timezone.localdate()
@@ -139,6 +217,8 @@ class ProfileProgressEndpointTests(APITestCase):
         self._authenticate()
         progress = self._get_progress()
         self.assertEqual(progress["percentage"], 60)
+        self.assertEqual(progress["identity_card_issue"], "Carte d'identité expirée")
+        self.assertTrue(progress["needs_client_action"])
 
     def test_inactive_document_is_not_counted(self):
         today = timezone.localdate()
@@ -178,7 +258,15 @@ class ProfileProgressEndpointTests(APITestCase):
             status_value=ClientDocument.Status.EN_ATTENTE,
             expiration_date=today + timedelta(days=60),
         )
+        self._create_document(
+            doc_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            status_value=ClientDocument.Status.VALIDE,
+            expiration_date=today + timedelta(days=60),
+        )
 
         self._authenticate()
         progress = self._get_progress()
-        self.assertEqual(progress["percentage"], 60)
+        self.assertEqual(progress["percentage"], 80)
+        self.assertEqual(progress["profile_status"], ClientProfile.ProfileStatus.EN_ATTENTE)
+        self.assertFalse(progress["needs_client_action"])
+        self.assertEqual(progress["identity_card_issue"], "Carte d'identité en attente de validation")

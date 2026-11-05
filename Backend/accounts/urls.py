@@ -4,6 +4,7 @@ from accounts.views import (
     AdminUserListView,
     AdminUserStatusUpdateView,
     ClientDocumentDetailView,
+    ClientDocumentFileView,
     ClientDocumentListCreateView,
     ClientProfileMeView,
     ClientProfileProgressView,
@@ -16,6 +17,7 @@ from accounts.views import (
     TokenRefreshView,
     VerifyEmailView,
     ManagementClientDocumentDetailView,
+    ManagementClientDocumentFileView,
     ManagementClientDocumentListView,
     ManagementClientDocumentRejectView,
     ManagementClientDocumentValidateView,
@@ -46,6 +48,11 @@ urlpatterns = [
         name="users-me-documents-detail",
     ),
     path(
+        "users/me/documents/<int:pk>/file/",
+        ClientDocumentFileView.as_view(),
+        name="users-me-documents-file",
+    ),
+    path(
         "management/documents/",
         ManagementClientDocumentListView.as_view(),
         name="management-documents",
@@ -54,6 +61,11 @@ urlpatterns = [
         "management/documents/<int:pk>/",
         ManagementClientDocumentDetailView.as_view(),
         name="management-documents-detail",
+    ),
+    path(
+        "management/documents/<int:pk>/file/",
+        ManagementClientDocumentFileView.as_view(),
+        name="management-documents-file",
     ),
     path(
         "management/documents/<int:pk>/validate/",

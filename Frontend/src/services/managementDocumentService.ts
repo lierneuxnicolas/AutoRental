@@ -3,6 +3,7 @@ import type {
   ManagementDocumentListQueryParams,
   ManagerClientDocumentDetail,
   ManagerRejectDocumentRequest,
+  ManagerValidateDocumentRequest,
   PaginatedManagerClientDocumentListResponse,
 } from '../types/managementDocument'
 
@@ -21,9 +22,20 @@ export async function getManagementDocumentById(id: number): Promise<ManagerClie
   return data
 }
 
-export async function validateManagementDocument(id: number): Promise<ManagerClientDocumentDetail> {
+export async function getManagementDocumentFile(id: number): Promise<Blob> {
+  const { data } = await api.get<Blob>(`/management/documents/${id}/file/`, {
+    responseType: 'blob',
+  })
+  return data
+}
+
+export async function validateManagementDocument(
+  id: number,
+  payload: ManagerValidateDocumentRequest = {},
+): Promise<ManagerClientDocumentDetail> {
   const { data } = await api.post<ManagerClientDocumentDetail>(
     `/management/documents/${id}/validate/`,
+    payload,
   )
   return data
 }

@@ -29,6 +29,7 @@ export type ReservationStatus =
 
 export interface ReservationVehicleSummary {
   id: number
+  mileage?: number
   brand: string
   model_name: string
   category: string
@@ -40,6 +41,7 @@ export interface ReservationVehicleSummary {
   doors: number
   registration_number: string
   parking_name: string
+  parking_address: string | null
   parking_space_number: string
 }
 

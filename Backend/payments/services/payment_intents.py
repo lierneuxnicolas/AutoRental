@@ -10,13 +10,15 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import Role
-from accounts.services import validate_client_for_reservation
+from accounts.services import (
+    check_vehicle_compatibility_for_client,
+    validate_client_for_reservation,
+)
 from payments.models import Deposit, Payment
 from reservations.models import Reservation
 from reservations.services.pricing import PricingError, calculate_price_simulation
 from vehicles.models import Vehicle
 from vehicles.services import BOOKABLE_VEHICLE_STATUSES, get_blocking_reservation_filter
-
 
 ALLOWED_PAYMENT_METHOD_TYPES = ["card", "bancontact"]
 PAYMENT_INTENT_CONFIGURATION_VERSION = "v2"
@@ -86,11 +88,31 @@ def _assert_profile_still_valid(reservation: Reservation) -> None:
     if eligibility.is_eligible:
         return
 
+    if {"IDENTITY_CARD_EXPIRED", "DRIVING_LICENSE_EXPIRED"} & set(eligibility.errors):
+        _raise_payment_intent_error(
+            "PROFILE_NOT_ELIGIBLE",
+            "Votre carte d'identité ou votre permis de conduire est expiré. "
+            "Veuillez remplacer ce document pour réserver.",
+            details={"eligibility_errors": list(eligibility.errors)},
+        )
+
     _raise_payment_intent_error(
         "PROFILE_NOT_ELIGIBLE",
         "Le profil client n'est plus valide pour cette reservation.",
         details={"eligibility_errors": list(eligibility.errors)},
     )
+
+
+def _assert_vehicle_compatible_with_license(reservation: Reservation) -> None:
+    compatibility = check_vehicle_compatibility_for_client(
+        client=reservation.client,
+        vehicle=reservation.vehicle,
+    )
+    if not compatibility.is_compatible:
+        _raise_payment_intent_error(
+            compatibility.code or "VEHICLE_INCOMPATIBLE_WITH_LICENSE",
+            compatibility.message or "Le vehicule est incompatible avec le permis du client.",
+        )
 
 
 def _assert_vehicle_still_available(reservation: Reservation) -> None:
@@ -264,7 +286,9 @@ def create_or_reuse_payment_intent(
 
         draft_expired = False
         if reservation_locked.status == Reservation.Status.BROUILLON:
-            from reservations.services.expiration import expire_draft_reservation_if_stale
+            from reservations.services.expiration import (
+                expire_draft_reservation_if_stale,
+            )
 
             draft_expired = expire_draft_reservation_if_stale(reservation=reservation_locked, reference_time=timezone.now())
 
@@ -286,6 +310,7 @@ def create_or_reuse_payment_intent(
 
         _assert_owner_and_role(reservation=reservation_locked, requested_by=requested_by)
         _assert_profile_still_valid(reservation_locked)
+        _assert_vehicle_compatible_with_license(reservation_locked)
         _assert_vehicle_still_available(reservation_locked)
         _assert_deposit_authorized(reservation_locked)
 

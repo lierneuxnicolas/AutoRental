@@ -879,6 +879,54 @@ class DepartureVehicleStateApiTests(TestCase):
         self.assertEqual(self.vehicle.status, Vehicle.Status.RESERVE)
         self.assertEqual(Damage.objects.filter(inspection=self.inspection).count(), 0)
 
+    def test_vehicle_state_rejects_mileage_below_last_recorded_value(self):
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._state_url(self.inspection.id),
+            {
+                "mileage": self.vehicle.mileage - 1,
+                "energy_level_percent": 70,
+                "anomaly_present": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "INVALID_MILEAGE")
+
+    def test_vehicle_state_rejects_mileage_above_unsigned_integer_limit(self):
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._state_url(self.inspection.id),
+            {
+                "mileage": 4_294_967_296,
+                "energy_level_percent": 70,
+                "anomaly_present": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("mileage", response.data)
+
+    def test_vehicle_state_rejects_decimal_mileage(self):
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._state_url(self.inspection.id),
+            {
+                "mileage": 1000.5,
+                "energy_level_percent": 70,
+                "anomaly_present": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("mileage", response.data)
+
     def test_acceptable_damage_allows_departure_completion(self):
         self.api.force_authenticate(self.client_user)
 
@@ -1621,8 +1669,8 @@ class ReturnInspectionFlowTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "INVALID_RESERVATION_STATUS")
 
-    def test_refuses_final_creation_when_already_exists(self):
-        Inspection.objects.create(
+    def test_returns_existing_final_inspection_when_already_exists(self):
+        existing_inspection = Inspection.objects.create(
             reservation=self.reservation,
             inspection_type=Inspection.Type.FINAL,
             status=Inspection.Status.BROUILLON,
@@ -1631,8 +1679,54 @@ class ReturnInspectionFlowTests(TestCase):
 
         response = self.api.post(self._create_return_url(self.reservation.id), {}, format="json")
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(response.data["code"], "RETURN_INSPECTION_ALREADY_EXISTS")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["inspection"]["id"], existing_inspection.id)
+        self.assertEqual(
+            Inspection.objects.filter(
+                reservation=self.reservation,
+                inspection_type=Inspection.Type.FINAL,
+            ).count(),
+            1,
+        )
+
+    def test_returns_existing_final_inspection_after_reservation_status_transition(self):
+        existing_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.BROUILLON,
+        )
+        self.reservation.status = Reservation.Status.TERMINEE
+        self.reservation.save(update_fields=["status", "updated_at"])
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(self._create_return_url(self.reservation.id), {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["inspection"]["id"], existing_inspection.id)
+        self.assertEqual(
+            Inspection.objects.filter(
+                reservation=self.reservation,
+                inspection_type=Inspection.Type.FINAL,
+            ).count(),
+            1,
+        )
+
+    def test_repeated_return_inspection_creation_returns_same_inspection(self):
+        self.api.force_authenticate(self.client_user)
+
+        first_response = self.api.post(self._create_return_url(self.reservation.id), {}, format="json")
+        second_response = self.api.post(self._create_return_url(self.reservation.id), {}, format="json")
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.data["inspection"]["id"], first_response.data["inspection"]["id"])
+        self.assertEqual(
+            Inspection.objects.filter(
+                reservation=self.reservation,
+                inspection_type=Inspection.Type.FINAL,
+            ).count(),
+            1,
+        )
 
     def test_saves_return_vehicle_state_without_anomaly(self):
         final_inspection = Inspection.objects.create(
@@ -1660,6 +1754,87 @@ class ReturnInspectionFlowTests(TestCase):
         self.assertFalse(final_inspection.has_critical_issue)
         self.assertEqual(final_inspection.critical_issue_description, "")
         self.assertEqual(Damage.objects.filter(inspection=final_inspection).count(), 0)
+
+    def test_saves_return_vehicle_state_when_mileage_equals_departure(self):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.BROUILLON,
+        )
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._state_url(final_inspection.id),
+            {
+                "mileage": self.initial_inspection.mileage,
+                "energy_level_percent": 72,
+                "anomaly_present": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        final_inspection.refresh_from_db()
+        self.assertEqual(final_inspection.mileage, self.initial_inspection.mileage)
+
+    def test_rejects_return_vehicle_state_when_mileage_is_below_departure(self):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.BROUILLON,
+        )
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._state_url(final_inspection.id),
+            {
+                "mileage": self.initial_inspection.mileage - 1,
+                "energy_level_percent": 72,
+                "anomaly_present": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "INVALID_MILEAGE")
+
+    def test_rejects_return_vehicle_state_when_departure_mileage_is_unavailable(self):
+        self.initial_inspection.mileage = None
+        self.initial_inspection.save(update_fields=["mileage", "updated_at"])
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.BROUILLON,
+        )
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._state_url(final_inspection.id),
+            {"mileage": 1200, "energy_level_percent": 72, "anomaly_present": False},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "DEPARTURE_MILEAGE_UNAVAILABLE")
+
+    def test_rejects_negative_or_non_numeric_return_mileage(self):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.BROUILLON,
+        )
+        self.api.force_authenticate(self.client_user)
+
+        for mileage in (-1, "not-a-number"):
+            with self.subTest(mileage=mileage):
+                response = self.api.post(
+                    self._state_url(final_inspection.id),
+                    {"mileage": mileage, "energy_level_percent": 72, "anomaly_present": False},
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn("mileage", response.data)
 
     def test_saves_return_vehicle_state_with_anomaly(self):
         final_inspection = Inspection.objects.create(
