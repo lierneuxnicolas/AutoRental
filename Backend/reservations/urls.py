@@ -2,6 +2,7 @@ from django.urls import path
 
 from inspections.views import DepartureInspectionCreateView, ReturnInspectionCreateView
 from reservations.views import (
+    ClientDashboardReservationsView,
     PriceSimulationView,
     ReservationClientCancelView,
     ReservationClientCancelPreviewView,
@@ -29,6 +30,7 @@ app_name = "reservations"
 
 urlpatterns = [
     path("simulations/", PriceSimulationView.as_view(), name="price-simulation"),
+    path("reservations/dashboard/", ClientDashboardReservationsView.as_view(), name="reservation-dashboard"),
     path("reservations/", ReservationClientListCreateView.as_view(), name="reservation-list-create"),
     path("reservations/<int:pk>/", ReservationClientDetailView.as_view(), name="reservation-detail"),
     path(

@@ -1,4 +1,5 @@
 from .client import (
+    ClientDashboardReservationsView,
     ReservationClientCancelView,
     ReservationClientCancelPreviewView,
     ReservationClientCriticalAnomalyCancelView,
@@ -6,8 +7,8 @@ from .client import (
     ReservationClientDetailView,
     ReservationClientListCreateView,
     ReservationClientPaymentIntentView,
-     ReservationLockView,
-     ReservationUnlockView,
+    ReservationLockView,
+    ReservationUnlockView,
 )
 from .management import (
     ReservationManagementCancellationView,
@@ -25,6 +26,7 @@ from .management import (
 from .pricing import PriceSimulationView
 
 __all__ = [
+    "ClientDashboardReservationsView",
     "PriceSimulationView",
     "ReservationClientListCreateView",
     "ReservationClientDetailView",
@@ -44,6 +46,6 @@ __all__ = [
     "ReservationReplacementVehicleListView",
     "ReservationUnavailableCancellationView",
     "ReservationVehicleUnavailableCancellationView",
-     "ReservationLockView",
-     "ReservationUnlockView",
+    "ReservationLockView",
+    "ReservationUnlockView",
 ]

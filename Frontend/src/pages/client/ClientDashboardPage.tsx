@@ -8,7 +8,7 @@ import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import { getClientProfileMe, getClientProfileProgress } from '../../services/authService'
-import { getReservations } from '../../services/reservationService'
+import { getDashboardReservations } from '../../services/reservationService'
 import { getVehicleById } from '../../services/vehicleService'
 import type { ClientProfileProgress } from '../../types/auth'
 import type { ReservationDetail, ReservationStatus } from '../../types/reservation'
@@ -35,6 +35,7 @@ const nextReservationStatuses = new Set<ReservationStatus>([
   'EN_ATTENTE_CAUTION',
   'EN_ATTENTE_PAIEMENT',
   'CONFIRMEE',
+  'REAFFECTATION_REQUIRED',
 ])
 
 function formatDate(value: string): string {
@@ -133,7 +134,7 @@ function isReservationInProgress(reservation: ReservationDetail, now: number): b
     return false
   }
 
-  if (status === 'EN_COURS') {
+  if (status === 'EN_COURS' || status === 'A_CONTROLER') {
     return true
   }
 
@@ -173,6 +174,20 @@ function selectDashboardReservations(reservations: ReservationDetail[]) {
   })
 
   return { current, next }
+}
+
+function getDashboardFailureLabel(label: string, error: unknown): string {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return label
+  }
+
+  const response = error.response
+  if (typeof response !== 'object' || response === null || !('status' in response)) {
+    return label
+  }
+
+  const status = response.status
+  return typeof status === 'number' ? `${label} (HTTP ${status})` : label
 }
 
 function ReservationPanel({
@@ -397,27 +412,49 @@ export default function ClientDashboardPage() {
   const profileQuery = useQuery({
     queryKey: ['client-profile-me'],
     queryFn: getClientProfileMe,
+    retry: 1,
   })
 
   const progressQuery = useQuery({
     queryKey: ['client-profile-progress'],
     queryFn: getClientProfileProgress,
+    retry: 1,
   })
 
   const reservationsQuery = useQuery({
     queryKey: ['client-dashboard-reservations'],
-    queryFn: () => getReservations({ ordering: 'start_at', page: 1 }),
+    queryFn: getDashboardReservations,
+    retry: 1,
   })
 
   const progressSteps = useMemo(() => getProgressSteps(progressQuery.data), [progressQuery.data])
   const dashboardReservations = useMemo(
-    () => selectDashboardReservations(reservationsQuery.data?.results ?? []),
-    [reservationsQuery.data?.results],
+    () => selectDashboardReservations(reservationsQuery.data ?? []),
+    [reservationsQuery.data],
   )
   const currentReservation = dashboardReservations.current
   const nextReservation = dashboardReservations.next
   const currentVehicleId = currentReservation?.vehicle.id
   const nextVehicleId = nextReservation?.vehicle.id
+  const reservationsUnavailable = reservationsQuery.isError && !reservationsQuery.data
+  const failedSources = [
+    profileQuery.isError ? getDashboardFailureLabel('Profil', profileQuery.error) : null,
+    progressQuery.isError ? getDashboardFailureLabel('Progression du profil', progressQuery.error) : null,
+    reservationsQuery.isError ? getDashboardFailureLabel('Réservations', reservationsQuery.error) : null,
+  ].filter((source): source is string => source !== null)
+  const isRetryingDashboard = profileQuery.isFetching || progressQuery.isFetching || reservationsQuery.isFetching
+
+  const retryDashboard = () => {
+    if (profileQuery.isError) {
+      void profileQuery.refetch()
+    }
+    if (progressQuery.isError) {
+      void progressQuery.refetch()
+    }
+    if (reservationsQuery.isError) {
+      void reservationsQuery.refetch()
+    }
+  }
 
   const currentVehicleQuery = useQuery({
     queryKey: ['client-dashboard-current-vehicle', currentVehicleId],
@@ -467,11 +504,20 @@ export default function ClientDashboardPage() {
               <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-[#0F172A]">Bonjour {firstName}</h1>
             </div>
 
-            {profileQuery.isError || progressQuery.isError || reservationsQuery.isError ? (
+            {failedSources.length > 0 ? (
               <Alert
                 variant="danger"
                 title="Certaines informations sont indisponibles"
-                message="Le tableau de bord n'a pas pu charger l'ensemble des donnees client."
+                message={(
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p>
+                      Impossible de charger : {failedSources.join(', ')}. Vérifiez votre connexion puis réessayez.
+                    </p>
+                    <Button size="sm" variant="secondary" disabled={isRetryingDashboard} onClick={retryDashboard}>
+                      {isRetryingDashboard ? 'Chargement...' : 'Réessayer'}
+                    </Button>
+                  </div>
+                )}
               />
             ) : null}
 
@@ -536,7 +582,9 @@ export default function ClientDashboardPage() {
                   <ReservationPanel
                     title="Réservation en cours"
                     reservation={undefined}
-                    emptyMessage="Aucune réservation en cours"
+                    emptyMessage={reservationsUnavailable
+                      ? 'Impossible de charger les réservations.'
+                      : 'Aucune réservation en cours'}
                   />
                 )}
               </div>
@@ -554,7 +602,9 @@ export default function ClientDashboardPage() {
                 <ReservationPanel
                   title="Prochaine réservation"
                   reservation={undefined}
-                  emptyMessage="Aucune réservation prévue"
+                  emptyMessage={reservationsUnavailable
+                    ? 'Impossible de charger les réservations.'
+                    : 'Aucune réservation prévue'}
                 />
               )}
               </div>

@@ -117,7 +117,7 @@ def expire_missed_reservations(*, reference_time=None) -> ExpireMissedReservatio
     stats = ExpireMissedReservationsStats()
 
     reservation_ids = list(
-        Reservation.objects.filter(status=Reservation.Status.CONFIRMEE)
+        Reservation.objects.filter(status=Reservation.Status.CONFIRMEE, end_at__lt=now)
         .order_by("id")
         .values_list("id", flat=True)
     )
