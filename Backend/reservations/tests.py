@@ -1044,6 +1044,7 @@ class ReservationTestDataMixin:
 class ReservationRoutingTests(TestCase):
 	def test_client_urls_are_configured_and_cancel_route_is_resolved(self):
 		self.assertEqual(reverse("reservations:reservation-list-create"), "/api/v1/reservations/")
+		self.assertEqual(reverse("reservations:reservation-dashboard"), "/api/v1/reservations/dashboard/")
 		self.assertEqual(reverse("reservations:reservation-detail", kwargs={"pk": 1}), "/api/v1/reservations/1/")
 		self.assertEqual(reverse("reservations:reservation-deposit-authorize", kwargs={"pk": 1}), "/api/v1/reservations/1/deposit/")
 		self.assertEqual(reverse("reservations:reservation-payment-intent", kwargs={"pk": 1}), "/api/v1/reservations/1/payment-intent/")
@@ -1508,6 +1509,7 @@ class ReservationClientConsultationTests(ReservationTestDataMixin, TestCase):
 	def setUp(self):
 		self.client_api = APIClient()
 		self.list_url = reverse("reservations:reservation-list-create")
+		self.dashboard_url = reverse("reservations:reservation-dashboard")
 		self.owned_reservation = self._create_reservation(client=self.client_profile_1)
 		self.owned_reservation_2 = self._create_reservation(
 			client=self.client_profile_1,
@@ -1614,6 +1616,51 @@ class ReservationClientConsultationTests(ReservationTestDataMixin, TestCase):
 		self.assertIn("count", response.data)
 		self.assertIn("results", response.data)
 		self.assertEqual(len(response.data["results"]), 20)
+
+	def test_dashboard_includes_current_and_upcoming_but_not_completed_reservations(self):
+		now = timezone.now()
+		current = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.EN_COURS,
+			start_at=now - timedelta(hours=1),
+			end_at=now + timedelta(hours=1),
+		)
+		upcoming = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.CONFIRMEE,
+			start_at=now + timedelta(days=2),
+			end_at=now + timedelta(days=2, hours=3),
+		)
+		completed = self._create_reservation(
+			client=self.client_profile_1,
+			status=Reservation.Status.TERMINEE,
+			start_at=now - timedelta(days=3),
+			end_at=now - timedelta(days=2, hours=21),
+		)
+		self.client_api.force_authenticate(self.client_user_1)
+
+		response = self.client_api.get(self.dashboard_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertIsInstance(response.data, list)
+		reservations_by_id = {item["id"]: item for item in response.data}
+		self.assertIn(current.id, reservations_by_id)
+		self.assertIn(upcoming.id, reservations_by_id)
+		self.assertNotIn(completed.id, reservations_by_id)
+
+	def test_dashboard_returns_empty_list_when_client_has_no_relevant_reservations(self):
+		now = timezone.now()
+		self.other_reservation.status = Reservation.Status.TERMINEE
+		self.other_reservation.start_at = now - timedelta(days=3)
+		self.other_reservation.end_at = now - timedelta(days=2, hours=21)
+		self.other_reservation.confirmed_at = now - timedelta(days=4)
+		self.other_reservation.save(update_fields=["status", "start_at", "end_at", "confirmed_at", "updated_at"])
+		self.client_api.force_authenticate(self.client_user_2)
+
+		response = self.client_api.get(self.dashboard_url)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data, [])
 
 	def test_aucune_donnee_sensible(self):
 		self.client_api.force_authenticate(self.client_user_1)

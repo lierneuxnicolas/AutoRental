@@ -15,6 +15,11 @@ export async function getReservations(params?: ReservationListQueryParams): Prom
   return data
 }
 
+export async function getDashboardReservations(): Promise<ReservationDetail[]> {
+  const { data } = await api.get<ReservationDetail[]>('/reservations/dashboard/')
+  return data
+}
+
 export async function createReservation(payload: ReservationCreateRequest): Promise<ReservationCreateResponse> {
   const { data } = await api.post<ReservationCreateResponse>('/reservations/', payload)
   return data

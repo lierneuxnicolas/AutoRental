@@ -1592,6 +1592,15 @@ class ReturnInspectionFlowTests(TestCase):
     def _complete_url(self, inspection_id):
         return reverse("inspections:inspection-complete", kwargs={"pk": inspection_id})
 
+    def _demo_key_check_url(self, inspection_id):
+        return reverse("inspections:inspection-demo-return-key-check", kwargs={"pk": inspection_id})
+
+    def _complete_demo_key_check(self, inspection):
+        response = self.api.post(self._demo_key_check_url(inspection.id), {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(response.data["demo_key_check_completed_at"])
+        return response
+
     def _state_url(self, inspection_id):
         return reverse("inspections:inspection-vehicle-state-upsert", kwargs={"pk": inspection_id})
 
@@ -1623,6 +1632,66 @@ class ReturnInspectionFlowTests(TestCase):
             valid_until=now + timedelta(hours=1),
             is_active=True,
         )
+
+    def test_demo_key_check_is_persisted_and_idempotent(self):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.EN_COURS,
+        )
+        self.api.force_authenticate(self.client_user)
+
+        first_response = self._complete_demo_key_check(final_inspection)
+        second_response = self._complete_demo_key_check(final_inspection)
+
+        self.assertEqual(
+            first_response.data["demo_key_check_completed_at"],
+            second_response.data["demo_key_check_completed_at"],
+        )
+        final_inspection.refresh_from_db()
+        self.assertIsNotNone(final_inspection.demo_key_check_completed_at)
+
+    def test_demo_key_check_does_not_complete_when_reservation_is_not_in_progress(self):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.EN_COURS,
+        )
+        self.reservation.status = Reservation.Status.TERMINEE
+        self.reservation.save(update_fields=["status", "updated_at"])
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(self._demo_key_check_url(final_inspection.id), {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "INVALID_RESERVATION_STATUS")
+        final_inspection.refresh_from_db()
+        self.assertIsNone(final_inspection.demo_key_check_completed_at)
+        self.assertEqual(final_inspection.status, Inspection.Status.EN_COURS)
+
+    def test_return_completion_rejects_direct_api_call_without_demo_key_check(self):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.EN_COURS,
+        )
+        self._create_required_photos(final_inspection)
+        self._create_active_unlocked_vehicle_access()
+        self.api.force_authenticate(self.client_user)
+
+        response = self.api.post(
+            self._complete_url(final_inspection.id),
+            {"mileage": 1300, "energy_level_percent": 70},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "DEMO_KEY_CHECK_REQUIRED")
+        final_inspection.refresh_from_db()
+        self.reservation.refresh_from_db()
+        self.assertEqual(final_inspection.status, Inspection.Status.EN_COURS)
+        self.assertEqual(self.reservation.status, Reservation.Status.EN_COURS)
+        self.assertIsNone(final_inspection.completed_at)
 
     def test_creates_final_inspection_in_draft(self):
         self.api.force_authenticate(self.client_user)
@@ -1892,6 +1961,7 @@ class ReturnInspectionFlowTests(TestCase):
         )
         self._create_active_unlocked_vehicle_access()
         self.api.force_authenticate(self.client_user)
+        self._complete_demo_key_check(final_inspection)
 
         with self.captureOnCommitCallbacks(execute=True):
             response = self.api.post(
@@ -1975,6 +2045,7 @@ class ReturnInspectionFlowTests(TestCase):
             is_active=True,
         )
         self.api.force_authenticate(self.client_user)
+        self._complete_demo_key_check(final_inspection)
 
         with self.captureOnCommitCallbacks(execute=True):
             response = self.api.post(
@@ -2012,6 +2083,7 @@ class ReturnInspectionFlowTests(TestCase):
         self._create_required_photos(final_inspection)
         self._create_active_unlocked_vehicle_access()
         self.api.force_authenticate(self.client_user)
+        self._complete_demo_key_check(final_inspection)
 
         with self.captureOnCommitCallbacks(execute=True):
             first_response = self.api.post(
@@ -2139,6 +2211,7 @@ class ReturnInspectionFlowTests(TestCase):
             location="Pare-chocs avant",
         )
         self.api.force_authenticate(self.client_user)
+        self._complete_demo_key_check(final_inspection)
 
         with self.captureOnCommitCallbacks(execute=True):
             response = self.api.post(
@@ -2167,6 +2240,7 @@ class ReturnInspectionFlowTests(TestCase):
             location="Aile arriere",
         )
         self.api.force_authenticate(self.client_user)
+        self._complete_demo_key_check(final_inspection)
 
         with self.captureOnCommitCallbacks(execute=True):
             response = self.api.post(

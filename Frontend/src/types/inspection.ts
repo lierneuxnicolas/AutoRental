@@ -27,6 +27,7 @@ export interface Inspection {
   critical_issue_description?: string
   started_at?: string | null
   completed_at?: string | null
+  demo_key_check_completed_at?: string | null
   completed_by?: number | null
   completed_by_name?: string | null
   created_at: string

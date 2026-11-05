@@ -52,6 +52,7 @@ class Inspection(models.Model):
 	critical_issue_description = models.TextField(blank=True)
 	started_at = models.DateTimeField(null=True, blank=True)
 	completed_at = models.DateTimeField(null=True, blank=True)
+	demo_key_check_completed_at = models.DateTimeField(null=True, blank=True)
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)
 

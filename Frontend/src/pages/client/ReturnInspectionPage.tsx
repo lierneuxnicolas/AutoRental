@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AxiosError } from 'axios'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Check, LockKeyhole, MapPin, Smartphone } from 'lucide-react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
-import DepartureFlowProgress from '../../components/inspections/DepartureFlowProgress'
 import InspectionVehicleStateCard from '../../components/inspections/InspectionVehicleStateCard'
 import { MAX_VEHICLE_MILEAGE, validateInspectionVehicleState } from '../../components/inspections/inspectionVehicleState'
 import ReservationProgressBanner from '../../components/reservations/ReservationProgressBanner'
@@ -13,6 +13,7 @@ import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import {
+  completeDemoReturnKeyCheck,
   completeInspection,
   createReturnInspection,
   saveDepartureVehicleState,
@@ -66,6 +67,15 @@ const INTERIOR_PHOTO_SLOTS: InspectionStepPhotoSlot[] = [
   { key: 'interior_front_seats', label: 'Sieges avant', photoType: 'INTERIEUR', position: 1 },
   { key: 'interior_rear_seats', label: 'Sieges arriere', photoType: 'INTERIEUR', position: 2 },
   { key: 'interior_trunk', label: 'Coffre', photoType: 'AUTRE', position: 1 },
+]
+
+const REQUIRED_RETURN_PHOTO_TYPES: PhotoType[] = [
+  'AVANT',
+  'ARRIERE',
+  'COTE_GAUCHE',
+  'COTE_DROIT',
+  'INTERIEUR',
+  'TABLEAU_DE_BORD',
 ]
 
 const ANOMALY_PHOTO_SLOTS = [
@@ -298,7 +308,6 @@ function ReturnInspectionLayout({
   stepIndex,
   inspection,
   progress,
-  useDepartureProgressBanner = false,
   showInspectionSummary = true,
   allStepsDone = false,
 }: {
@@ -306,43 +315,28 @@ function ReturnInspectionLayout({
   stepIndex: number
   inspection: Inspection | null
   progress: number
-  useDepartureProgressBanner?: boolean
   showInspectionSummary?: boolean
   allStepsDone?: boolean
 }) {
-  const steps = [
-    { index: 1, label: 'Extérieur', status: 'done' as const },
-    { index: 2, label: 'Intérieur', status: 'future' as const },
-    { index: 3, label: 'État du véhicule', status: 'future' as const },
-    { index: 4, label: 'Confirmation', status: 'future' as const },
-  ] as Array<{ index: number; label: string; status: 'done' | 'active' | 'future' }>
-
-  if (allStepsDone) {
-    for (let i = 0; i < steps.length; i += 1) {
-      steps[i] = { ...steps[i], status: 'done' }
-    }
-  } else {
-    steps[stepIndex - 1] = { ...steps[stepIndex - 1], status: 'active' }
-    for (let i = 0; i < stepIndex - 1; i += 1) {
-      steps[i] = { ...steps[i], status: 'done' }
-    }
-  }
+  const stepLabels = ['Parking', 'Extérieur', 'Intérieur', 'État du véhicule', 'Verrouillage', 'Terminé']
+  const steps = stepLabels.map((label, index) => ({
+    order: index + 1,
+    label,
+    status: allStepsDone || index + 1 < stepIndex
+      ? 'done' as const
+      : index + 1 === stepIndex
+        ? 'active' as const
+        : 'future' as const,
+  }))
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="relative left-1/2 mb-6 w-[min(100vw-2rem,72rem)] -translate-x-1/2 sm:w-[min(100vw-3rem,72rem)] lg:w-[min(100vw-4rem,72rem)]">
-        {useDepartureProgressBanner ? (
-          <ReservationProgressBanner
-            className="mb-6 sm:mb-8"
-            steps={steps.map((step) => ({
-              order: step.index,
-              label: step.label,
-              status: step.status,
-            }))}
-          />
-        ) : (
-          <DepartureFlowProgress steps={steps} />
-        )}
+        <ReservationProgressBanner
+          ariaLabel="Progression de restitution"
+          className="mb-6 sm:mb-8"
+          steps={steps}
+        />
       </div>
 
       {inspection && showInspectionSummary ? (
@@ -372,7 +366,103 @@ function ReturnInspectionLayout({
 }
 
 export default function ReturnInspectionPage() {
+  return <ReturnInspectionParkingPage />
+}
+
+export function ReturnInspectionExteriorPage() {
   return <ReturnInspectionStepOne />
+}
+
+function ReturnInspectionParkingPage() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const [parkingConfirmationError, setParkingConfirmationError] = useState(false)
+  const reservationId = Number(id)
+  const isReservationIdValid = Number.isInteger(reservationId) && reservationId > 0
+  const reservationQuery = useQuery({
+    queryKey: ['client-reservation', reservationId],
+    queryFn: () => getReservationById(reservationId),
+    enabled: isReservationIdValid,
+  })
+
+  if (!isReservationIdValid) {
+    return (
+      <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+        <Alert variant="danger" title="Réservation invalide" message="L'identifiant de réservation est invalide." />
+      </section>
+    )
+  }
+
+  const reservation = reservationQuery.data
+  const parkingName = reservation?.vehicle.parking_name || 'Parking de dépôt'
+  const parkingAddress = reservation?.vehicle.parking_address
+
+  return (
+    <ReturnInspectionLayout stepIndex={1} inspection={reservation?.return_inspection ?? null} progress={0} showInspectionSummary={false}>
+      {reservationQuery.isLoading ? (
+        <Card>
+          <div className="flex items-center justify-center gap-3 text-sm text-slate-600">
+            <LoadingSpinner size="sm" aria-label="Chargement du parking" />
+            <p>Chargement des informations du parking...</p>
+          </div>
+        </Card>
+      ) : null}
+      {reservationQuery.isError ? (
+        <Alert variant="danger" title="Chargement impossible" message="Les informations de restitution n'ont pas pu être chargées. Veuillez réessayer." />
+      ) : null}
+      {reservation ? (
+        <div className="space-y-6">
+          <Card>
+            <div className="space-y-6 text-center">
+              <h1 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Parking</h1>
+              <div className="space-y-3">
+                <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#EDE9FE] text-[#6D28D9]">
+                  <MapPin aria-hidden="true" size={24} />
+                </span>
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold text-[#1F2937]">Parking de dépôt</h2>
+                  <p className="text-base font-medium text-slate-800">{parkingName}</p>
+                  <p className="text-sm leading-6 text-slate-600">
+                    {parkingAddress || 'Adresse du parking non renseignée.'}
+                  </p>
+                </div>
+              </div>
+              <p className="text-lg font-semibold leading-7 text-[#1F2937] sm:text-xl">
+                Le véhicule est-il stationné au parking de départ indiqué ci-dessous ?
+              </p>
+              {parkingConfirmationError ? (
+                <Alert
+                  variant="danger"
+                  message="Veuillez restituer le véhicule au parking de départ avant de continuer."
+                />
+              ) : null}
+            </div>
+          </Card>
+
+          <div className="flex flex-col-reverse justify-between gap-3 sm:flex-row">
+            <Button variant="secondary" className="w-full sm:w-auto" onClick={() => navigate('/client/reservations')}>
+              Retour à mes réservations
+            </Button>
+            <div className="flex flex-col-reverse gap-3 sm:flex-row">
+              <Button
+                variant="secondary"
+                className="w-full sm:w-auto"
+                onClick={() => setParkingConfirmationError(true)}
+              >
+                Non
+              </Button>
+              <Button
+                className="w-full bg-[#6D28D9] text-white hover:bg-[#5B21B6] focus-visible:ring-[#6D28D9] sm:w-auto"
+                onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/exterior`)}
+              >
+                Oui, continuer vers l'extérieur
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </ReturnInspectionLayout>
+  )
 }
 
 function ReturnInspectionStepOne() {
@@ -541,10 +631,9 @@ function ReturnInspectionStepOne() {
 
   return (
     <ReturnInspectionLayout
-      stepIndex={1}
+      stepIndex={2}
       inspection={inspection}
       progress={progress}
-      useDepartureProgressBanner
       showInspectionSummary={false}
     >
       {reservationLoadErrorMessage ? <Alert className="mb-4" variant="danger" title="Chargement impossible" message={reservationLoadErrorMessage} /> : null}
@@ -724,10 +813,9 @@ export function ReturnInspectionInteriorPage() {
 
   return (
     <ReturnInspectionLayout
-      stepIndex={2}
+      stepIndex={3}
       inspection={inspection}
       progress={Math.round((completedInteriorPhotos / INTERIOR_PHOTO_SLOTS.length) * 100)}
-      useDepartureProgressBanner
       showInspectionSummary={false}
     >
       {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
@@ -923,21 +1011,11 @@ export function ReturnInspectionVehicleStatePage() {
 
   const saveStateMutation = useMutation({
     mutationFn: (payload: DepartureVehicleStateRequest) => saveDepartureVehicleState(inspection!.id, payload),
-    onSuccess: async (response) => {
+    onSuccess: async () => {
       setGlobalError(null)
       await reservationQuery.refetch()
 
-      navigate(`/client/reservations/${reservationId}/return-inspection/confirmation`, {
-        state: {
-          inspectionId: inspection?.id,
-          mileage: mileageValue,
-          energyLevelPercent: energyValue,
-          hasDamage: Boolean(response.damage),
-          damageDescription: response.damage?.description ?? '',
-          criticalIssue: response.inspection.has_critical_issue ?? false,
-          criticalIssueDescription: response.inspection.critical_issue_description ?? '',
-        },
-      })
+      navigate(`/client/reservations/${reservationId}/return-inspection/lock`)
     },
     onError: (error) => {
       setGlobalError(toVehicleStateErrorMessage(error))
@@ -1000,10 +1078,9 @@ export function ReturnInspectionVehicleStatePage() {
 
   return (
     <ReturnInspectionLayout
-      stepIndex={3}
+      stepIndex={4}
       inspection={inspection}
       progress={50}
-      useDepartureProgressBanner
       showInspectionSummary={false}
     >
       {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
@@ -1064,10 +1141,17 @@ export function ReturnInspectionVehicleStatePage() {
   )
 }
 
+export function ReturnInspectionLockPage() {
+  return <ReturnInspectionCompletionPage isLockStep />
+}
+
 export function ReturnInspectionConfirmationPage() {
+  return <ReturnInspectionCompletionPage isLockStep={false} />
+}
+
+function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean }) {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const location = useLocation()
   const reservationId = Number(id)
   const isReservationIdValid = Number.isInteger(reservationId) && reservationId > 0
   const reservationQuery = useQuery({
@@ -1079,26 +1163,15 @@ export function ReturnInspectionConfirmationPage() {
   const inspection = reservationQuery.data?.return_inspection ?? null
   const reservation = reservationQuery.data
   const [globalError, setGlobalError] = useState<string | null>(null)
+  const [demoKeyCheckResult, setDemoKeyCheckResult] = useState<{ inspectionId: number, completedAt: string } | null>(null)
   const [invoiceDownloadError, setInvoiceDownloadError] = useState<string | null>(null)
   const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false)
-  const finalizationAttemptRef = useRef<{ reservationId: number | null, attempted: boolean }>({ reservationId: null, attempted: false })
+  const finalizationInFlightRef = useRef(false)
+  const keyCheckInFlightRef = useRef(false)
   const vehicleLabel = reservation ? `${reservation.vehicle.brand} ${reservation.vehicle.model_name}` : 'Non disponible'
-
-  const state = location.state as {
-    inspectionId?: number
-    mileage?: number | null
-    energyLevelPercent?: number | null
-    hasDamage?: boolean | null
-    damageDescription?: string
-    damageSeverity?: Severity | null
-    criticalIssue?: boolean | null
-    criticalIssueDescription?: string
-    comments?: string
-  } | undefined
-
-  const effectiveMileage = state?.mileage ?? inspection?.mileage ?? null
-  const effectiveEnergyLevelPercent = state?.energyLevelPercent ?? inspection?.energy_level_percent ?? null
-  const isInspectionCompleted = inspection?.status === 'TERMINE'
+  const effectiveMileage = inspection?.mileage ?? null
+  const effectiveEnergyLevelPercent = inspection?.energy_level_percent ?? null
+  const isInspectionCompleted = reservation?.status === 'TERMINEE' && inspection?.status === 'TERMINE'
 
   const currentVehicleQuery = useQuery({
     queryKey: ['client-return-confirmation-vehicle', reservation?.vehicle.id],
@@ -1142,6 +1215,29 @@ export function ReturnInspectionConfirmationPage() {
     },
   })
 
+  const demoKeyCheckMutation = useMutation({
+    mutationFn: async () => {
+      if (!inspection) {
+        throw new Error("L'état des lieux de retour est introuvable.")
+      }
+
+      return completeDemoReturnKeyCheck(inspection.id)
+    },
+    onSuccess: async (checkedInspection) => {
+      if (checkedInspection.demo_key_check_completed_at) {
+        setDemoKeyCheckResult({
+          inspectionId: checkedInspection.id,
+          completedAt: checkedInspection.demo_key_check_completed_at,
+        })
+      }
+      setGlobalError(null)
+      await reservationQuery.refetch()
+    },
+    onError: (error) => {
+      setGlobalError(toErrorMessage(error))
+    },
+  })
+
   const completeMutation = useMutation({
     mutationFn: async () => {
       if (!inspection || effectiveMileage == null || effectiveEnergyLevelPercent == null) {
@@ -1153,73 +1249,93 @@ export function ReturnInspectionConfirmationPage() {
         energy_level_percent: effectiveEnergyLevelPercent,
       }
 
-      if (state?.comments && state.comments.trim().length > 0) {
-        payload.comments = state.comments.trim()
-      }
-      if (state?.criticalIssue !== null && state?.criticalIssue !== undefined) {
-        payload.has_critical_issue = state.criticalIssue
-      }
-      if (state?.criticalIssue) {
-        payload.critical_issue_description = state.criticalIssueDescription?.trim() ?? ''
+      if (inspection.comments?.trim()) {
+        payload.comments = inspection.comments.trim()
       }
 
       if (inspection.status === 'TERMINE') {
-        return reservationQuery.refetch()
+        throw new Error('Cette inspection a déjà été terminée.')
       }
 
-      // The backend already locks the vehicle as part of completing the return inspection,
-      // so no separate lock call is needed here (it previously caused a spurious "already locked" error).
-      await completeInspection(inspection.id, payload)
-      return reservationQuery.refetch()
+      return completeInspection(inspection.id, payload)
     },
-    onSuccess: () => {
+    onSuccess: async (completedInspection) => {
+      if (completedInspection.status !== 'TERMINE') {
+        setGlobalError("Le verrouillage du véhicule n'a pas été confirmé.")
+        return
+      }
+
       setGlobalError(null)
+      const refreshedReservation = await reservationQuery.refetch()
+      if (refreshedReservation.data?.status !== 'TERMINEE' || refreshedReservation.data.return_inspection?.status !== 'TERMINE') {
+        setGlobalError("La confirmation de fin de location n'a pas pu être vérifiée. Veuillez réessayer.")
+        return
+      }
+
+      navigate(`/client/reservations/${reservationId}/return-inspection/confirmation`, { replace: true })
     },
-    onError: (error) => {
+    onError: async (error) => {
       const axiosError = error as AxiosError<ApiErrorPayload>
       const errorCode = axiosError.response?.data?.code
       if (errorCode === 'INSPECTION_ALREADY_COMPLETED' || errorCode === 'ALREADY_LOCKED') {
-        // The restitution already succeeded (e.g. a duplicate finalization attempt): reload
-        // the reservation silently instead of surfacing a false error.
-        setGlobalError(null)
-        void reservationQuery.refetch()
-        return
+        const refreshedReservation = await reservationQuery.refetch()
+        if (refreshedReservation.data?.status === 'TERMINEE' && refreshedReservation.data.return_inspection?.status === 'TERMINE') {
+          navigate(`/client/reservations/${reservationId}/return-inspection/confirmation`, { replace: true })
+          return
+        }
       }
       setGlobalError(toErrorMessage(error))
     },
   })
 
   useEffect(() => {
-    if (!inspection) {
-      return
+    if (isLockStep && isInspectionCompleted) {
+      navigate(`/client/reservations/${reservationId}/return-inspection/confirmation`, { replace: true })
     }
-    if (inspection.status === 'TERMINE' || completeMutation.isPending) {
-      return
-    }
-    if (effectiveMileage == null || effectiveEnergyLevelPercent == null) {
+  }, [isInspectionCompleted, isLockStep, navigate, reservationId])
+
+  const returnPhotoTypes = new Set(inspection?.photos.map((photo) => photo.photo_type) ?? [])
+  const missingReturnPhotoTypes = REQUIRED_RETURN_PHOTO_TYPES
+    .filter((photoType) => !returnPhotoTypes.has(photoType))
+  const canLockVehicle = Boolean(
+    inspection
+    && reservation?.status === 'EN_COURS'
+    && inspection.status !== 'TERMINE'
+    && effectiveMileage !== null
+    && effectiveEnergyLevelPercent !== null
+    && missingReturnPhotoTypes.length === 0,
+  )
+  const isDemoKeyCheckCompleted = Boolean(
+    inspection?.demo_key_check_completed_at
+    || (inspection && demoKeyCheckResult?.inspectionId === inspection.id && demoKeyCheckResult.completedAt),
+  )
+  const canFinalizeReturn = canLockVehicle && isDemoKeyCheckCompleted
+
+  const handleDemoKeyCheck = () => {
+    if (!canLockVehicle || demoKeyCheckMutation.isPending || keyCheckInFlightRef.current) {
       return
     }
 
-    if (finalizationAttemptRef.current.reservationId !== reservationId) {
-      finalizationAttemptRef.current = { reservationId, attempted: false }
-    }
-    if (finalizationAttemptRef.current.attempted) {
+    keyCheckInFlightRef.current = true
+    demoKeyCheckMutation.mutate(undefined, {
+      onSettled: () => {
+        keyCheckInFlightRef.current = false
+      },
+    })
+  }
+
+  const handleLockVehicle = () => {
+    if (!canFinalizeReturn || completeMutation.isPending || finalizationInFlightRef.current) {
       return
     }
 
-    finalizationAttemptRef.current.attempted = true
-    void completeMutation.mutateAsync()
-  }, [
-    completeMutation,
-    effectiveEnergyLevelPercent,
-    effectiveMileage,
-    inspection,
-    reservationId,
-  ])
-
-  const isFinalizing = !isInspectionCompleted
-    && (reservationQuery.isLoading || reservationQuery.isFetching || completeMutation.isPending)
-  const showFinalizationError = Boolean(globalError) && !isFinalizing && !isInspectionCompleted
+    finalizationInFlightRef.current = true
+    completeMutation.mutate(undefined, {
+      onSettled: () => {
+        finalizationInFlightRef.current = false
+      },
+    })
+  }
 
   const handleDownloadInvoice = async () => {
     setInvoiceDownloadError(null)
@@ -1252,35 +1368,157 @@ export function ReturnInspectionConfirmationPage() {
 
   return (
     <ReturnInspectionLayout
-      stepIndex={4}
+      stepIndex={isLockStep || !isInspectionCompleted ? 5 : 6}
       inspection={inspection}
-      progress={100}
-      useDepartureProgressBanner
+      progress={isLockStep ? 80 : 100}
       showInspectionSummary={false}
-      allStepsDone
+      allStepsDone={!isLockStep && isInspectionCompleted}
     >
-      {showFinalizationError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError ?? ''} /> : null}
-      {!isInspectionCompleted ? (
+      {isLockStep && globalError ? (
+        <Alert className="mb-4" variant="danger" title="Verrouillage impossible" message={globalError} />
+      ) : null}
+
+      {reservationQuery.isLoading || (isLockStep && reservationQuery.isFetching) ? (
         <Card>
           <div className="flex items-center justify-center gap-3 py-4 text-sm text-slate-600">
-            {isFinalizing ? (
-              <>
-                <LoadingSpinner size="sm" aria-label="Finalisation de la restitution" />
-                <p>Finalisation de la restitution...</p>
-              </>
-            ) : null}
+            <LoadingSpinner size="sm" aria-label="Chargement de la restitution" />
+            <p>Chargement des informations de restitution...</p>
           </div>
         </Card>
-      ) : (
+      ) : null}
+
+      {reservationQuery.isError ? (
+        <Alert variant="danger" title="Chargement impossible" message="Les informations de la restitution n'ont pas pu être chargées." />
+      ) : null}
+
+      {isLockStep && !reservationQuery.isLoading && !reservationQuery.isError && !isInspectionCompleted ? (
+        <div className="mx-auto w-full max-w-xl space-y-4">
+          {inspection && !canLockVehicle ? (
+            <Alert
+              variant="warning"
+              title="État des lieux incomplet"
+              message={
+                missingReturnPhotoTypes.length > 0
+                  ? 'Les photos obligatoires de l’état des lieux doivent être enregistrées avant le verrouillage.'
+                  : 'Enregistrez le kilométrage final et le niveau de carburant ou de batterie pour continuer.'
+              }
+            />
+          ) : null}
+          {!inspection && reservation ? (
+            <Alert variant="warning" title="État des lieux introuvable" message="Reprenez l’état des lieux de retour avant de verrouiller le véhicule." />
+          ) : null}
+
+          <Card>
+            <h1 className="text-center text-2xl font-semibold text-[#1F2937] sm:text-3xl">
+              Verrouillage du véhicule
+            </h1>
+            <p className="mt-2 text-center text-base leading-7 text-slate-600">
+              Veuillez replacer la clé dans son boîtier situé dans la boîte à gants.
+            </p>
+
+            <div className="relative mx-auto flex h-72 w-full max-w-sm items-center justify-center overflow-hidden sm:h-80">
+              <div aria-hidden="true" className="absolute h-64 w-64 rounded-full border border-violet-200 sm:h-72 sm:w-72" />
+              <div aria-hidden="true" className="absolute h-52 w-52 rounded-full border-2 border-violet-300 sm:h-60 sm:w-60" />
+              <div aria-hidden="true" className="absolute h-40 w-40 rounded-full border-2 border-violet-400 sm:h-48 sm:w-48" />
+              <div className="relative flex h-48 w-32 flex-col items-center rounded-[2rem] border-[6px] border-[#5B21B6] bg-[#F5F3FF] px-3 py-4 shadow-[0_20px_50px_rgba(91,33,182,0.22)]">
+                <span className="mb-3 h-1.5 w-10 rounded-full bg-[#A78BFA]" />
+                <div className="flex flex-1 items-center justify-center">
+                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[#6D28D9] text-white shadow-lg">
+                    <LockKeyhole aria-hidden="true" size={36} />
+                  </div>
+                </div>
+                <Smartphone aria-hidden="true" className="absolute -bottom-3 -right-4 rounded-full bg-white p-2 text-[#6D28D9] shadow-md" size={36} />
+              </div>
+            </div>
+
+            <div className="mx-auto flex w-full max-w-sm flex-col gap-3">
+              <Button
+                className={`w-full ${isDemoKeyCheckCompleted
+                  ? 'bg-[#16A34A] text-white hover:bg-[#15803D] focus-visible:ring-[#16A34A]'
+                  : 'bg-[#6D28D9] text-white hover:bg-[#5B21B6] focus-visible:ring-[#6D28D9]'}`}
+                disabled={!canLockVehicle || demoKeyCheckMutation.isPending || isDemoKeyCheckCompleted}
+                onClick={handleDemoKeyCheck}
+              >
+                {demoKeyCheckMutation.isPending ? (
+                  <span className="flex items-center gap-2">
+                    <LoadingSpinner size="sm" aria-label="Vérification de démonstration en cours" />
+                    Vérification en cours...
+                  </span>
+                ) : isDemoKeyCheckCompleted ? (
+                  <>
+                    <Check aria-hidden="true" size={18} />
+                    Clé détectée
+                  </>
+                ) : (
+                  'Détecter la clé'
+                )}
+              </Button>
+              <p className="text-center text-xs text-slate-500">
+                Vérification de démonstration : aucun capteur physique n’est utilisé.
+              </p>
+              <Button
+                className={`w-full ${canFinalizeReturn
+                  ? 'bg-[#6D28D9] text-white hover:bg-[#5B21B6] focus-visible:ring-[#6D28D9]'
+                  : 'cursor-not-allowed bg-slate-300 text-slate-600 hover:bg-slate-300 focus-visible:ring-slate-300'}`}
+                disabled={!canFinalizeReturn || completeMutation.isPending}
+                onClick={handleLockVehicle}
+              >
+                {completeMutation.isPending ? (
+                  <span className="flex items-center gap-2">
+                    <LoadingSpinner size="sm" aria-label="Verrouillage en cours" />
+                    Verrouillage en cours...
+                  </span>
+                ) : (
+                  <>
+                    <LockKeyhole aria-hidden="true" size={18} />
+                    Verrouiller le véhicule
+                  </>
+                )}
+              </Button>
+            </div>
+          </Card>
+
+          <div className="flex justify-center">
+            <Button
+              variant="secondary"
+              className="w-full max-w-sm"
+              onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/vehicle-state`)}
+            >
+              Retour à l’état du véhicule
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {!isLockStep && !reservationQuery.isLoading && !reservationQuery.isError && !isInspectionCompleted ? (
+        <Card>
+          <div className="space-y-4 text-center">
+            <Alert
+              variant="warning"
+              title="Restitution non terminée"
+              message="La confirmation finale s’affichera après la confirmation du verrouillage."
+            />
+            <Button
+              className="w-full bg-[#6D28D9] text-white hover:bg-[#5B21B6] focus-visible:ring-[#6D28D9] sm:w-auto"
+              onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/lock`)}
+            >
+              Continuer vers le verrouillage
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+
+      {!isLockStep && isInspectionCompleted ? (
         <div className="space-y-6">
           <Card>
             <div className="flex flex-col items-center text-center">
               <div className="mb-5 flex h-28 w-28 items-center justify-center rounded-full bg-[#16A34A] shadow-[0_16px_40px_rgba(22,163,74,0.3)]">
-                <span className="text-5xl font-bold text-white">✓</span>
+                <Check aria-hidden="true" className="text-white" size={60} strokeWidth={3} />
               </div>
-              <h2 className="text-3xl font-semibold text-[#0F172A] sm:text-4xl">Location terminée avec succès !</h2>
-              <p className="mt-3 text-base text-slate-700">Merci d'avoir choisi GetaCar.</p>
-              <p className="text-base text-slate-700">Nous espérons vous revoir bientôt.</p>
+              <h1 className="text-3xl font-semibold text-[#0F172A] sm:text-4xl">Location terminée</h1>
+              <p className="mt-3 text-base text-slate-700">
+                Votre véhicule a bien été verrouillé. La location est maintenant terminée.
+              </p>
             </div>
           </Card>
 
@@ -1313,7 +1551,11 @@ export function ReturnInspectionConfirmationPage() {
 
               <div className="rounded-2xl bg-[#F8FAFC] px-4 py-3 text-left lg:text-right">
                 <p className="text-sm font-medium text-slate-600">Location terminée le</p>
-                <p className="mt-1 text-base font-semibold text-[#0F172A]">{reservation ? formatDateTime(reservation.end_at) : '-'}</p>
+                <p className="mt-1 text-base font-semibold text-[#0F172A]">
+                  {reservation?.actual_return_at || inspection?.completed_at
+                    ? formatDateTime(reservation?.actual_return_at ?? inspection!.completed_at!)
+                    : 'Date réelle indisponible'}
+                </p>
               </div>
             </div>
           </Card>
@@ -1342,16 +1584,16 @@ export function ReturnInspectionConfirmationPage() {
               ) : invoiceQuery.isLoading && !invoiceQuery.data ? (
                 'Preparation de la facture...'
               ) : (
-                'Telecharger ma facture'
+                'Télécharger ma facture'
               )}
             </Button>
 
             <Button variant="secondary" className="w-full sm:w-auto" onClick={() => navigate('/client/reservations')}>
-              Retour a mes reservations
+              Retour à mes réservations
             </Button>
           </div>
         </div>
-      )}
+      ) : null}
     </ReturnInspectionLayout>
   )
 }

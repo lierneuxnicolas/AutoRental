@@ -83,6 +83,7 @@ api.interceptors.response.use(
           const headers = originalRequest.headers ?? new AxiosHeaders()
           headers.set('Authorization', `Bearer ${token}`)
           originalRequest.headers = headers
+          originalRequest._retry = true
           resolve(api(originalRequest))
         })
       })

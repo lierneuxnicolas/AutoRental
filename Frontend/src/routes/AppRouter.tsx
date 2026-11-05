@@ -38,7 +38,9 @@ import DepartureInspectionVehicleStatePage from '../pages/client/DepartureInspec
 import DepartureInspectionConfirmationPage from '../pages/client/DepartureInspectionConfirmationPage'
 import ReturnInspectionPage, {
   ReturnInspectionConfirmationPage,
+  ReturnInspectionExteriorPage,
   ReturnInspectionInteriorPage,
+  ReturnInspectionLockPage,
   ReturnInspectionVehicleStatePage,
 } from '../pages/client/ReturnInspectionPage'
 import ClientInvoicesPage from '../pages/client/ClientInvoicesPage'
@@ -378,12 +380,20 @@ export default function AppRouter() {
               element={<ReturnInspectionPage />}
             />
             <Route
+              path="reservations/:id/return-inspection/exterior"
+              element={<ReturnInspectionExteriorPage />}
+            />
+            <Route
               path="reservations/:id/return-inspection/interior"
               element={<ReturnInspectionInteriorPage />}
             />
             <Route
               path="reservations/:id/return-inspection/vehicle-state"
               element={<ReturnInspectionVehicleStatePage />}
+            />
+            <Route
+              path="reservations/:id/return-inspection/lock"
+              element={<ReturnInspectionLockPage />}
             />
             <Route
               path="reservations/:id/return-inspection/confirmation"

@@ -161,6 +161,7 @@ class ReservationInspectionDetailSerializer(serializers.ModelSerializer):
             "energy_level_percent",
             "completed_at",
             "started_at",
+            "demo_key_check_completed_at",
             "photos",
         ]
 

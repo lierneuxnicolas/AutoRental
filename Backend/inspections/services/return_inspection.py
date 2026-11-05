@@ -139,6 +139,44 @@ def _assert_return_completion_eligibility(*, inspection: Inspection, mileage: in
             "Des dommages doivent etre enregistres lorsqu'un probleme est signale.",
         )
 
+    if inspection.demo_key_check_completed_at is None:
+        _raise_return_error(
+            "DEMO_KEY_CHECK_REQUIRED",
+            "La verification de demonstration de la cle doit etre effectuee avant le verrouillage.",
+        )
+
+
+def complete_demo_return_key_check(*, inspection: Inspection, requested_by) -> Inspection:
+    with transaction.atomic():
+        inspection_locked = (
+            Inspection.objects.select_for_update()
+            .select_related("reservation", "reservation__client", "reservation__client__user")
+            .get(pk=inspection.pk)
+        )
+        reservation_locked = Reservation.objects.select_for_update().get(pk=inspection_locked.reservation_id)
+
+        _assert_request_context(reservation=reservation_locked, requested_by=requested_by)
+
+        if inspection_locked.inspection_type != Inspection.Type.FINAL:
+            _raise_return_error(
+                "INVALID_INSPECTION_TYPE",
+                "La verification de cle concerne uniquement une inspection de retour.",
+            )
+        if inspection_locked.status == Inspection.Status.TERMINE:
+            _raise_return_error("INSPECTION_ALREADY_COMPLETED", "Cette inspection est deja terminee.")
+        if reservation_locked.status != Reservation.Status.EN_COURS:
+            _raise_return_error(
+                "INVALID_RESERVATION_STATUS",
+                "La reservation doit etre EN_COURS pour verifier la cle.",
+                details={"current_status": reservation_locked.status},
+            )
+
+        if inspection_locked.demo_key_check_completed_at is None:
+            inspection_locked.demo_key_check_completed_at = timezone.now()
+            inspection_locked.save(update_fields=["demo_key_check_completed_at", "updated_at"])
+
+        return inspection_locked
+
 
 def _notify_once(*, user, notification_type: str, title: str, message: str, related_object_type: str, related_object_id: int):
     existing = user.notifications.filter(

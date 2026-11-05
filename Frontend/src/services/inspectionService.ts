@@ -36,6 +36,13 @@ export async function completeInspection(
   return data
 }
 
+export async function completeDemoReturnKeyCheck(
+  inspectionId: number | string,
+): Promise<Inspection> {
+  const { data } = await api.post<Inspection>(`/inspections/${inspectionId}/demo-return-key-check/`)
+  return data
+}
+
 export async function uploadInspectionPhoto(
   inspectionId: number | string,
   payload: UploadInspectionPhotoRequest,

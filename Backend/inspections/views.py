@@ -24,7 +24,12 @@ from inspections.services.departure import (
 	create_departure_inspection,
 	save_departure_vehicle_state,
 )
-from inspections.services.return_inspection import complete_return_inspection, create_return_inspection, save_return_vehicle_state
+from inspections.services.return_inspection import (
+	complete_demo_return_key_check,
+	complete_return_inspection,
+	create_return_inspection,
+	save_return_vehicle_state,
+)
 from reservations.models import Reservation
 from vehicles.constants import MAX_VEHICLE_MILEAGE
 
@@ -57,6 +62,7 @@ class InspectionSummarySerializer(serializers.ModelSerializer):
 			"critical_issue_description",
 			"started_at",
 			"completed_at",
+			"demo_key_check_completed_at",
 			"completed_by",
 			"created_at",
 			"updated_at",
@@ -396,6 +402,53 @@ class DepartureInspectionCompleteView(generics.GenericAPIView):
 			return Response(detail, status=status.HTTP_400_BAD_REQUEST)
 
 		return Response(InspectionSummarySerializer(completed_inspection).data, status=status.HTTP_200_OK)
+
+
+class DemoReturnKeyCheckView(generics.GenericAPIView):
+	permission_classes = [IsAuthenticated, IsClient, IsReservationOwner]
+	serializer_class = InspectionSummarySerializer
+	lookup_field = "id"
+	lookup_url_kwarg = "pk"
+
+	def get_queryset(self):
+		if getattr(self, "swagger_fake_view", False):
+			return Inspection.objects.none()
+
+		return Inspection.objects.select_related(
+			"reservation",
+			"reservation__client",
+			"reservation__client__user",
+		).filter(reservation__client__user=self.request.user)
+
+	def get_object(self):
+		inspection = get_object_or_404(self.get_queryset(), pk=self.kwargs[self.lookup_url_kwarg])
+		self.check_object_permissions(self.request, inspection.reservation)
+		return inspection
+
+	@extend_schema(
+		tags=["Inspections"],
+		description="Enregistre la verification de cle simulée pour la demonstration; aucun materiel n'est pilote.",
+		responses={
+			200: InspectionSummarySerializer,
+			400: ErrorDetailResponseSerializer,
+			401: ErrorDetailResponseSerializer,
+			403: ErrorDetailResponseSerializer,
+			404: ErrorDetailResponseSerializer,
+		},
+	)
+	def post(self, request, *args, **kwargs):
+		try:
+			inspection = complete_demo_return_key_check(
+				inspection=self.get_object(),
+				requested_by=request.user,
+			)
+		except DepartureInspectionError as exc:
+			detail = {"code": exc.code, "message": exc.message}
+			if exc.details:
+				detail["details"] = exc.details
+			return Response(detail, status=status.HTTP_400_BAD_REQUEST)
+
+		return Response(InspectionSummarySerializer(inspection).data, status=status.HTTP_200_OK)
 
 
 class DepartureVehicleStateUpsertView(generics.GenericAPIView):

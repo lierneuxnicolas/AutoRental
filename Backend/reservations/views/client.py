@@ -1,4 +1,6 @@
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -36,7 +38,10 @@ from reservations.serializers.reservation import (
 )
 from reservations.services import ReservationCreationError, create_draft_reservation
 from reservations.services.cancellation import CancellationError, build_cancellation_preview, cancel_reservation
-from reservations.services.expiration import expire_missed_reservations, expire_stale_draft_reservations
+from reservations.services.expiration import (
+    expire_missed_reservations,
+    expire_stale_draft_reservations,
+)
 from vehicles.models import Vehicle
 
 
@@ -214,6 +219,54 @@ class ReservationClientListCreateView(generics.ListCreateAPIView):
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+
+
+class ClientDashboardReservationsView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated, IsClient]
+    serializer_class = ReservationListDetailSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        expire_stale_draft_reservations()
+        expire_missed_reservations()
+
+        now = timezone.now()
+        current_reservations = Q(status__in=[Reservation.Status.EN_COURS, Reservation.Status.A_CONTROLER])
+        confirmed_in_progress = Q(
+            status=Reservation.Status.CONFIRMEE,
+            start_at__lte=now,
+            end_at__gte=now,
+        )
+        upcoming_reservations = Q(
+            status__in=[
+                Reservation.Status.BROUILLON,
+                Reservation.Status.EN_ATTENTE_CAUTION,
+                Reservation.Status.EN_ATTENTE_PAIEMENT,
+                Reservation.Status.CONFIRMEE,
+                Reservation.Status.REAFFECTATION_REQUIRED,
+            ],
+            start_at__gt=now,
+        )
+
+        return (
+            Reservation.objects.filter(client__user=self.request.user)
+            .filter(current_reservations | confirmed_in_progress | upcoming_reservations)
+            .select_related(
+                "client",
+                "client__user",
+                "vehicle",
+                "vehicle__brand",
+                "vehicle__category",
+                "vehicle__parking_space",
+                "vehicle__parking_space__parking",
+                "vehicle_access",
+            )
+            .prefetch_related("inspections")
+            .order_by("start_at", "id")
+        )
 
 
 class ReservationClientDetailView(generics.RetrieveAPIView):
