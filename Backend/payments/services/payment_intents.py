@@ -18,13 +18,13 @@ from payments.models import Deposit, Payment
 from reservations.models import Reservation
 from reservations.services.pricing import PricingError, calculate_price_simulation
 from vehicles.models import Vehicle
-from vehicles.services import BOOKABLE_VEHICLE_STATUSES, get_blocking_reservation_filter
+from vehicles.services import AvailabilityValidationError, is_vehicle_available
 
 ALLOWED_PAYMENT_METHOD_TYPES = ["card", "bancontact"]
 PAYMENT_INTENT_CONFIGURATION_VERSION = "v2"
 
 
-@dataclass(frozen=True)
+@dataclass
 class PaymentIntentError(ValueError):
     code: str
     message: str
@@ -82,11 +82,18 @@ def _assert_owner_and_role(*, reservation: Reservation, requested_by) -> None:
 def _assert_profile_still_valid(reservation: Reservation) -> None:
     eligibility = validate_client_for_reservation(
         client=reservation.client,
-        reservation_start_date=reservation.start_at.date(),
-        reservation_end_date=reservation.end_at.date(),
+        reservation_start_date=timezone.localtime(reservation.start_at).date(),
+        reservation_end_date=timezone.localtime(reservation.end_at).date(),
     )
     if eligibility.is_eligible:
         return
+
+    if "IDENTITY_CARD_BIRTH_DATE_UNVERIFIED" in eligibility.errors:
+        _raise_payment_intent_error("PROFILE_NOT_ELIGIBLE", "Faites vérifier votre date de naissance par un gestionnaire.", details={"eligibility_errors": list(eligibility.errors)})
+    if "IDENTITY_CARD_BIRTH_DATE_MISMATCH" in eligibility.errors:
+        _raise_payment_intent_error("PROFILE_NOT_ELIGIBLE", "La date de naissance du profil diffère de celle vérifiée. Corrigez votre profil et contactez le gestionnaire.", details={"eligibility_errors": list(eligibility.errors)})
+    if "UNDER_MINIMUM_AGE" in eligibility.errors:
+        _raise_payment_intent_error("PROFILE_NOT_ELIGIBLE", "Vous devez avoir au moins 21 ans au début de la location.", details={"eligibility_errors": list(eligibility.errors)})
 
     if {"IDENTITY_CARD_EXPIRED", "DRIVING_LICENSE_EXPIRED"} & set(eligibility.errors):
         _raise_payment_intent_error(
@@ -116,32 +123,16 @@ def _assert_vehicle_compatible_with_license(reservation: Reservation) -> None:
 
 
 def _assert_vehicle_still_available(reservation: Reservation) -> None:
-    vehicle = reservation.vehicle
-    allowed_statuses = set(BOOKABLE_VEHICLE_STATUSES) | {Vehicle.Status.RESERVE}
-
-    if not (
-        vehicle.is_active
-        and vehicle.brand.is_active
-        and vehicle.category.is_active
-        and vehicle.status in allowed_statuses
-    ):
-        _raise_payment_intent_error(
-            "RESERVATION_UNAVAILABLE",
-            "Le vehicule n'est plus disponible pour cette reservation.",
+    try:
+        available = is_vehicle_available(
+            vehicle=reservation.vehicle,
+            start=reservation.start_at,
+            end=reservation.end_at,
+            reservation_queryset=Reservation.objects.exclude(pk=reservation.pk),
         )
-
-    has_conflict = (
-        Reservation.objects.filter(
-            get_blocking_reservation_filter(),
-            vehicle_id=reservation.vehicle_id,
-            start_at__lt=reservation.end_at,
-            end_at__gt=reservation.start_at,
-        )
-        .exclude(pk=reservation.pk)
-        .exists()
-    )
-
-    if has_conflict:
+    except AvailabilityValidationError as exc:
+        _raise_payment_intent_error("RESERVATION_UNAVAILABLE", str(exc))
+    if not available:
         _raise_payment_intent_error(
             "RESERVATION_UNAVAILABLE",
             "Le vehicule n'est plus disponible pour cette reservation.",
@@ -177,6 +168,7 @@ def _recalculate_payable_amount(reservation: Reservation) -> Decimal:
             start_at=reservation.start_at,
             end_at=reservation.end_at,
             insurance_type=reservation.insurance_type,
+            is_daily_rate_booking=reservation.is_daily_rate_booking,
         )
     except PricingError as exc:
         _raise_payment_intent_error(
@@ -309,6 +301,15 @@ def create_or_reuse_payment_intent(
         Vehicle.objects.select_for_update().get(pk=reservation_locked.vehicle_id)
 
         _assert_owner_and_role(reservation=reservation_locked, requested_by=requested_by)
+        if reservation_locked.status not in {
+            Reservation.Status.BROUILLON,
+            Reservation.Status.EN_ATTENTE_CAUTION,
+            Reservation.Status.EN_ATTENTE_PAIEMENT,
+        }:
+            _raise_payment_intent_error(
+                "RESERVATION_STATUS_NOT_COMPATIBLE",
+                "Le statut de cette réservation ne permet pas de préparer un paiement.",
+            )
         _assert_profile_still_valid(reservation_locked)
         _assert_vehicle_compatible_with_license(reservation_locked)
         _assert_vehicle_still_available(reservation_locked)

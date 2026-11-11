@@ -201,7 +201,7 @@ class ProfileEndpointsTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(ClientProfile.objects.filter(user=legacy_user).exists())
 
-    def test_patch_rejects_date_of_birth_when_under_21(self):
+    def test_patch_accepts_declarative_date_of_birth_when_under_21(self):
         self._authenticate("profile-client@example.com", "StrongPass123!")
         today = timezone.localdate()
         underage_birth_date = self._subtract_years(today, 20)
@@ -212,11 +212,9 @@ class ProfileEndpointsTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["date_of_birth"][0],
-            "Vous devez avoir au moins 21 ans pour utiliser GetaCar.",
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.date_of_birth, underage_birth_date)
 
     def test_patch_accepts_date_of_birth_when_exactly_21(self):
         self._authenticate("profile-client@example.com", "StrongPass123!")

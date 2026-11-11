@@ -10,6 +10,25 @@ import type {
   ReservationListQueryParams,
 } from '../types/reservation'
 
+export type PaymentCheck = { valid: boolean; message: string; state?: 'pending' }
+export type PaymentChecks = {
+  account: PaymentCheck
+  identity: PaymentCheck
+  license: PaymentCheck
+  compatibility: PaymentCheck
+  availability: PaymentCheck
+}
+
+export async function getPaymentChecks(payload: {
+  vehicle_id: number
+  start_at: string
+  end_at: string
+  reservation_id?: number
+}): Promise<PaymentChecks> {
+  const { data } = await api.post<PaymentChecks>('/reservations/payment-checks/', payload)
+  return data
+}
+
 export async function getReservations(params?: ReservationListQueryParams): Promise<PaginatedReservationListResponse> {
   const { data } = await api.get<PaginatedReservationListResponse>('/reservations/', { params })
   return data

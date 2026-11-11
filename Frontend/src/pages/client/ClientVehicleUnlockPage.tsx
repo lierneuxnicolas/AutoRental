@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import axios from 'axios'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -10,12 +10,6 @@ import UnlockDetectionIllustration from '../../components/vehicle/UnlockDetectio
 import { unlockVehicle } from '../../services/inspectionService'
 import { getReservationById } from '../../services/reservationService'
 import { getVehicleById } from '../../services/vehicleService'
-import type { ReservationStatus } from '../../types/reservation'
-import { getUnlockWindowAvailability } from '../../utils/reservationActionRules'
-
-type UnlockAvailability = {
-  isEnabled: boolean
-}
 
 type ApiErrorPayload = {
   code?: string
@@ -50,11 +44,6 @@ function toErrorMessage(error: unknown): string {
   return 'Une erreur est survenue. Veuillez reessayer.'
 }
 
-function getUnlockAvailability(status: ReservationStatus | undefined, startAt: string, endAt: string): UnlockAvailability {
-  const { isEnabled } = getUnlockWindowAvailability(status, startAt, endAt)
-  return { isEnabled }
-}
-
 export default function ClientVehicleUnlockPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -65,6 +54,7 @@ export default function ClientVehicleUnlockPage() {
     queryKey: ['client-reservation', reservationId],
     queryFn: () => getReservationById(reservationId),
     enabled: isReservationIdValid,
+    refetchInterval: 30000,
   })
 
   const vehicleId = reservationQuery.data?.vehicle.id
@@ -75,17 +65,8 @@ export default function ClientVehicleUnlockPage() {
     enabled: typeof vehicleId === 'number' && vehicleId > 0,
   })
 
-  const unlockAvailability = useMemo(() => {
-    if (!reservationQuery.data) {
-      return { isEnabled: false }
-    }
-
-    return getUnlockAvailability(
-      reservationQuery.data.status,
-      reservationQuery.data.start_at,
-      reservationQuery.data.end_at,
-    )
-  }, [reservationQuery.data])
+  const availability = reservationQuery.data?.unlock_availability
+  const canUnlock = Boolean(availability?.allowed || availability?.code === 'ALREADY_UNLOCKED')
 
   const [isAlreadyUnlocked, setIsAlreadyUnlocked] = useState(false)
 
@@ -152,7 +133,11 @@ export default function ClientVehicleUnlockPage() {
       </div>
 
       <div className="mx-auto flex max-w-xl flex-col items-center gap-5">
-        <UnlockDetectionIllustration isDetected={unlockAvailability.isEnabled} />
+        <UnlockDetectionIllustration isDetected={canUnlock} />
+
+        {!canUnlock && !isAlreadyUnlocked ? (
+          <Alert variant="warning" title="Déverrouillage indisponible" message={availability?.message ?? 'La disponibilité ne peut pas être vérifiée. Actualisez la page.'} />
+        ) : null}
 
         {isAlreadyUnlocked ? (
           <div className="w-full max-w-md rounded-2xl border border-[#86EFAC] bg-[#DCFCE7] px-4 py-3 text-center text-sm font-semibold text-[#166534]">
@@ -166,14 +151,14 @@ export default function ClientVehicleUnlockPage() {
 
         <Button
           className="h-[52px] w-full max-w-md border-0 bg-[#F97316] text-base text-white hover:bg-[#EA580C] focus-visible:ring-[#F97316]"
-          disabled={(!unlockAvailability.isEnabled && !isAlreadyUnlocked) || unlockMutation.isPending}
+          disabled={(!canUnlock && !isAlreadyUnlocked) || unlockMutation.isPending}
           onClick={() => {
             if (isAlreadyUnlocked) {
               navigate(`/client/reservations/${reservationId}/departure-inspection`)
               return
             }
 
-            void unlockMutation.mutateAsync()
+            unlockMutation.mutate()
           }}
         >
           {isAlreadyUnlocked

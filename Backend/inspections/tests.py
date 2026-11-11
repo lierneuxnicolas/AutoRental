@@ -1943,6 +1943,77 @@ class ReturnInspectionFlowTests(TestCase):
         self.assertEqual(damage.description, "Rayure pare-chocs")
         self.assertEqual(list(damage.evidence_photos.values_list("id", flat=True)), [photo.id])
 
+    def test_late_return_is_recorded_without_financial_closure(self):
+        self.reservation.end_at = timezone.now() - timedelta(hours=2)
+        self.reservation.save(update_fields=["end_at", "updated_at"])
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.EN_COURS,
+        )
+        self._create_required_photos(final_inspection)
+        access = self._create_active_unlocked_vehicle_access()
+        access.valid_from = self.reservation.start_at
+        access.valid_until = self.reservation.end_at
+        access.save(update_fields=["valid_from", "valid_until"])
+        self.api.force_authenticate(self.client_user)
+        self._complete_demo_key_check(final_inspection)
+        response = self.api.post(
+            self._complete_url(final_inspection.id),
+            {"mileage": 1300, "energy_level_percent": 70},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.reservation.refresh_from_db()
+        final_inspection.refresh_from_db()
+        self.assertGreater(final_inspection.completed_at, self.reservation.end_at)
+        self.assertEqual(self.reservation.status, Reservation.Status.A_CONTROLER)
+        self.assertFalse(hasattr(self.reservation, "invoice"))
+
+    def test_return_full_flow_is_persisted_and_safe_to_retry(self):
+        self.api.force_authenticate(self.client_user)
+        created = self.api.post(self._create_return_url(self.reservation.id), {}, format="json")
+        self.assertEqual(created.status_code, status.HTTP_200_OK)
+        inspection_id = created.data["inspection"]["id"]
+        final_inspection = Inspection.objects.get(pk=inspection_id)
+        self._create_required_photos(final_inspection)
+        access = self._create_active_unlocked_vehicle_access()
+        state = self.api.post(self._state_url(inspection_id), {
+            "mileage": 1203, "energy_level_percent": 70, "anomaly_present": False,
+        }, format="json")
+        self.assertEqual(state.status_code, status.HTTP_200_OK)
+        detail_url = reverse("reservations:reservation-detail", kwargs={"pk": self.reservation.id})
+        before = self.api.get(detail_url).data
+        self.assertEqual(before["return_inspection"]["mileage"], 1203)
+        self.assertEqual(before["return_inspection"]["energy_level_percent"], 70)
+        self.assertEqual(before["status"], Reservation.Status.EN_COURS)
+        self.assertFalse(before["invoice_pdf_available"])
+        self._complete_demo_key_check(final_inspection)
+        payload = {"mileage": 1203, "energy_level_percent": 70}
+        with self.captureOnCommitCallbacks(execute=True):
+            first = self.api.post(self._complete_url(inspection_id), payload, format="json")
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        final_inspection.refresh_from_db()
+        returned_at = final_inspection.completed_at
+        with self.captureOnCommitCallbacks(execute=True):
+            second = self.api.post(self._complete_url(inspection_id), payload, format="json")
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        final_inspection.refresh_from_db()
+        access.refresh_from_db()
+        after = self.api.get(detail_url).data
+        self.assertEqual(after["status"], Reservation.Status.A_CONTROLER)
+        self.assertEqual(after["return_inspection"]["status"], Inspection.Status.TERMINE)
+        self.assertTrue(after["return_inspection"]["return_access_secured"])
+        self.assertEqual(final_inspection.completed_at, returned_at)
+        self.assertEqual((final_inspection.mileage, final_inspection.energy_level_percent), (1203, 70))
+        self.assertEqual(final_inspection.photos.count(), 6)
+        self.assertFalse(access.is_active)
+        self.assertEqual(access.status, VehicleAccess.Status.REVOKED)
+        self.assertEqual(LockingLog.objects.filter(reservation=self.reservation, action=LockingLog.Action.ACCESS_REVOKED).count(), 1)
+        self.assertFalse(after["invoice_pdf_available"])
+        self.assertFalse(hasattr(self.reservation, "invoice"))
+        self.assertEqual(Inspection.objects.filter(reservation=self.reservation, inspection_type=Inspection.Type.FINAL).count(), 1)
+
     def test_completes_return_inspection_and_applies_effects(self):
         final_inspection = Inspection.objects.create(
             reservation=self.reservation,
@@ -1983,7 +2054,8 @@ class ReturnInspectionFlowTests(TestCase):
         self.assertEqual(final_inspection.energy_level_percent, 70)
         self.assertEqual(final_inspection.comments, "Retour effectue")
         self.assertIsNotNone(final_inspection.completed_at)
-        self.assertEqual(self.reservation.status, Reservation.Status.TERMINEE)
+        self.assertEqual(self.reservation.status, Reservation.Status.A_CONTROLER)
+        self.assertFalse(hasattr(self.reservation, "invoice"))
         self.assertEqual(self.vehicle.status, Vehicle.Status.DISPONIBLE)
         self.assertEqual(self.vehicle.mileage, 1300)
 
@@ -2060,11 +2132,13 @@ class ReturnInspectionFlowTests(TestCase):
         self.vehicle.refresh_from_db()
 
         self.assertEqual(final_inspection.status, Inspection.Status.TERMINE)
-        self.assertEqual(self.reservation.status, Reservation.Status.TERMINEE)
+        self.assertEqual(self.reservation.status, Reservation.Status.A_CONTROLER)
         self.assertEqual(self.vehicle.status, Vehicle.Status.DISPONIBLE)
 
         access = VehicleAccess.objects.get(reservation=self.reservation)
         self.assertEqual(access.lock_state, VehicleAccess.LockState.LOCKED)
+        self.assertEqual(access.status, VehicleAccess.Status.REVOKED)
+        self.assertFalse(access.is_active)
 
         self.assertFalse(
             LockingLog.objects.filter(
@@ -2073,6 +2147,70 @@ class ReturnInspectionFlowTests(TestCase):
                 result=LockingLog.Result.SUCCESS,
             ).exists()
         )
+
+    def test_completed_return_with_active_locked_access_can_be_recovered_idempotently(self):
+        returned_at = timezone.now() - timedelta(minutes=5)
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.TERMINE,
+            mileage=1300,
+            energy_level_percent=95,
+            completed_at=returned_at,
+            completed_by=self.client_user,
+            demo_key_check_completed_at=returned_at,
+        )
+        self._create_required_photos(final_inspection)
+        self.reservation.status = Reservation.Status.A_CONTROLER
+        self.reservation.save(update_fields=["status", "updated_at"])
+        access = self._create_active_unlocked_vehicle_access()
+        access.lock_state = VehicleAccess.LockState.LOCKED
+        access.save(update_fields=["lock_state"])
+        self.api.force_authenticate(self.client_user)
+        detail_url = reverse("reservations:reservation-detail", kwargs={"pk": self.reservation.id})
+        before = self.api.get(detail_url)
+        self.assertFalse(before.data["return_inspection"]["return_access_secured"])
+        payload = {"mileage": 1300, "energy_level_percent": 95}
+        first = self.api.post(self._complete_url(final_inspection.id), payload, format="json")
+        second = self.api.post(self._complete_url(final_inspection.id), payload, format="json")
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        access.refresh_from_db()
+        final_inspection.refresh_from_db()
+        self.assertEqual(access.status, VehicleAccess.Status.REVOKED)
+        self.assertFalse(access.is_active)
+        self.assertEqual(final_inspection.completed_at, returned_at)
+        self.assertEqual(self.api.get(detail_url).data["return_inspection"]["return_access_secured"], True)
+        self.assertEqual(LockingLog.objects.filter(reservation=self.reservation, action=LockingLog.Action.ACCESS_REVOKED).count(), 1)
+        self.assertFalse(hasattr(self.reservation, "invoice"))
+
+    def test_retrying_saved_vehicle_state_does_not_duplicate_damage(self):
+        final_inspection = Inspection.objects.create(
+            reservation=self.reservation,
+            inspection_type=Inspection.Type.FINAL,
+            status=Inspection.Status.EN_COURS,
+        )
+        self.api.force_authenticate(self.client_user)
+        payload = {
+            "mileage": 1300, "energy_level_percent": 80,
+            "anomaly_present": True, "anomaly_description": "Rayure",
+            "anomaly_severity": Damage.Severity.ACCEPTABLE, "photo_ids": [],
+        }
+        first = self.api.post(self._state_url(final_inspection.id), payload, format="json")
+        second = self.api.post(self._state_url(final_inspection.id), payload, format="json")
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(final_inspection.damages.count(), 1)
+        corrected = dict(payload, mileage=1301)
+        response = self.api.post(self._state_url(final_inspection.id), corrected, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        final_inspection.refresh_from_db()
+        self.assertEqual(final_inspection.mileage, 1301)
+        self.assertEqual(final_inspection.damages.count(), 1)
+        detail = self.api.get(reverse("reservations:reservation-detail", kwargs={"pk": self.reservation.id}))
+        self.assertEqual(detail.data["return_inspection"]["mileage"], 1301)
+        self.assertEqual(detail.data["return_inspection"]["energy_level_percent"], 80)
+        self.assertEqual(len(detail.data["return_inspection"]["damages"]), 1)
 
     def test_refuses_second_completion_without_duplicate_notifications(self):
         final_inspection = Inspection.objects.create(

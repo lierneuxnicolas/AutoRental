@@ -29,23 +29,9 @@ class PriceSimulationRequestSerializer(serializers.Serializer):
         },
     )
     insurance_type = serializers.ChoiceField(
-        choices=["STANDARD", "DUO", "OMNIUM"],
+        choices=["STANDARD", "COMPLEMENTAIRE"],
         required=False,
     )
-
-    @staticmethod
-    def _validate_hour_precision(value):
-        if value.minute != 0:
-            raise serializers.ValidationError(
-                "Les heures de reservation doivent etre a l'heure pleine (minutes = 00)."
-            )
-        return value
-
-    def validate_start_at(self, value):
-        return self._validate_hour_precision(value)
-
-    def validate_end_at(self, value):
-        return self._validate_hour_precision(value)
 
     def to_internal_value(self, data):
         if hasattr(data, "keys"):
@@ -89,6 +75,7 @@ class PriceSimulationRequestSerializer(serializers.Serializer):
 class PriceSimulationResponseSerializer(serializers.Serializer):
     vehicle_id = serializers.IntegerField()
     duration_hours = serializers.DecimalField(max_digits=10, decimal_places=2)
+    billed_days = serializers.IntegerField()
     rental_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
     insurance_type = serializers.CharField()
     insurance_amount = serializers.DecimalField(max_digits=10, decimal_places=2)

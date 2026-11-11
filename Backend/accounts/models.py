@@ -162,10 +162,6 @@ class ClientProfile(models.Model):
 		if date_of_birth > today:
 			raise ValidationError("La date de naissance ne peut pas etre dans le futur.")
 
-		youngest_allowed = cls._subtract_years(today, cls.MINIMUM_AGE_YEARS)
-		if date_of_birth > youngest_allowed:
-			raise ValidationError("Vous devez avoir au moins 21 ans pour utiliser GetaCar.")
-
 		oldest_allowed = cls._subtract_years(today, cls.MAXIMUM_AGE_YEARS)
 		if date_of_birth < oldest_allowed:
 			raise ValidationError("L'âge maximum autorisé pour une location GetACar est de 90 ans.")
@@ -230,6 +226,7 @@ class ClientDocument(models.Model):
 	document_number = models.CharField(max_length=120)
 	file = models.FileField(upload_to="client_documents/")
 	expiration_date = models.DateField(null=True, blank=True)
+	verified_date_of_birth = models.DateField(null=True, blank=True)
 	driving_license_category = models.CharField(
 		max_length=3,
 		choices=DrivingLicenseCategory.choices,
@@ -308,3 +305,10 @@ class ClientDocument(models.Model):
 
 	def __str__(self) -> str:
 		return f"{self.document_type} - {self.client.user.email}"
+
+
+class DocumentVerificationChange(models.Model):
+	document = models.ForeignKey(ClientDocument, on_delete=models.PROTECT, related_name="verification_changes")
+	manager = models.ForeignKey(User, on_delete=models.PROTECT, related_name="document_verification_changes")
+	changes = models.JSONField()
+	created_at = models.DateTimeField(auto_now_add=True)

@@ -7,6 +7,7 @@ from .availability import (
     get_available_vehicles,
     is_vehicle_available,
     validate_availability_period,
+    validate_daily_rental_period,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "get_available_vehicles",
     "is_vehicle_available",
     "validate_availability_period",
+    "validate_daily_rental_period",
 ]

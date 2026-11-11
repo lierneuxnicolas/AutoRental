@@ -5,8 +5,9 @@ from rest_framework import serializers
 from accounts.models import ClientDocument
 from inspections.services.departure import MANDATORY_PHOTO_TYPES
 from reservations.services.cancellation import get_cancellable_statuses
+from reservations.services.pricing import FIXED_DEPOSIT_AMOUNT
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory, VehicleEquipment
-from vehicles.services import AvailabilityValidationError, validate_availability_period
+from vehicles.services import AvailabilityValidationError, validate_daily_rental_period
 
 
 class VehiclePhotoPublicSerializer(serializers.Serializer):
@@ -38,34 +39,13 @@ class VehicleAvailabilityQuerySerializer(serializers.Serializer):
 		}
 	)
 
-	@staticmethod
-	def _validate_hour_precision(value):
-		if value.minute != 0:
-			raise serializers.ValidationError(
-				"Les heures de reservation doivent etre a l'heure pleine (minutes = 00)."
-			)
-		return value
-
-	def validate_start(self, value):
-		return self._validate_hour_precision(value)
-
-	def validate_end(self, value):
-		return self._validate_hour_precision(value)
-
 	def validate(self, attrs):
-		minimum_hours = self.context.get("minimum_hours")
 		try:
-			period = validate_availability_period(
-				start=attrs["start"],
-				end=attrs["end"],
-				minimum_hours=minimum_hours,
-			)
+			period = validate_daily_rental_period(start=attrs["start"], end=attrs["end"])
 		except AvailabilityValidationError as exc:
-			if exc.code in {"END_BEFORE_START", "DURATION_TOO_SHORT"}:
-				raise serializers.ValidationError({"end": [str(exc)]})
-			if exc.code == "START_IN_PAST":
+			if exc.code in {"START_IN_PAST", "START_NOT_AT_FIXED_HOUR"}:
 				raise serializers.ValidationError({"start": [str(exc)]})
-			raise serializers.ValidationError({"non_field_errors": [str(exc)]})
+			raise serializers.ValidationError({"end": [str(exc)]})
 		return period
 
 
@@ -186,13 +166,10 @@ class VehiclePublicDetailSerializer(VehiclePublicSerializer):
 		)
 	)
 	def get_conditions(self, obj: Vehicle):
-		category = getattr(obj, "category", None)
-		minimum_deposit = getattr(category, "minimum_deposit", None)
-
 		return {
 			"included_km_per_day": obj.included_km_per_day,
 			"extra_km_price": obj.extra_km_price,
-			"minimum_deposit": minimum_deposit,
+			"minimum_deposit": FIXED_DEPOSIT_AMOUNT,
 			"minimum_age": obj.minimum_age,
 			"required_license": obj.required_license,
 			"reservation_profile_validation": {

@@ -9,17 +9,17 @@ import { getVehicleById, simulatePrice } from '../../services/vehicleService'
 import type { PriceSimulationResponse } from '../../types/simulation'
 import type { PublicVehicle } from '../../types/vehicle'
 import { resolveMediaUrl } from '../../utils/media'
+import { formatVehicleDailyRate } from '../../utils/vehiclePrice'
 
 type InsuranceOption = {
-  key: 'standard' | 'duo' | 'omnium'
+  key: 'standard' | 'complementary'
   label: string
   description: string
 }
 
 const INSURANCE_DAILY_PRICE: Record<InsuranceOption['key'], number> = {
   standard: 0,
-  duo: 8,
-  omnium: 25,
+  complementary: 10,
 }
 
 const insuranceOptions: InsuranceOption[] = [
@@ -29,14 +29,9 @@ const insuranceOptions: InsuranceOption[] = [
     description: 'Assurance de base',
   },
   {
-    key: 'duo',
-    label: 'CONDUCTEUR +',
-    description: 'Assurance de base',
-  },
-  {
-    key: 'omnium',
-    label: 'OMNIUM',
-    description: 'Protection renforcée',
+    key: 'complementary',
+    label: 'COMPLÉMENTAIRE',
+    description: 'Franchise réduite',
   },
 ]
 
@@ -82,7 +77,11 @@ function formatDailyInsurancePrice(value: number): string {
   return `+ ${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(value)} €/jour`
 }
 
-function formatDurationHours(value: string | number): string {
+function formatDurationLabel(value: string | number, billedDays?: number): string {
+  if (typeof billedDays === 'number' && billedDays > 0) {
+    return `${billedDays} jour${billedDays > 1 ? 's' : ''}`
+  }
+
   const parsedValue = Number(value)
   if (!Number.isFinite(parsedValue)) {
     return `${value} heures`
@@ -110,7 +109,11 @@ function toFiniteNumber(value: unknown): number | null {
   return parsedValue
 }
 
-function computeInsuranceDays(durationHours: string | number): number | null {
+function computeInsuranceDays(durationHours: string | number, billedDays?: number): number | null {
+  if (typeof billedDays === 'number' && billedDays > 0) {
+    return billedDays
+  }
+
   const parsedHours = toFiniteNumber(durationHours)
 
   if (parsedHours === null || parsedHours <= 0) {
@@ -133,7 +136,7 @@ export default function SimulationPage() {
   const [simulation, setSimulation] = useState<PriceSimulationResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [selectedInsurance, setSelectedInsurance] = useState<InsuranceOption['key'] | null>(null)
+  const [selectedInsurance, setSelectedInsurance] = useState<InsuranceOption['key'] | null>('standard')
 
   useEffect(() => {
     let isMounted = true
@@ -249,7 +252,7 @@ export default function SimulationPage() {
   const selectedInsuranceOption = insuranceOptions.find((option) => option.key === selectedInsurance) ?? null
 
   const baseRentalAmount = simulation ? toFiniteNumber(simulation.rental_amount) : null
-  const insuranceDays = simulation ? computeInsuranceDays(simulation.duration_hours) : null
+  const insuranceDays = simulation ? computeInsuranceDays(simulation.duration_hours, simulation.billed_days) : null
   const selectedInsuranceDailyPrice = selectedInsurance ? INSURANCE_DAILY_PRICE[selectedInsurance] : null
   const selectedInsuranceAmount = insuranceDays !== null && selectedInsuranceDailyPrice !== null
     ? insuranceDays * selectedInsuranceDailyPrice
@@ -259,52 +262,27 @@ export default function SimulationPage() {
   const insuranceSummaryVehicleLabel = vehicle ? `${vehicle.brand} ${vehicle.model_name}` : 'Véhicule indisponible'
   const insuranceSummaryStartLabel = formatDateTimeLabel(startParam ?? '')
   const insuranceSummaryEndLabel = formatDateTimeLabel(endParam ?? '')
-  const insuranceSummaryDurationLabel = simulation ? formatDurationHours(simulation.duration_hours) : 'Durée indisponible'
+  const insuranceSummaryDurationLabel = simulation
+    ? formatDurationLabel(simulation.duration_hours, simulation.billed_days)
+    : 'Durée indisponible'
 
   const insuranceCardDetails: Record<InsuranceOption['key'], {
-    intro: string
     priceLabel: string
     features: string[]
-    footer: string
-    description: string
-    badge?: string
   }> = {
     standard: {
-      intro: 'Assurance de base',
-      priceLabel: 'Incluse',
+      priceLabel: 'Incluse dans le prix',
       features: [
-        '✓ Couverture responsabilité civile',
-        '✓ Dommages au véhicule (franchise standard)',
-        '✓ Vol et incendie',
-        '✓ Assistance 24/7',
+        'Assurance de base obligatoire.',
+        'Franchise standard applicable en cas de dommage couvert.',
       ],
-      footer: 'Idéale pour réduire le coût',
-      description: 'Une protection essentielle incluse dans votre location.',
     },
-    duo: {
-      intro: 'Assurance de base',
-      priceLabel: formatDailyInsurancePrice(INSURANCE_DAILY_PRICE.duo),
+    complementary: {
+      priceLabel: formatDailyInsurancePrice(INSURANCE_DAILY_PRICE.complementary),
       features: [
-        '✓ Tout ce qui est inclus dans Standard',
-        '✓ 2 conducteurs autorisés',
-        '✓ Conduite partagée en toute tranquillité',
-        '✓ Idéal pour les couples ou amis',
+        'Assurance de base incluse.',
+        'Franchise réduite en cas de dommage couvert.',
       ],
-      footer: 'Idéale si vous partagez la conduite',
-      description: 'Ajoutez un second conducteur sans stress ni frais supplémentaires.',
-    },
-    omnium: {
-      intro: 'Protection renforcée',
-      priceLabel: formatDailyInsurancePrice(INSURANCE_DAILY_PRICE.omnium),
-      features: [
-        '✓ Tout ce qui est inclus dans Conducteur +',
-        '✓ Franchise réduite en cas de dommage',
-        '✓ Protection maximale du véhicule',
-        '✓ Assistance premium 24/7',
-      ],
-      footer: 'Idéale pour plus de tranquillité',
-      description: 'Moins de franchise, plus de sérénité en cas d’imprévu.',
-      badge: '★ Recommandée',
     },
   }
 
@@ -375,8 +353,8 @@ export default function SimulationPage() {
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2563EB]">{vehicle.category}</p>
                     <h2 className="mt-1 text-2xl font-semibold tracking-tight text-[#1F2937]">{vehicle.brand} {vehicle.model_name}</h2>
-                    <p className="mt-3 text-sm text-slate-600">Prix journalier</p>
-                    <p className="text-xl font-semibold text-[#1F2937]">{formatCurrency(vehicle.category_daily_rate)}</p>
+                    <p className="mt-3 text-xl font-semibold text-[#1F2937]">{formatVehicleDailyRate(vehicle.category_daily_rate)}</p>
+                    <p className="mt-1 text-xs text-slate-500">TVA de 21 % comprise</p>
                   </div>
 
                   <Button variant="secondary" className="w-full md:w-auto" onClick={() => navigate(`/vehicles/${vehicleIdParam}`)}>
@@ -400,7 +378,7 @@ export default function SimulationPage() {
                     </div>
                     <div className="flex items-start justify-between gap-4 border-b border-orange-100 pb-3">
                       <span className="text-sm text-slate-600">Durée</span>
-                      <span className="text-sm font-medium text-[#1F2937]">{formatDurationHours(simulation.duration_hours)}</span>
+                      <span className="text-sm font-medium text-[#1F2937]">{formatDurationLabel(simulation.duration_hours, simulation.billed_days)}</span>
                     </div>
                     <div className="flex items-start justify-between gap-4 border-b border-orange-100 pb-3">
                       <span className="text-sm text-slate-600">Prix de base</span>
@@ -453,7 +431,7 @@ export default function SimulationPage() {
                       </div>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-3">
+                    <div className="grid gap-4 md:grid-cols-2">
                     {insuranceOptions.map((option) => {
                       const inputId = `insurance-${option.key}`
                       const isSelected = selectedInsurance === option.key
@@ -480,27 +458,8 @@ export default function SimulationPage() {
                             className="sr-only"
                           />
 
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-500">{option.label}</p>
-                              <p className="mt-2 text-sm font-medium text-slate-700">{cardDetails.intro}</p>
-                              {option.key === 'duo' ? <p className="mt-1 text-sm text-slate-600">- 1 conducteur additionnel</p> : null}
-                              {option.key === 'omnium' ? <p className="mt-1 text-sm text-slate-600">Franchise réduite</p> : null}
-                            </div>
-
-                            {cardDetails.badge ? (
-                              <span className="inline-flex shrink-0 items-center rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-[#6D28D9]">
-                                {cardDetails.badge}
-                              </span>
-                            ) : null}
-                          </div>
-
-                          <div className="mt-5 flex items-end justify-between gap-4">
-                            <div>
-                              <p className="text-sm text-slate-600">{cardDetails.description}</p>
-                              <p className="mt-1 text-base font-semibold text-[#1F2937]">{cardDetails.priceLabel}</p>
-                            </div>
-                          </div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-500">{option.label}</p>
+                          <p className="mt-2 text-xl font-semibold text-[#1F2937]">{cardDetails.priceLabel}</p>
 
                           <ul className="mt-5 space-y-3 text-sm text-slate-700">
                             {cardDetails.features.map((feature) => (
@@ -512,10 +471,6 @@ export default function SimulationPage() {
                               </li>
                             ))}
                           </ul>
-
-                          <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50/70 px-4 py-3">
-                            <p className="text-sm font-semibold text-[#1F2937]">{cardDetails.footer}</p>
-                          </div>
                         </label>
                       )
                     })}

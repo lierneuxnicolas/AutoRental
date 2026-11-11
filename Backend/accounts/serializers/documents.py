@@ -8,7 +8,8 @@ from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 from rest_framework import serializers
 
-from accounts.models import ClientDocument
+from accounts.models import ClientDocument, ClientProfile
+from accounts.validators import validate_person_name
 from accounts.services.profile_status import (
     get_effective_document_status,
     get_effective_profile_status,
@@ -155,21 +156,23 @@ class ClientDocumentCreateSerializer(serializers.ModelSerializer):
         safe_ext = ext.lower()
         uploaded_file.name = f"{uuid.uuid4().hex}{safe_ext}"
 
-        document = ClientDocument.objects.create(
-            client=client_profile,
-            document_type=validated_data["document_type"],
-            document_number=validated_data["document_number"],
-            file=uploaded_file,
-            expiration_date=validated_data["expiration_date"],
-            driving_license_transmission_declared=validated_data.get(
-                "driving_license_transmission_declared"
-            ),
-            status=ClientDocument.Status.EN_ATTENTE,
-            rejection_reason="",
-            validated_at=None,
-            validated_by=None,
-            is_active=True,
-        )
+        with transaction.atomic():
+            ClientProfile.objects.select_for_update().get(pk=client_profile.pk)
+            document = ClientDocument.objects.create(
+                client=client_profile,
+                document_type=validated_data["document_type"],
+                document_number=validated_data["document_number"],
+                file=uploaded_file,
+                expiration_date=validated_data["expiration_date"],
+                driving_license_transmission_declared=validated_data.get(
+                    "driving_license_transmission_declared"
+                ),
+                status=ClientDocument.Status.EN_ATTENTE,
+                rejection_reason="",
+                validated_at=None,
+                validated_by=None,
+                is_active=True,
+            )
         recalculate_profile_status(client_profile)
 
         notification_message = (
@@ -217,6 +220,7 @@ class ManagerClientDocumentListSerializer(serializers.ModelSerializer):
             "document_type",
             "document_number",
             "expiration_date",
+            "driving_license_transmission",
             "status",
             "is_active",
             "uploaded_at",
@@ -252,6 +256,7 @@ class ManagerClientDocumentDetailSerializer(serializers.ModelSerializer):
             "document_number",
             "file",
             "expiration_date",
+            "verified_date_of_birth",
             "driving_license_category",
             "driving_license_transmission",
             "driving_license_transmission_declared",
@@ -296,8 +301,19 @@ class ManagerRejectDocumentSerializer(serializers.Serializer):
 
 
 class ManagerValidateDocumentSerializer(serializers.Serializer):
+    first_name = serializers.CharField(required=False, max_length=150)
+    last_name = serializers.CharField(required=False, max_length=150)
+    document_number = serializers.CharField(required=True, max_length=120, allow_blank=False)
+    expiration_date = serializers.DateField(required=True, allow_null=False)
+    verified_date_of_birth = serializers.DateField(required=False, allow_null=True)
     driving_license_transmission = serializers.ChoiceField(
         choices=ClientDocument.DrivingLicenseTransmission.choices,
         required=False,
         allow_null=True,
     )
+
+    def validate_first_name(self, value):
+        return validate_person_name(value, label="prénom")
+
+    def validate_last_name(self, value):
+        return validate_person_name(value, label="nom")

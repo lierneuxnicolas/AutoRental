@@ -21,6 +21,7 @@ from inspections.serializers import InspectionDamageReadSerializer, InspectionPh
 from interventions.models import Intervention
 from interventions.serializers import InterventionManagementResponseSerializer
 from reservations.models import Reservation
+from reservations.services.return_charges import calculate_return_charges
 from vehicles.models import Vehicle
 from vehicles.serializers.public import VehiclePhotoPublicSerializer
 
@@ -244,6 +245,8 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
     previous_reservation = serializers.SerializerMethodField()
     vehicle_reference_inspection = serializers.SerializerMethodField()
     invoice_id = serializers.SerializerMethodField()
+    invoice_pdf_available = serializers.SerializerMethodField()
+    return_charges_estimate = serializers.SerializerMethodField()
 
     def get_needs_review(self, obj):
         return _reservation_needs_review(obj)
@@ -253,6 +256,10 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
             return obj.invoice.id
         except Reservation.invoice.RelatedObjectDoesNotExist:
             return None
+
+    def get_invoice_pdf_available(self, obj):
+        from reservations.serializers.reservation import ReservationListDetailSerializer
+        return ReservationListDetailSerializer().get_invoice_pdf_available(obj)
 
     class Meta:
         model = Reservation
@@ -270,11 +277,17 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
             "deposit_status",
             "departure_inspection",
             "return_inspection",
+            "return_charges_estimate",
+            "return_delay_fee",
+            "return_fuel_fee",
+            "return_charges_confirmed_at",
+            "return_charges_confirmed_by",
             "interventions",
             "needs_review",
             "previous_reservation",
             "vehicle_reference_inspection",
             "invoice_id",
+            "invoice_pdf_available",
             "created_at",
             "confirmed_at",
             "cancelled_at",
@@ -317,6 +330,23 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
         if inspection is None:
             return None
         return ReservationManagementInspectionSerializer(inspection, context=self.context).data
+
+    def get_return_charges_estimate(self, obj):
+        departure = self._get_inspection(obj, Inspection.Type.INITIAL)
+        returned = self._get_inspection(obj, Inspection.Type.FINAL)
+        if returned is None or returned.status != Inspection.Status.TERMINE or returned.completed_at is None:
+            return None
+        charges = calculate_return_charges(
+            scheduled_return=obj.end_at,
+            actual_return=returned.completed_at,
+            departure_fuel=departure.energy_level_percent if departure and departure.status == Inspection.Status.TERMINE else None,
+            return_fuel=returned.energy_level_percent,
+        )
+        return {
+            "delay_seconds": charges.delay.total_seconds(),
+            "delay_fee": str(charges.delay_fee),
+            "fuel_fee": str(charges.fuel_fee) if charges.fuel_fee is not None else None,
+        }
 
     def get_previous_reservation(self, obj):
         """Return the closest earlier reservation of the same vehicle, if any.

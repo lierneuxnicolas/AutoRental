@@ -7,8 +7,9 @@ import Input from '../../components/ui/Input'
 import { VehicleCard } from '../../components/vehicles'
 import { getAvailableVehicles } from '../../services/vehicleService'
 import type { PublicVehicle } from '../../types/vehicle'
+import { buildRentalDateTime, getFollowingDate, getMinimumStartDate, getRentalClock, RETURN_CLOCK, toDateValue } from '../../utils/rentalPeriod'
 
-function toDateTimeLocalValue(value: string): string {
+function toDateInputValue(value: string): string {
   if (!value) {
     return ''
   }
@@ -19,13 +20,10 @@ function toDateTimeLocalValue(value: string): string {
     return ''
   }
 
-  const year = parsedValue.getFullYear()
-  const month = `${parsedValue.getMonth() + 1}`.padStart(2, '0')
-  const day = `${parsedValue.getDate()}`.padStart(2, '0')
-  const hours = `${parsedValue.getHours()}`.padStart(2, '0')
-  const minutes = `${parsedValue.getMinutes()}`.padStart(2, '0')
-
-  return `${year}-${month}-${day}T${hours}:${minutes}`
+  if (/^\d{4}-\d{2}-\d{2}(?:$|T\d{2}:\d{2}(?::\d{2})?$)/.test(value)) {
+    return value.slice(0, 10)
+  }
+  return toDateValue(parsedValue)
 }
 
 function toApiDateTime(value: string): string {
@@ -33,14 +31,8 @@ function toApiDateTime(value: string): string {
     return ''
   }
 
-  const normalizedValue = value.length === 16 ? `${value}:00` : value
-  const parsedValue = new Date(normalizedValue)
-
-  if (Number.isNaN(parsedValue.getTime())) {
-    return ''
-  }
-
-  return parsedValue.toISOString()
+  const normalizedValue = value.length === 10 ? `${value}T10:00:00` : value.length === 16 ? `${value}:00` : value
+  return Number.isNaN(new Date(normalizedValue).getTime()) ? '' : normalizedValue
 }
 
 function formatDateTimeLabel(value: string): string {
@@ -53,6 +45,7 @@ function formatDateTimeLabel(value: string): string {
   return parsedValue.toLocaleString('fr-FR', {
     dateStyle: 'medium',
     timeStyle: 'short',
+    timeZone: 'Europe/Brussels',
   })
 }
 
@@ -67,8 +60,8 @@ export default function SearchPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [resultCount, setResultCount] = useState<number | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
-  const [startInput, setStartInput] = useState(() => toDateTimeLocalValue(searchParams.get('start') ?? ''))
-  const [endInput, setEndInput] = useState(() => toDateTimeLocalValue(searchParams.get('end') ?? ''))
+  const [startInput, setStartInput] = useState(() => toDateInputValue(searchParams.get('start') ?? ''))
+  const [endInput, setEndInput] = useState(() => toDateInputValue(searchParams.get('end') ?? ''))
   const [locationInput, setLocationInput] = useState(() => searchParams.get('location') ?? '')
   const vehicleId = searchParams.get('vehicleId')
 
@@ -94,6 +87,20 @@ export default function SearchPage() {
         setIsLoading(false)
         setErrorMessage('Veuillez renseigner des dates pour rechercher des véhicules disponibles.')
         return
+      }
+
+      const startDay = toDateInputValue(startParam)
+      const endDay = toDateInputValue(endParam)
+      if (startDay && endDay && startDay >= getMinimumStartDate()) {
+        const canonicalStart = buildRentalDateTime(startDay, getRentalClock(startDay))
+        const canonicalEnd = buildRentalDateTime(endDay, RETURN_CLOCK)
+        if (startParam !== canonicalStart || endParam !== canonicalEnd) {
+          const nextParams = new URLSearchParams(searchParams)
+          nextParams.set('start', canonicalStart)
+          nextParams.set('end', canonicalEnd)
+          setSearchParams(nextParams, { replace: true })
+          return
+        }
       }
 
       const startIso = toApiDateTime(startParam)
@@ -155,7 +162,7 @@ export default function SearchPage() {
     return () => {
       isMounted = false
     }
-  }, [searchParams])
+  }, [searchParams, setSearchParams])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -170,11 +177,16 @@ export default function SearchPage() {
       return
     }
 
-    const startIso = toApiDateTime(normalizedStart)
-    const endIso = toApiDateTime(normalizedEnd)
+    const startIso = toApiDateTime(buildRentalDateTime(normalizedStart, getRentalClock(normalizedStart)))
+    const endIso = toApiDateTime(buildRentalDateTime(normalizedEnd, RETURN_CLOCK))
 
     if (!startIso || !endIso) {
       setFormError('Les dates saisies sont invalides.')
+      return
+    }
+
+    if (startInput < getMinimumStartDate()) {
+      setFormError('La date de départ ne peut pas être dans le passé.')
       return
     }
 
@@ -263,18 +275,22 @@ export default function SearchPage() {
             />
 
             <Input
-              label="Date et heure de début"
-              type="datetime-local"
+              label="Date de départ"
+              type="date"
+              min={getMinimumStartDate()}
               value={startInput}
               onChange={(event) => setStartInput(event.target.value)}
             />
 
             <Input
-              label="Date et heure de fin"
-              type="datetime-local"
+              label="Date de retour"
+              type="date"
+              min={startInput ? getFollowingDate(startInput) : getFollowingDate(getMinimumStartDate())}
               value={endInput}
               onChange={(event) => setEndInput(event.target.value)}
             />
+
+            <p className="text-xs text-slate-500 md:col-span-3">Retour à 10 h · location minimale d’une journée.</p>
 
             <Button type="submit" variant="danger" className="w-full md:w-auto">
               Rechercher

@@ -26,6 +26,16 @@ function getStatusDetails(status: ClientDocumentStatus | null): { label: string;
   }
 }
 
+function formatTransmission(value: ClientDocument['driving_license_transmission'] | undefined): string | null {
+  if (value === 'MANUAL_AND_AUTOMATIC') {
+    return 'Manuel'
+  }
+  if (value === 'AUTOMATIC_ONLY') {
+    return 'Automatique'
+  }
+  return null
+}
+
 function formatDate(value: string | null | undefined): string {
   if (!value) {
     return '—'
@@ -70,20 +80,27 @@ function ClientDocumentCard({
   title: string
 }) {
   const status = getStatusDetails(document?.status ?? null)
-
+  const transmissionLabel = documentType === 'PERMIS_CONDUIRE' && document?.status === 'VALIDE'
+    ? formatTransmission(document.driving_license_transmission)
+    : null
+  const displayTitle = transmissionLabel ? `${title} — ${transmissionLabel}` : title
   return (
     <Card
       className="h-full border border-slate-100"
       contentClassName="flex flex-1 flex-col"
       header={
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-[#1F2937]">{title}</h2>
+          <h2 className="text-lg font-semibold text-[#1F2937]">{displayTitle}</h2>
           <StatusBadge variant={status.variant} label={status.label} />
         </div>
       }
     >
       <div className="flex flex-1 flex-col gap-4">
         <dl className="grid grid-cols-2 gap-3 rounded-2xl bg-slate-50 p-4 text-sm">
+          <div className="min-w-0 sm:col-span-2">
+            <dt className="font-medium text-slate-500">Numéro du document</dt>
+            <dd className="mt-1 text-[#1F2937]">{document?.document_number || '—'}</dd>
+          </div>
           <div className="min-w-0">
             <dt className="font-medium text-slate-500">Date d’expiration</dt>
             <dd className="mt-1 text-[#1F2937]">{formatDate(document?.expiration_date)}</dd>

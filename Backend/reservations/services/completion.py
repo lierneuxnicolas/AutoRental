@@ -1,6 +1,8 @@
 import os
 import uuid
+import logging
 from dataclasses import dataclass
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.mail import send_mail
@@ -16,14 +18,17 @@ from invoicing.services import InvoiceCreationNotAvailable, create_invoice_for_r
 from interventions.services import create_intervention
 from interventions.models import Intervention
 from inspections.models import Inspection
+from invoicing.models import Invoice
 from notifications.services import create_notification
-from payments.models import Deposit
+from payments.models import Deposit, Payment, Refund
 from reservations.models import Reservation
+from reservations.services.return_charges import calculate_return_charges
 from vehicles.models import Vehicle
 
 
 RESERVATION_COMPLETED_NOTIFICATION_TYPE = "RESERVATION_COMPLETED"
 RETURN_ISSUE_REPORTED_NOTIFICATION_TYPE = "RETURN_ISSUE_REPORTED"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -142,6 +147,36 @@ def _get_completed_final_inspection(*, reservation: Reservation) -> Inspection:
     return inspection
 
 
+def confirm_return_charges(*, reservation: Reservation, requested_by) -> Reservation:
+    role_code = getattr(getattr(requested_by, "role", None), "code", None)
+    if not getattr(requested_by, "is_superuser", False) and role_code not in {"GESTIONNAIRE_COMPTABLE", "ADMINISTRATEUR"}:
+        _raise_completion_error("FORBIDDEN", "Action réservée aux gestionnaires.", http_status=403)
+    with transaction.atomic():
+        locked = Reservation.objects.select_for_update().get(pk=reservation.pk)
+        if locked.status != Reservation.Status.A_CONTROLER:
+            _raise_completion_error("INVALID_STATUS", "La réservation doit être en attente de contrôle.", http_status=409)
+        if locked.return_charges_confirmed_at is not None:
+            _raise_completion_error("CHARGES_ALREADY_CONFIRMED", "Les frais ont déjà été confirmés.", http_status=409)
+        returned = _get_completed_final_inspection(reservation=locked)
+        departure = locked.inspections.filter(
+            inspection_type=Inspection.Type.INITIAL, status=Inspection.Status.TERMINE,
+        ).first()
+        if departure is None or returned.completed_at is None:
+            _raise_completion_error("INSPECTIONS_REQUIRED", "Les deux états des lieux terminés sont requis.", http_status=409)
+        charges = calculate_return_charges(
+            scheduled_return=locked.end_at, actual_return=returned.completed_at,
+            departure_fuel=departure.energy_level_percent, return_fuel=returned.energy_level_percent,
+        )
+        if charges.fuel_fee is None:
+            _raise_completion_error("FUEL_LEVEL_REQUIRED", "Les niveaux de carburant au départ et au retour sont requis.", http_status=409)
+        locked.return_delay_fee = charges.delay_fee
+        locked.return_fuel_fee = charges.fuel_fee
+        locked.return_charges_confirmed_at = timezone.now()
+        locked.return_charges_confirmed_by = requested_by
+        locked.save(update_fields=["return_delay_fee", "return_fuel_fee", "return_charges_confirmed_at", "return_charges_confirmed_by", "updated_at"])
+        return locked
+
+
 def _get_latest_deposit_for_return_validation(*, reservation: Reservation) -> Deposit:
     deposit = (
         Deposit.objects.select_for_update()
@@ -164,6 +199,71 @@ def _get_latest_deposit_for_return_validation(*, reservation: Reservation) -> De
         )
 
     return deposit
+
+
+def _assert_return_financials(*, reservation: Reservation) -> None:
+    if not _has_completed_final_inspection(reservation=reservation):
+        _raise_completion_error("FINAL_INSPECTION_REQUIRED", "Une inspection finale terminee est requise avant la cloture.", http_status=409)
+    if not reservation.inspections.filter(inspection_type=Inspection.Type.INITIAL, status=Inspection.Status.TERMINE).exists():
+        _raise_completion_error("INITIAL_INSPECTION_REQUIRED", "Une inspection de départ terminée est requise.", http_status=409)
+    if reservation.return_charges_confirmed_at is None or reservation.return_delay_fee is None or reservation.return_fuel_fee is None:
+        _raise_completion_error("CHARGES_NOT_CONFIRMED", "Les frais de restitution doivent être confirmés.", http_status=409)
+    if reservation.return_delay_fee + reservation.return_fuel_fee > Decimal("0.00"):
+        _raise_completion_error("SUPPLEMENTARY_PAYMENT_REQUIRED", "Le règlement des frais complémentaires est requis ; aucun encaissement automatique n'est disponible.", http_status=409)
+    payments = reservation.payments.filter(provider=Payment.Provider.STRIPE, status=Payment.Status.REUSSI, currency="EUR")
+    amount_paid = sum((payment.amount for payment in payments), Decimal("0.00"))
+    refunded = sum((refund.amount for refund in reservation.refunds.filter(status=Refund.Status.REUSSI, currency="EUR")), Decimal("0.00"))
+    if (payments.count() != 1 or payments.filter(stripe_payment_intent_id__isnull=True).exists()
+            or payments.filter(stripe_payment_intent_id="").exists() or refunded != 0
+            or amount_paid != reservation.rental_amount
+            or reservation.refunds.exclude(status__in=[Refund.Status.REUSSI, Refund.Status.ECHOUE, Refund.Status.ANNULE]).exists()):
+        _raise_completion_error("PAYMENT_NOT_SETTLED", "Le paiement ou les remboursements de la location nécessitent une vérification.", http_status=409)
+    if reservation.payments.filter(status__in=[Payment.Status.CREE, Payment.Status.EN_ATTENTE, Payment.Status.ACTION_REQUISE, Payment.Status.TRAITEMENT]).exists():
+        _raise_completion_error("PAYMENT_PENDING", "Un paiement est encore en attente.", http_status=409)
+
+
+def _validate_existing_invoice(*, reservation: Reservation, invoice: Invoice) -> None:
+    from invoicing.services.pdf_generator import build_invoice_financial_details
+
+    if invoice.pdf_file:
+        if not invoice.pdf_file.storage.exists(invoice.pdf_file.name):
+            _raise_completion_error("INVOICE_PDF_MISSING", "Le PDF historique référencé est introuvable ; une vérification manuelle est nécessaire.", http_status=409)
+        return
+
+    details = build_invoice_financial_details(invoice)
+    if (invoice.status not in {Invoice.Status.ISSUED, Invoice.Status.PAID}
+            or invoice.currency != "EUR" or invoice.total_amount != reservation.rental_amount
+            or details.get("total") != invoice.total_amount
+            or sum(invoice.lines.values_list("total_price", flat=True), Decimal("0.00")) != invoice.subtotal):
+        _raise_completion_error("INVOICE_INCONSISTENT", "La facture existante nécessite une vérification comptable avant génération du PDF.", http_status=409)
+
+
+def _ensure_final_invoice(*, reservation: Reservation) -> None:
+    from invoicing.services.pdf_generator import ensure_invoice_pdf
+
+    invoice = Invoice.objects.select_for_update().filter(reservation=reservation).first()
+    if invoice:
+        _validate_existing_invoice(reservation=reservation, invoice=invoice)
+        if invoice.pdf_file:
+            return
+    else:
+        try:
+            invoice = create_invoice_for_reservation(reservation)
+        except InvoiceCreationNotAvailable as exc:
+            _raise_completion_error("INVOICE_CREATION_FAILED", str(exc), http_status=409)
+        rental_line = invoice.lines.get(line_type="VEHICLE_RENTAL")
+        rental_line.description = "Location et assurance (montant total confirmé)"
+        rental_line.save(update_fields=["description", "total_price"])
+
+    try:
+        ensure_invoice_pdf(invoice)
+    except Exception as exc:
+        logger.exception("Impossible de générer le PDF pour la réservation %s", reservation.pk)
+        raise ReservationCompletionError(
+            code="INVOICE_PDF_FAILED",
+            message="Le PDF de la facture n'a pas pu être enregistré. Veuillez réessayer.",
+            http_status=503,
+        ) from exc
 
 
 def _resolve_vehicle_status_after_return_validation(*, reservation: Reservation, vehicle: Vehicle) -> str:
@@ -338,15 +438,6 @@ def complete_reservation(*, reservation: Reservation, requested_by) -> Reservati
         )
         vehicle_locked = Vehicle.objects.select_for_update().get(pk=locked.vehicle_id)
 
-        if locked.status == Reservation.Status.TERMINEE:
-            return locked
-
-        if locked.status != Reservation.Status.A_CONTROLER:
-            _raise_completion_error(
-                "INVALID_STATUS",
-                "La reservation doit etre A_CONTROLER pour etre terminee.",
-            )
-
         role_code = getattr(getattr(requested_by, "role", None), "code", None)
         if not getattr(requested_by, "is_superuser", False) and role_code not in {"GESTIONNAIRE_COMPTABLE", "ADMINISTRATEUR"}:
             _raise_completion_error(
@@ -355,21 +446,24 @@ def complete_reservation(*, reservation: Reservation, requested_by) -> Reservati
                 http_status=403,
             )
 
-        if not _has_completed_final_inspection(reservation=locked):
-            _raise_completion_error(
-                "FINAL_INSPECTION_REQUIRED",
-                "Une inspection finale terminee est requise avant la cloture.",
-                http_status=409,
-            )
+        if locked.status == Reservation.Status.TERMINEE:
+            invoice = Invoice.objects.filter(reservation=locked).first()
+            if not invoice or not invoice.pdf_file or not invoice.pdf_file.storage.exists(invoice.pdf_file.name):
+                _assert_return_financials(reservation=locked)
+                deposit = _get_latest_deposit_for_return_validation(reservation=locked)
+                if deposit.status != Deposit.Status.LIBEREE:
+                    _raise_completion_error("DEPOSIT_STATUS_INVALID", "La caution doit être libérée avant génération de la facture.", http_status=409)
+                _ensure_final_invoice(reservation=locked)
+            return locked
 
-        try:
-            create_invoice_for_reservation(locked)
-        except InvoiceCreationNotAvailable as exc:
-            _raise_completion_error(
-                "INVOICE_CREATION_FAILED",
-                str(exc),
-                http_status=409,
-            )
+        if locked.status != Reservation.Status.A_CONTROLER:
+            _raise_completion_error("INVALID_STATUS", "La reservation doit etre A_CONTROLER pour etre terminee.")
+
+        _assert_return_financials(reservation=locked)
+
+        existing_invoice = Invoice.objects.select_for_update().filter(reservation=locked).first()
+        if existing_invoice:
+            _validate_existing_invoice(reservation=locked, invoice=existing_invoice)
 
         deposit = _get_latest_deposit_for_return_validation(reservation=locked)
 
@@ -390,6 +484,8 @@ def complete_reservation(*, reservation: Reservation, requested_by) -> Reservati
                     http_status=409,
                 )
             deposit = released_deposit
+
+        _ensure_final_invoice(reservation=locked)
 
         vehicle_status = _resolve_vehicle_status_after_return_validation(
             reservation=locked,

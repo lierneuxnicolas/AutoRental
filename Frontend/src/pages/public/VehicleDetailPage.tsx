@@ -4,18 +4,23 @@ import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-
 import { loadStripe } from '@stripe/stripe-js'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AxiosError } from 'axios'
+import { Car, Check } from 'lucide-react'
 import { Alert, EmptyState, LoadingSpinner } from '../../components/feedback'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
+import Input from '../../components/ui/Input'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import { useAuth } from '../../hooks/useAuth'
 import { getClientProfileMe, getClientProfileProgress } from '../../services/authService'
 import { createReservationDeposit, createReservationPaymentIntent } from '../../services/paymentService'
-import { createReservation, getReservationById } from '../../services/reservationService'
+import { createReservation, getPaymentChecks, getReservationById } from '../../services/reservationService'
 import { getVehicleById, simulatePrice } from '../../services/vehicleService'
 import type { ReservationCreateRequest, ReservationCreateResponse } from '../../types/reservation'
 import type { PublicVehicle, VehiclePhoto } from '../../types/vehicle'
 import { resolveMediaUrl } from '../../utils/media'
+import { toDateValue } from '../../utils/rentalPeriod'
+import { formatVehicleDailyRate } from '../../utils/vehiclePrice'
+import { getReservationResume } from '../../utils/reservationResume'
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
 const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null
@@ -29,18 +34,25 @@ type ReservationApiErrorPayload = Record<string, unknown> & {
   details?: unknown
 }
 
+const LICENSE_VEHICLE_INCOMPATIBLE_MESSAGE =
+  'Votre permis autorise uniquement les véhicules automatiques. Le véhicule sélectionné possède une boîte manuelle. Veuillez choisir un véhicule automatique.'
+
 const reservationErrorMessages: Record<string, string> = {
   ACCOUNT_INACTIVE: 'Votre compte est désactivé. Contactez le support GetaCar.',
   DATE_OF_BIRTH_IN_FUTURE: 'La date de naissance indiquée dans votre profil est invalide.',
   DRIVING_LICENSE_CATEGORY_INCOMPATIBLE: 'La catégorie de votre permis ne permet pas de louer ce véhicule.',
   DRIVING_LICENSE_DETAILS_UNVERIFIED: 'Les informations de votre permis doivent être vérifiées avant de réserver.',
-  DRIVING_LICENSE_EXPIRED: 'Votre permis de conduire est expiré. Mettez-le à jour dans votre profil.',
+  DRIVING_LICENSE_EXPIRED: 'Votre permis de conduire a expiré. Veuillez le remplacer dans votre profil.',
   DRIVING_LICENSE_EXPIRES_TOO_SOON: 'Votre permis doit rester valide jusqu’à la fin de la location.',
   DRIVING_LICENSE_MISSING: 'Ajoutez votre permis de conduire à votre profil pour réserver.',
   DRIVING_LICENSE_NOT_VALID: 'Votre permis de conduire doit être validé avant de réserver.',
   EMAIL_NOT_VERIFIED: 'Confirmez votre adresse e-mail avant de réserver.',
   DURATION_TOO_SHORT: 'La période choisie est trop courte pour cette location.',
+  DRAFT_EXPIRED: 'Cette réservation provisoire a expiré. Veuillez recommencer votre réservation.',
+  DEPOSIT_NOT_AUTHORIZED: "La caution n'a pas été autorisée. Veuillez réessayer.",
+  DEPOSIT_AUTHORIZATION_EXPIRED: 'La préautorisation de la caution a expiré. Veuillez recommencer votre réservation.',
   END_BEFORE_START: 'La date de fin doit être postérieure à la date de début.',
+  END_NOT_AT_FIXED_HOUR: "L'heure de retour doit être fixée à 10 h.",
   END_REQUIRED: 'Indiquez une date de fin pour la location.',
   IDENTITY_CARD_EXPIRED: 'Votre carte d’identité est expirée. Mettez-la à jour dans votre profil.',
   IDENTITY_CARD_EXPIRES_TOO_SOON: 'Votre carte d’identité doit rester valide jusqu’à la fin de la location.',
@@ -50,17 +62,21 @@ const reservationErrorMessages: Record<string, string> = {
   INVALID_PERIOD: 'La période choisie est invalide. Vérifiez les dates et heures de début et de fin.',
   INVALID_START: 'La date de début indiquée est invalide.',
   PRICING_ERROR: 'Le prix de cette réservation n’a pas pu être calculé. Veuillez réessayer.',
+  PRICING_NOT_CONFIGURED: 'Le tarif de ce véhicule est indisponible. Veuillez contacter le support.',
   PROFILE_INCOMPLETE: 'Complétez les informations obligatoires de votre profil avant de réserver.',
   PROFILE_NOT_ELIGIBLE: 'Votre profil ou vos documents ne remplissent pas les conditions de réservation.',
   PROFILE_NOT_VALID: 'Votre profil doit être validé avant de réserver.',
   START_REQUIRED: 'Indiquez une date de début pour la location.',
   START_IN_PAST: 'La date de début ne peut pas être dans le passé.',
+  START_NOT_AT_FIXED_HOUR: "Choisissez un départ à 10 h, ou une heure future pour une réservation aujourd'hui après 10 h.",
+  STRIPE_CARD_DECLINED: "La préautorisation de la caution a été refusée. Veuillez utiliser un autre moyen de paiement.",
   UNDER_MINIMUM_AGE: 'Vous devez avoir au moins 21 ans à la date de début de la location.',
-  VEHICLE_INCOMPATIBLE_WITH_LICENSE: 'Votre permis ne permet pas de conduire ce véhicule.',
+  VEHICLE_INCOMPATIBLE_WITH_LICENSE: LICENSE_VEHICLE_INCOMPATIBLE_MESSAGE,
   VEHICLE_NOT_ACTIVE: 'Ce véhicule n’est actuellement pas disponible à la réservation.',
   VEHICLE_NOT_BOOKABLE: 'Ce véhicule n’est actuellement pas réservable.',
   VEHICLE_TRANSMISSION_UNKNOWN: 'La transmission de ce véhicule doit être vérifiée avant sa réservation.',
-  VEHICLE_UNAVAILABLE: 'Ce véhicule n’est plus disponible pour les dates choisies. Sélectionnez une autre période.',
+  VEHICLE_UNAVAILABLE: "Ce véhicule n'est pas disponible pour les dates sélectionnées. Veuillez choisir une autre période ou un autre véhicule.",
+  RESERVATION_UNAVAILABLE: "Ce véhicule n'est plus disponible pour les dates sélectionnées. Veuillez choisir une autre période ou un autre véhicule.",
 }
 
 const reservationValidationFieldLabels: Record<string, string> = {
@@ -96,6 +112,75 @@ function collectValidationMessages(value: unknown): string[] {
   }
 
   return []
+}
+
+function normalizeTransmission(value: string | null | undefined): 'MANUAL' | 'AUTOMATIC' | null {
+  const normalized = (value ?? '')
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+  if (normalized === 'manuelle' || normalized === 'manual') {
+    return 'MANUAL'
+  }
+  if (normalized === 'automatique' || normalized === 'automatic' || normalized === 'auto') {
+    return 'AUTOMATIC'
+  }
+  return null
+}
+
+function getLicenseIssueMessage(issue: string | null | undefined): string {
+  const text = (issue ?? '').toLowerCase()
+  if (text.includes('expir')) {
+    return 'Votre permis de conduire a expiré. Veuillez le remplacer dans votre profil.'
+  }
+  if (text.includes('attente')) {
+    return 'Votre permis est en attente de validation par le gestionnaire.'
+  }
+  if (text.includes('refus')) {
+    return 'Votre permis de conduire a été refusé. Veuillez le remplacer dans votre profil.'
+  }
+  if (text.includes('manqu')) {
+    return 'Veuillez ajouter votre permis de conduire dans votre profil.'
+  }
+  return 'Votre permis de conduire doit être validé avant de réserver.'
+}
+
+function getSimulationErrorMessage(error: unknown): { message: string; retryable: boolean } {
+  if (error instanceof AxiosError && error.response && error.response.status < 500) {
+    const data = error.response.data
+    if (isRecord(data)) {
+      const codeMessage = getErrorCodeMessage(data.code)
+      if (codeMessage) {
+        return { message: codeMessage, retryable: false }
+      }
+      if (data.start_at || data.end_at) {
+        return { message: 'Les dates ou heures de location sont invalides ou déjà passées. Veuillez choisir une autre période.', retryable: false }
+      }
+      if (data.insurance_type) {
+        return { message: "La formule d'assurance sélectionnée est invalide.", retryable: false }
+      }
+    }
+    return { message: "Le calcul du paiement n'a pas pu être effectué. Veuillez réessayer ou contacter le support.", retryable: true }
+  }
+  return { message: 'Le calcul du paiement est momentanément indisponible. Veuillez réessayer.', retryable: true }
+}
+
+function getPaymentPreparationErrorMessage(error: unknown): string {
+  if (error instanceof AxiosError && isRecord(error.response?.data)) {
+    const data = error.response.data
+    const details = isRecord(data.details) ? data.details : {}
+    if (Array.isArray(details.eligibility_errors)) {
+      const messages = details.eligibility_errors.map(getErrorCodeMessage).filter((message): message is string => message !== null)
+      if (messages.length) {
+        return [...new Set(messages)].join(' ')
+      }
+    }
+    const message = getErrorCodeMessage(data.code)
+    if (message) {
+      return message
+    }
+  }
+  return "Le paiement n'a pas pu être préparé. Veuillez réessayer ou contacter le support."
 }
 
 function getReservationValidationMessage(payload: ReservationApiErrorPayload): string | null {
@@ -238,20 +323,6 @@ function buildGallery(vehicle: PublicVehicle): { main: VehiclePhoto | null; seco
   }
 }
 
-function formatRate(rate: string): string {
-  const parsedRate = Number(rate)
-  if (!Number.isFinite(parsedRate)) {
-    return `À partir de ${rate} € / jour`
-  }
-
-  const formatter = new Intl.NumberFormat('fr-FR', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })
-
-  return `À partir de ${formatter.format(parsedRate)} € / jour`
-}
-
 function formatValue(value: unknown): string {
   if (value === null || value === undefined || value === '') {
     return 'Non renseigné'
@@ -310,6 +381,7 @@ function formatDateTimeFr(value: string | null): string {
   return new Intl.DateTimeFormat('fr-FR', {
     dateStyle: 'medium',
     timeStyle: 'short',
+    timeZone: 'Europe/Brussels',
   }).format(parsed)
 }
 
@@ -335,7 +407,11 @@ function isReservationConfirmed(status: string | null | undefined): boolean {
   return status === 'CONFIRMEE' || status === 'PAYEE'
 }
 
-function mapInsuranceToBackend(insurance: InsuranceOptionKey | null): 'STANDARD' | 'DUO' | 'OMNIUM' | null {
+function mapInsuranceToBackend(insurance: InsuranceOptionKey | null): 'STANDARD' | 'COMPLEMENTAIRE' | 'DUO' | 'OMNIUM' | null {
+  if (insurance === 'complementary') {
+    return 'COMPLEMENTAIRE'
+  }
+
   if (insurance === 'duo') {
     return 'DUO'
   }
@@ -354,6 +430,10 @@ function mapInsuranceToBackend(insurance: InsuranceOptionKey | null): 'STANDARD'
 function mapInsuranceToUi(insuranceType: string | null | undefined): InsuranceOptionKey | null {
   const normalizedType = insuranceType?.toUpperCase()
 
+  if (normalizedType === 'COMPLEMENTAIRE') {
+    return 'complementary'
+  }
+
   if (normalizedType === 'DUO') {
     return 'duo'
   }
@@ -371,17 +451,22 @@ function mapInsuranceToUi(insuranceType: string | null | undefined): InsuranceOp
 
 type StripePaymentFormProps = {
   clientSecret: string
+  initialCardholderName: string
   isSubmitting: boolean
   onBack: () => void
   returnUrl: string
   onSubmit: (paymentStatus?: string) => Promise<void>
+  verifyBeforePayment: () => Promise<boolean>
 }
 
-function StripePaymentForm({ clientSecret, isSubmitting, onBack, returnUrl, onSubmit }: StripePaymentFormProps) {
+function StripePaymentForm({ clientSecret, initialCardholderName, isSubmitting, onBack, returnUrl, onSubmit, verifyBeforePayment }: StripePaymentFormProps) {
   const stripe = useStripe()
   const elements = useElements()
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [isConfirming, setIsConfirming] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState<string | null>(null)
+  const [cardholderName, setCardholderName] = useState(initialCardholderName)
+  const [cardholderError, setCardholderError] = useState<string | null>(null)
   const confirmationLockRef = useRef(false)
 
   const handleResolvedPaymentIntent = useCallback(async (status: string | undefined) => {
@@ -391,7 +476,7 @@ function StripePaymentForm({ clientSecret, isSubmitting, onBack, returnUrl, onSu
     }
 
     if (status === 'requires_payment_method') {
-      setPaymentError("Le paiement n'a pas pu être effectué. Vérifiez votre moyen de paiement ou essayez-en un autre.")
+      setPaymentError('Paiement échoué. Veuillez recommencer votre réservation.')
       return true
     }
 
@@ -404,6 +489,16 @@ function StripePaymentForm({ clientSecret, isSubmitting, onBack, returnUrl, onSu
 
   const handleSubmit = async () => {
     if (!stripe || !elements || isSubmitting || isConfirming || confirmationLockRef.current) {
+      return
+    }
+
+    if (!paymentMethod) {
+      setPaymentError('Veuillez choisir un moyen de paiement.')
+      return
+    }
+
+    if (paymentMethod === 'card' && !cardholderName.trim()) {
+      setCardholderError('Veuillez renseigner le nom et le prénom du titulaire.')
       return
     }
 
@@ -420,10 +515,18 @@ function StripePaymentForm({ clientSecret, isSubmitting, onBack, returnUrl, onSu
         return
       }
 
+      if (!await verifyBeforePayment()) {
+        setPaymentError('Les vérifications avant paiement ont échoué ou sont indisponibles.')
+        return
+      }
+
       const result = await stripe.confirmPayment({
         elements,
         confirmParams: {
           return_url: returnUrl,
+          ...(paymentMethod === 'card'
+            ? { payment_method_data: { billing_details: { name: cardholderName.trim() } } }
+            : {}),
         },
         redirect: 'if_required',
       })
@@ -439,7 +542,7 @@ function StripePaymentForm({ clientSecret, isSubmitting, onBack, returnUrl, onSu
           }
         }
 
-        setPaymentError(result.error.message ?? 'Le paiement a ete refuse. Verifiez votre moyen de paiement et reessayez.')
+        setPaymentError('Paiement échoué. Veuillez recommencer votre réservation.')
         return
       }
 
@@ -460,11 +563,27 @@ function StripePaymentForm({ clientSecret, isSubmitting, onBack, returnUrl, onSu
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      {paymentMethod === 'card' ? (
+        <Input
+          label="Nom et prénom du titulaire"
+          name="cardholder-name"
+          autoComplete="cc-name"
+          required
+          value={cardholderName}
+          error={cardholderError ?? undefined}
+          onChange={(event) => {
+            setCardholderName(event.target.value)
+            setCardholderError(null)
+          }}
+        />
+      ) : null}
+      <div>
         <PaymentElement
+          onChange={(event) => setPaymentMethod(event.value.type || null)}
           options={{
             layout: 'tabs',
             paymentMethodOrder: ['card', 'bancontact'],
+            fields: { card: { billingDetails: { name: 'never' } } },
             wallets: {
               applePay: 'never',
               googlePay: 'never',
@@ -488,47 +607,26 @@ function StripePaymentForm({ clientSecret, isSubmitting, onBack, returnUrl, onSu
   )
 }
 
-function parseDateInput(value: string | null | undefined): Date | null {
-  if (!value) {
-    return null
+function ReservationVehicleThumbnail({ vehicle }: { vehicle: PublicVehicle }) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const photoUrl = resolveMediaUrl(vehicle.main_photo?.file)
+
+  if (!photoUrl || imageFailed) {
+    return (
+      <div className="flex aspect-[7/5] w-full max-w-[260px] items-center justify-center rounded-lg bg-slate-100 text-slate-400" role="img" aria-label="Photo du véhicule indisponible">
+        <Car aria-hidden="true" size={40} />
+      </div>
+    )
   }
 
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-  if (!match) {
-    return null
-  }
-
-  const year = Number(match[1])
-  const monthIndex = Number(match[2]) - 1
-  const day = Number(match[3])
-  const parsed = new Date(year, monthIndex, day)
-
-  if (parsed.getFullYear() !== year || parsed.getMonth() !== monthIndex || parsed.getDate() !== day) {
-    return null
-  }
-
-  return parsed
-}
-
-function getAgeYears(dateOfBirth: string | null | undefined, reservationStart: string | null): number | null {
-  const parsedBirthDate = parseDateInput(dateOfBirth)
-  if (!parsedBirthDate) {
-    return null
-  }
-
-  const today = new Date()
-  const referenceDate = parseDateInput(reservationStart?.slice(0, 10))
-    ?? new Date(today.getFullYear(), today.getMonth(), today.getDate())
-  let age = referenceDate.getFullYear() - parsedBirthDate.getFullYear()
-  const isBirthdayPassed =
-    referenceDate.getMonth() > parsedBirthDate.getMonth()
-    || (referenceDate.getMonth() === parsedBirthDate.getMonth() && referenceDate.getDate() >= parsedBirthDate.getDate())
-
-  if (!isBirthdayPassed) {
-    age -= 1
-  }
-
-  return age
+  return (
+    <img
+      src={photoUrl}
+      alt={`${vehicle.brand} ${vehicle.model_name}`}
+      className="aspect-[7/5] w-full max-w-[260px] rounded-lg object-contain"
+      onError={() => setImageFailed(true)}
+    />
+  )
 }
 
 type VehicleDetailTab = 'features' | 'equipment' | 'conditions'
@@ -538,13 +636,15 @@ type ReservationProgressStep = {
   label: string
 }
 
-type ReservationStepNumber = 1 | 2 | 3 | 4 | 5
-type InsuranceOptionKey = 'standard' | 'duo' | 'omnium'
+type ReservationStepNumber = 1 | 2 | 3 | 4
+// 'duo' et 'omnium' sont des formules historiques, conservées uniquement pour les anciennes réservations.
+type InsuranceOptionKey = 'standard' | 'complementary' | 'duo' | 'omnium'
 
-const INSURANCE_DAILY_PRICE: Record<InsuranceOptionKey, number> = {
-  standard: 0,
-  duo: 8,
-  omnium: 25,
+const INSURANCE_TITLES: Record<InsuranceOptionKey, string> = {
+  standard: 'Standard',
+  complementary: 'Complémentaire',
+  duo: 'Duo (ancienne formule)',
+  omnium: 'Omnium (ancienne formule)',
 }
 
 export default function VehicleDetailPage() {
@@ -558,6 +658,10 @@ export default function VehicleDetailPage() {
   const reservationIdParam = searchParams.get('reservationId')
   const reservationIdFromQuery = reservationIdParam ? Number(reservationIdParam) : Number.NaN
   const hasReservationIdInQuery = Number.isInteger(reservationIdFromQuery) && reservationIdFromQuery > 0
+  const resume = getReservationResume({
+    from: `${location.pathname}${location.search}`,
+    reservationDraft: (location.state as { reservationDraft?: unknown } | null)?.reservationDraft,
+  })
 
   const [vehicle, setVehicle] = useState<PublicVehicle | null>(null)
   const [activeTab, setActiveTab] = useState<VehicleDetailTab>('features')
@@ -565,17 +669,16 @@ export default function VehicleDetailPage() {
   const [isNotFound, setIsNotFound] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [simulationContextMessage, setSimulationContextMessage] = useState<string | null>(null)
-  const [currentStep, setCurrentStep] = useState<ReservationStepNumber>(() => (hasReservationIdInQuery ? 4 : 1))
-  const [selectedInsurance, setSelectedInsurance] = useState<InsuranceOptionKey | null>(null)
+  const [currentStep, setCurrentStep] = useState<ReservationStepNumber>(() => (hasReservationIdInQuery || resume ? 3 : 1))
+  const [selectedInsurance, setSelectedInsurance] = useState<InsuranceOptionKey | null>(() => resume?.reservationDraft.insurance ?? null)
   const [createdReservation, setCreatedReservation] = useState<ReservationCreateResponse | null>(null)
-  const [depositBackendStatus, setDepositBackendStatus] = useState<string | null>(null)
   const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null)
-  const [paymentSetupMessage, setPaymentSetupMessage] = useState<string | null>(null)
   const [paymentWorkflowError, setPaymentWorkflowError] = useState<string | null>(null)
   const [isPreparingPayment, setIsPreparingPayment] = useState(false)
   const [isConfirmingPayment, setIsConfirmingPayment] = useState(false)
   const [confirmedPaymentIntentStatus, setConfirmedPaymentIntentStatus] = useState<string | null>(null)
   const [hasConfirmationTimedOut, setHasConfirmationTimedOut] = useState(false)
+  const [hasPaymentFailed, setHasPaymentFailed] = useState(false)
   const [isRefreshingReservationStatus, setIsRefreshingReservationStatus] = useState(false)
   const finalizedPaymentClientSecretRef = useRef<string | null>(null)
   const reservationCreationInFlightRef = useRef(false)
@@ -600,6 +703,25 @@ export default function VehicleDetailPage() {
     enabled: isAuthenticated && hasReservationIdInQuery,
   })
 
+  const licenseTransmission = profileProgressQuery.data?.driving_license_transmission ?? null
+  const licenseTypeLabel =
+    licenseTransmission === 'AUTOMATIC_ONLY' ? 'Automatique' : licenseTransmission === 'MANUAL_AND_AUTOMATIC' ? 'Manuel' : null
+  const vehicleTransmissionKind = normalizeTransmission(vehicle?.transmission)
+  const vehicleTransmissionLabel =
+    vehicleTransmissionKind === 'MANUAL' ? 'Manuelle' : vehicleTransmissionKind === 'AUTOMATIC' ? 'Automatique' : null
+  const licenseVehicleCompatibility: 'compatible' | 'incompatible' | 'unknown' =
+    !profileProgressQuery.data?.driving_license_valid
+      ? 'unknown'
+      : vehicleTransmissionKind === null || licenseTransmission === null
+        ? 'incompatible'
+        : licenseTransmission === 'AUTOMATIC_ONLY' && vehicleTransmissionKind === 'MANUAL'
+          ? 'incompatible'
+          : 'compatible'
+  const licenseVehicleIncompatibilityMessage =
+    vehicleTransmissionKind !== null && licenseTransmission !== null
+      ? LICENSE_VEHICLE_INCOMPATIBLE_MESSAGE
+      : 'Le type de permis ou la transmission du véhicule ne peut pas être vérifié. Veuillez contacter le gestionnaire.'
+
   const paymentErrors = useMemo(() => {
     if (!isAuthenticated) {
       return []
@@ -612,36 +734,26 @@ export default function VehicleDetailPage() {
 
     if (!dateOfBirth) {
       errors.push('Veuillez renseigner votre date de naissance dans votre profil.')
-    } else {
-      const age = getAgeYears(dateOfBirth, start)
-      if (age === null) {
-        errors.push('Veuillez renseigner votre date de naissance dans votre profil.')
-      } else if (age < 21) {
-        errors.push('Vous devez avoir au moins 21 ans pour louer un véhicule.')
-      } else if (age > 90) {
-        errors.push("L'âge maximum autorisé pour une location GetACar est de 90 ans.")
-      }
     }
 
     if (!drivingLicenseValid) {
-      errors.push('Votre permis de conduire doit être validé avant de pouvoir payer.')
+      errors.push(getLicenseIssueMessage(profileProgressQuery.data?.driving_license_issue))
+    } else if (licenseVehicleCompatibility === 'incompatible') {
+      errors.push(licenseVehicleIncompatibilityMessage)
     }
 
     if (!identityCardValid) {
-      errors.push("Votre carte d'identité doit être validée avant de pouvoir payer.")
+      errors.push("Votre carte d'identité doit être validée avant de réserver.")
     }
 
     return errors
-  }, [isAuthenticated, profileProgressQuery.data, profileQuery.data, start])
-
-  const canProceedToPayment = isAuthenticated && !profileQuery.isLoading && !profileProgressQuery.isLoading && paymentErrors.length === 0
+  }, [isAuthenticated, licenseVehicleCompatibility, licenseVehicleIncompatibilityMessage, profileProgressQuery.data, profileQuery.data])
 
   const reservationSteps: ReservationProgressStep[] = [
     { order: 1, label: 'Véhicule & période' },
     { order: 2, label: 'Assurance' },
-    { order: 3, label: 'Récapitulatif' },
-    { order: 4, label: 'Paiement et vérifications' },
-    { order: 5, label: 'Confirmation' },
+    { order: 3, label: 'Récapitulatif et paiement' },
+    { order: 4, label: 'Confirmation' },
   ]
 
   useEffect(() => {
@@ -657,25 +769,9 @@ export default function VehicleDetailPage() {
     navigate(`/vehicles/${id}/reservation${location.search}`, { replace: true })
   }, [end, id, location.pathname, location.search, navigate, start])
 
-  const insuranceOptions: Array<{ key: InsuranceOptionKey; title: string; description: string; price: string }> = [
-    {
-      key: 'standard',
-      title: 'Standard',
-      description: 'Assurance de base, 1 conducteur',
-      price: 'Incluse',
-    },
-    {
-      key: 'duo',
-      title: 'Duo',
-      description: 'Assurance de base + 1 conducteur additionnel',
-      price: '+ 8 €/jour',
-    },
-    {
-      key: 'omnium',
-      title: 'Omnium',
-      description: 'Protection renforcée + franchise réduite',
-      price: '+ 25 €/jour',
-    },
+  const insuranceOptions: Array<{ key: 'standard' | 'complementary'; title: string; deductible: number }> = [
+    { key: 'standard', title: INSURANCE_TITLES.standard, deductible: 1000 },
+    { key: 'complementary', title: INSURANCE_TITLES.complementary, deductible: 300 },
   ]
 
   const restoredInsuranceSelection = useMemo(
@@ -684,8 +780,12 @@ export default function VehicleDetailPage() {
   )
 
   const activeReservation = reservationStateQuery.data ?? createdReservation
-  const effectiveInsuranceSelection = selectedInsurance ?? restoredInsuranceSelection
-  const selectedInsuranceOption = insuranceOptions.find((option) => option.key === effectiveInsuranceSelection) ?? null
+  const effectiveInsuranceSelection: InsuranceOptionKey | null = selectedInsurance
+    ?? restoredInsuranceSelection
+    ?? (hasReservationIdInQuery ? null : 'standard')
+  const selectedInsuranceOption = effectiveInsuranceSelection
+    ? { key: effectiveInsuranceSelection, title: INSURANCE_TITLES[effectiveInsuranceSelection] }
+    : null
 
   const rentalDays = useMemo(() => {
     if (!start || !end) {
@@ -701,45 +801,24 @@ export default function VehicleDetailPage() {
       return 0
     }
 
-    const millisecondsPerDay = 24 * 60 * 60 * 1000
-    const rawDays = (endTimestamp - startTimestamp) / millisecondsPerDay
+    const reservation = reservationStateQuery.data ?? createdReservation
+    if (reservation?.is_daily_rate_booking ?? !hasReservationIdInQuery) {
+      const localDate = (raw: string, value: Date) => /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw) ? toDateValue(value) : raw.slice(0, 10)
+      const startDateValue = Date.parse(`${localDate(start, startDate)}T00:00:00Z`)
+      const endDateValue = Date.parse(`${localDate(end, endDate)}T00:00:00Z`)
+      const days = Math.round((endDateValue - startDateValue) / (24 * 60 * 60 * 1000))
+      return days > 0 ? days : 0
+    }
+
+    const rawDays = (endTimestamp - startTimestamp) / (24 * 60 * 60 * 1000)
     if (!Number.isFinite(rawDays) || rawDays <= 0) {
       return 0
     }
 
     return Math.ceil(rawDays)
-  }, [start, end])
+  }, [createdReservation, end, hasReservationIdInQuery, reservationStateQuery.data, start])
 
-  const rentalPrice = useMemo(() => {
-    if (!vehicle || rentalDays <= 0) {
-      return 0
-    }
-
-    const dailyRate = Number(vehicle.category_daily_rate)
-    if (!Number.isFinite(dailyRate)) {
-      return 0
-    }
-
-    return dailyRate * rentalDays
-  }, [vehicle, rentalDays])
-
-  const insurancePrice = useMemo(() => {
-    if (!effectiveInsuranceSelection || rentalDays <= 0) {
-      return 0
-    }
-
-    return INSURANCE_DAILY_PRICE[effectiveInsuranceSelection] * rentalDays
-  }, [effectiveInsuranceSelection, rentalDays])
-
-  const estimatedTotal = useMemo(() => {
-    if (!effectiveInsuranceSelection) {
-      return null
-    }
-
-    return rentalPrice + insurancePrice
-  }, [effectiveInsuranceSelection, rentalPrice, insurancePrice])
-
-  const cautionLabel = formatCurrencyFr(vehicle?.conditions?.minimum_deposit) ?? 'Non renseigné'
+  const cautionLabel = formatCurrencyFr(activeReservation?.deposit_amount ?? vehicle?.conditions?.minimum_deposit) ?? 'Non renseigné'
   const backendInsuranceType = mapInsuranceToBackend(effectiveInsuranceSelection)
 
   const stripeReturnUrl = useMemo(() => {
@@ -763,6 +842,23 @@ export default function VehicleDetailPage() {
   }, [createdReservation?.id, end, location.pathname, reservationIdFromQuery, start])
 
   const simulationReservationId = createdReservation?.id ?? (hasReservationIdInQuery ? reservationIdFromQuery : null)
+  const paymentChecksQuery = useQuery({
+    queryKey: ['reservation-payment-checks', vehicle?.id, start, end, simulationReservationId],
+    queryFn: () => getPaymentChecks({
+      vehicle_id: vehicle!.id,
+      start_at: start!,
+      end_at: end!,
+      ...(simulationReservationId ? { reservation_id: simulationReservationId } : {}),
+    }),
+    enabled: isAuthenticated && currentStep === 3 && Boolean(vehicle && start && end),
+    retry: false,
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
+  })
+  const canProceedToPayment = isAuthenticated && !profileQuery.isLoading && !profileProgressQuery.isLoading
+    && paymentErrors.length === 0 && !paymentChecksQuery.isError && !paymentChecksQuery.isPending
+    && !!paymentChecksQuery.data && Object.values(paymentChecksQuery.data).every((check) => check.valid)
+
   const canRunSimulationQuery = Boolean(vehicle && start && end && (backendInsuranceType || simulationReservationId))
 
   const simulationQuery = useQuery({
@@ -772,7 +868,7 @@ export default function VehicleDetailPage() {
         vehicle_id: number
         start_at: string
         end_at: string
-        insurance_type?: 'STANDARD' | 'DUO' | 'OMNIUM'
+        insurance_type?: 'STANDARD' | 'COMPLEMENTAIRE' | 'DUO' | 'OMNIUM'
         reservation_id?: number
       } = {
         vehicle_id: vehicle!.id,
@@ -791,12 +887,40 @@ export default function VehicleDetailPage() {
       return simulatePrice(payload)
     },
     enabled: canRunSimulationQuery,
+    retry: (failureCount, error) =>
+      !(error instanceof AxiosError && error.response && error.response.status < 500) && failureCount < 2,
   })
+
+  const complementarySimulationQuery = useQuery({
+    queryKey: ['vehicle-detail-reservation-simulation', vehicle?.id, start, end, 'COMPLEMENTAIRE', simulationReservationId],
+    queryFn: () => simulatePrice({
+      vehicle_id: vehicle!.id,
+      start_at: start!,
+      end_at: end!,
+      insurance_type: 'COMPLEMENTAIRE',
+      ...(simulationReservationId ? { reservation_id: simulationReservationId } : {}),
+    }),
+    enabled: currentStep === 2 && Boolean(vehicle && start && end),
+    retry: (failureCount, error) =>
+      !(error instanceof AxiosError && error.response && error.response.status < 500) && failureCount < 2,
+  })
+
+  const complementarySimulation = complementarySimulationQuery.isError ? undefined : complementarySimulationQuery.data
+  const complementaryDays = complementarySimulation?.billed_days
+  const complementaryAmount = complementarySimulation ? Number(complementarySimulation.insurance_amount) : Number.NaN
+  const complementaryRate = complementaryDays && complementaryDays > 0 && Number.isFinite(complementaryAmount)
+    ? formatCurrencyFr(complementaryAmount / complementaryDays)
+    : null
+  const complementaryTotal = Number.isFinite(complementaryAmount) ? formatCurrencyFr(complementaryAmount) : null
+  const insuranceSummary = simulationQuery.isError ? undefined : simulationQuery.data
 
   const insuranceSummaryVehicleLabel = vehicle ? `${vehicle.brand} ${vehicle.model_name}` : 'Véhicule indisponible'
   const insuranceSummaryStartLabel = formatDateTimeFr(start)
   const insuranceSummaryEndLabel = formatDateTimeFr(end)
-  const insuranceSummaryDurationLabel = formatDurationFromHours(simulationQuery.data?.duration_hours, rentalDays)
+  const isDailyRental = activeReservation?.is_daily_rate_booking ?? !hasReservationIdInQuery
+  const insuranceSummaryDurationLabel = isDailyRental && rentalDays > 0
+    ? `${rentalDays} jour${rentalDays > 1 ? 's' : ''}`
+    : formatDurationFromHours(simulationQuery.data?.duration_hours, rentalDays)
 
   const reservationPayload = useMemo<ReservationCreateRequest | null>(() => {
     if (!vehicle || !start || !end || !backendInsuranceType) {
@@ -816,7 +940,6 @@ export default function VehicleDetailPage() {
     onSuccess: (reservation) => {
       setCreatedReservation(reservation)
       setPaymentWorkflowError(null)
-      setPaymentSetupMessage(null)
     },
     onError: (error) => {
       logReservationCreationError(error)
@@ -835,13 +958,10 @@ export default function VehicleDetailPage() {
   const preparePayment = useCallback(async (reservationId: number) => {
     setIsPreparingPayment(true)
     setPaymentWorkflowError(null)
-    setPaymentSetupMessage(null)
 
     try {
       const depositResult = await depositAuthorizationMutation.mutateAsync(reservationId)
       const normalizedDepositStatus = depositResult.deposit_status.toUpperCase()
-      setDepositBackendStatus(normalizedDepositStatus)
-
       if (normalizedDepositStatus !== 'AUTORISEE' && normalizedDepositStatus !== 'VALIDE') {
         throw new Error(depositResult.authorization_note || 'La preautorisation Stripe de la caution a ete refusee.')
       }
@@ -853,14 +973,8 @@ export default function VehicleDetailPage() {
       }
 
       setPaymentClientSecret(paymentIntentResult.client_secret)
-      setPaymentSetupMessage('Le moyen de paiement est prêt. La confirmation finale dépendra du backend et du webhook Stripe.')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string; message?: string }>
-      setPaymentWorkflowError(
-        axiosError.response?.data?.detail
-        || axiosError.response?.data?.message
-        || (error instanceof Error ? error.message : 'Impossible de preparer le paiement Stripe Test.'),
-      )
+      setPaymentWorkflowError(getPaymentPreparationErrorMessage(error))
     } finally {
       setIsPreparingPayment(false)
     }
@@ -868,7 +982,6 @@ export default function VehicleDetailPage() {
 
   const loadExistingPaymentClientSecret = useCallback(async (reservationId: number) => {
     setPaymentWorkflowError(null)
-    setPaymentSetupMessage(null)
 
     try {
       const paymentIntentResult = await paymentIntentMutation.mutateAsync(reservationId)
@@ -878,14 +991,8 @@ export default function VehicleDetailPage() {
       }
 
       setPaymentClientSecret(paymentIntentResult.client_secret)
-      setPaymentSetupMessage('Le moyen de paiement est prêt. La confirmation finale dépendra du backend et du webhook Stripe.')
     } catch (error) {
-      const axiosError = error as AxiosError<{ detail?: string; message?: string }>
-      setPaymentWorkflowError(
-        axiosError.response?.data?.detail
-        || axiosError.response?.data?.message
-        || (error instanceof Error ? error.message : 'Impossible de recuperer le moyen de paiement Stripe Test.'),
-      )
+      setPaymentWorkflowError(getPaymentPreparationErrorMessage(error))
     }
   }, [paymentIntentMutation])
 
@@ -903,7 +1010,7 @@ export default function VehicleDetailPage() {
   }, [])
 
   const handlePaymentSuccess = async (paymentStatus?: string) => {
-    if (!createdReservation || !paymentClientSecret) {
+    if (!activeReservation || !paymentClientSecret) {
       return
     }
 
@@ -912,19 +1019,15 @@ export default function VehicleDetailPage() {
     }
 
     finalizedPaymentClientSecretRef.current = paymentClientSecret
+    setCreatedReservation(activeReservation)
 
     setIsConfirmingPayment(true)
     setConfirmedPaymentIntentStatus(paymentStatus ?? null)
     setHasConfirmationTimedOut(false)
     setPaymentWorkflowError(null)
-    setCurrentStep(5)
+    setCurrentStep(4)
     confirmationPollDeadlineRef.current = Date.now() + RESERVATION_CONFIRMATION_TIMEOUT_MS
 
-    if (paymentStatus === 'processing') {
-      setPaymentSetupMessage('Votre paiement est en cours de traitement. Veuillez patienter.')
-    } else {
-      setPaymentSetupMessage('Paiement en cours de confirmation...')
-    }
   }
 
   const handleRefreshReservationStatus = useCallback(async () => {
@@ -943,7 +1046,12 @@ export default function VehicleDetailPage() {
       if (isReservationConfirmed(refreshedReservation.status)) {
         setHasConfirmationTimedOut(false)
         setIsConfirmingPayment(false)
-        setPaymentSetupMessage(null)
+        return
+      }
+
+      if (refreshedReservation.status === 'PAIEMENT_ECHOUE') {
+        setHasPaymentFailed(true)
+        setIsConfirmingPayment(false)
         return
       }
 
@@ -957,7 +1065,7 @@ export default function VehicleDetailPage() {
   }, [createdReservation?.id, refreshReservationStatus])
 
   useEffect(() => {
-    if (currentStep < 5 || !isConfirmingPayment || hasConfirmationTimedOut) {
+    if (currentStep < 4 || !isConfirmingPayment || hasConfirmationTimedOut) {
       clearConfirmationPollTimer()
       return
     }
@@ -983,7 +1091,13 @@ export default function VehicleDetailPage() {
         if (isReservationConfirmed(refreshedReservation.status)) {
           setHasConfirmationTimedOut(false)
           setIsConfirmingPayment(false)
-          setPaymentSetupMessage(null)
+          clearConfirmationPollTimer()
+          return
+        }
+
+        if (refreshedReservation.status === 'PAIEMENT_ECHOUE') {
+          setHasPaymentFailed(true)
+          setIsConfirmingPayment(false)
           clearConfirmationPollTimer()
           return
         }
@@ -991,7 +1105,6 @@ export default function VehicleDetailPage() {
         if ((confirmationPollDeadlineRef.current ?? 0) <= Date.now()) {
           setHasConfirmationTimedOut(true)
           setIsConfirmingPayment(false)
-          setPaymentSetupMessage(null)
           clearConfirmationPollTimer()
           return
         }
@@ -1009,7 +1122,6 @@ export default function VehicleDetailPage() {
           setPaymentWorkflowError(axiosError.response?.data?.detail || 'Impossible de récupérer la confirmation de la réservation pour le moment.')
           setHasConfirmationTimedOut(true)
           setIsConfirmingPayment(false)
-          setPaymentSetupMessage(null)
           clearConfirmationPollTimer()
           return
         }
@@ -1054,7 +1166,7 @@ export default function VehicleDetailPage() {
   }, [createdReservation, location.pathname, navigate, searchParams])
 
   useEffect(() => {
-    if (currentStep !== 4 || !canProceedToPayment) {
+    if (currentStep !== 3 || !canProceedToPayment || !simulationQuery.data || simulationQuery.isError) {
       return
     }
 
@@ -1129,6 +1241,7 @@ export default function VehicleDetailPage() {
     preparePayment,
     reservationPayload,
     simulationQuery.data,
+    simulationQuery.isError,
   ])
 
   useEffect(() => {
@@ -1390,26 +1503,32 @@ export default function VehicleDetailPage() {
     )
   }
 
-  const paymentPeriodLabel = start && end
-    ? `${formatDateTimeFr(start)} → ${formatDateTimeFr(end)}`
-    : 'Non renseignée'
-  const paymentDurationLabel = formatDurationFromHours(simulationQuery.data?.duration_hours, rentalDays)
+  const paymentDurationLabel = insuranceSummaryDurationLabel
+  const startBrusselsClock = start && Number.isFinite(new Date(start).getTime())
+    ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Brussels', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(start))
+    : null
+  const endBrusselsClock = end && Number.isFinite(new Date(end).getTime())
+    ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Brussels', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(end))
+    : null
+  const durationHours = Number(simulationQuery.data?.duration_hours)
+  const hasShortBilledDay = isDailyRental && endBrusselsClock === '10:00' && (
+    (startBrusselsClock !== null && startBrusselsClock > '10:00')
+    || (Number.isFinite(durationHours) && durationHours > 0 && durationHours < rentalDays * 24)
+  )
   const hasSimulationSummary = Boolean(simulationQuery.data)
   const shouldShowSimulationError = simulationQuery.isError && !hasSimulationSummary
+  const simulationError = getSimulationErrorMessage(simulationQuery.error)
   const paymentInsuranceLabel = selectedInsuranceOption?.title
-    ?? (simulationQuery.data?.insurance_type === 'STANDARD'
-      ? 'Standard'
-      : simulationQuery.data?.insurance_type === 'DUO'
-        ? 'Duo'
-        : simulationQuery.data?.insurance_type === 'OMNIUM'
-          ? 'Omnium'
-          : 'Non sélectionnée')
+    ?? (mapInsuranceToUi(simulationQuery.data?.insurance_type)
+      ? INSURANCE_TITLES[mapInsuranceToUi(simulationQuery.data?.insurance_type) as InsuranceOptionKey]
+      : 'Non sélectionnée')
   const paymentRentalAmountLabel = formatCurrencyFr(simulationQuery.data?.rental_amount) ?? 'Non renseigné'
   const paymentInsuranceAmountLabel = formatCurrencyFr(simulationQuery.data?.insurance_amount) ?? 'Non renseigné'
   const paymentTotalAmountLabel = formatCurrencyFr(simulationQuery.data?.total_amount) ?? 'Non renseigné'
-  const confirmationReservation = activeReservation
-  const displayedCurrentStep: ReservationStepNumber = confirmationReservation?.status === 'CONFIRMEE' ? 5 : currentStep
-  const isDepositConfirmedForDisplay = depositBackendStatus === 'AUTORISEE' || confirmationReservation?.status === 'CONFIRMEE'
+  const confirmationReservation = createdReservation?.status === 'CONFIRMEE' && createdReservation.id === activeReservation?.id
+    ? createdReservation
+    : activeReservation
+  const displayedCurrentStep: ReservationStepNumber = confirmationReservation?.status === 'CONFIRMEE' ? 4 : currentStep
 
   const tabContent = {
     features: (featureRows.length > 0 ? (
@@ -1451,7 +1570,7 @@ export default function VehicleDetailPage() {
   }
 
   return (
-    <section className="py-8 sm:py-10" aria-labelledby="vehicle-detail-title">
+    <section className="py-8 sm:py-10" aria-label="Réservation du véhicule">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <nav aria-label="Progression de reservation" className="mb-6 sm:mb-8">
           <div className="overflow-x-auto pb-2">
@@ -1508,13 +1627,7 @@ export default function VehicleDetailPage() {
             style={{ transform: `translateX(-${(displayedCurrentStep - 1) * 100}%)` }}
           >
             <div className="w-full shrink-0">
-              <header className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-medium text-[#2563EB]">{vehicle.category}</p>
-                  <h1 id="vehicle-detail-title" className="mt-1 text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
-                    {vehicle.brand} {vehicle.model_name}
-                  </h1>
-                </div>
+              <header className="mb-4 flex justify-end">
                 <StatusBadge variant={status.variant} label={status.label} />
               </header>
 
@@ -1572,9 +1685,8 @@ export default function VehicleDetailPage() {
                     </div>
 
                     <div className="rounded-2xl border border-[#DBEAFE] bg-[#EFF6FF] p-4">
-                      <p className="text-sm font-medium text-slate-500">Tarif journalier</p>
-                      <p className="mt-2 text-3xl font-semibold text-[#1F2937]">{formatRate(vehicle.category_daily_rate)}</p>
-                      <p className="mt-1 text-xs text-slate-500">TVA 21 % comprise</p>
+                      <p className="text-3xl font-semibold text-[#1F2937]">{formatVehicleDailyRate(vehicle.category_daily_rate)}</p>
+                      <p className="mt-1 text-xs text-slate-500">TVA de 21 % comprise</p>
                     </div>
                   </div>
                 </Card>
@@ -1608,125 +1720,78 @@ export default function VehicleDetailPage() {
             </div>
 
             <div className="w-full shrink-0">
-              <Card className="mt-2" header={<h2 className="text-lg font-semibold text-[#1F2937]">Choisissez votre assurance</h2>}>
-                <div className="space-y-4">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-slate-50 px-4 py-3 text-[15px] leading-7 text-slate-700 sm:text-base sm:leading-8">
-                    <span className="font-semibold text-[#1F2937]">{insuranceSummaryVehicleLabel}</span>
-                    <span className="text-slate-300">·</span>
+              <Card className="mt-2" header={<h2 className="text-lg font-semibold text-black">Choisissez votre assurance</h2>}>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-slate-50 px-4 py-3 text-[15px] leading-7 text-black sm:text-base sm:leading-8">
+                    <span className="font-semibold">{insuranceSummaryVehicleLabel}</span>
+                    <span>·</span>
                     <span>Départ {insuranceSummaryStartLabel}</span>
-                    <span className="text-slate-300">·</span>
+                    <span>·</span>
                     <span>Retour {insuranceSummaryEndLabel}</span>
-                    <span className="text-slate-300">·</span>
-                    <span className="font-medium text-[#1F2937]">{insuranceSummaryDurationLabel}</span>
+                    <span>·</span>
+                    <span className="font-medium">{insuranceSummaryDurationLabel}</span>
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-3">
+                  <div className="grid gap-3 md:grid-cols-2">
                     {insuranceOptions.map((option) => {
                       const isSelected = effectiveInsuranceSelection === option.key
-                      const optionInsuranceTotal = INSURANCE_DAILY_PRICE[option.key] * rentalDays
-
                       return (
                         <button
                           key={option.key}
                           type="button"
                           onClick={() => setSelectedInsurance(option.key)}
                           className={[
-                            'flex h-full flex-col rounded-2xl border bg-white p-4 text-left transition-all sm:p-5',
+                            'flex h-full flex-col items-center rounded-2xl border bg-white p-4 text-center text-black transition-all sm:p-5',
                             isSelected
-                              ? 'border-[#7C3AED] bg-violet-50/40 shadow-[0_10px_30px_rgba(124,58,237,0.12)] ring-2 ring-[#7C3AED]/20'
-                              : 'border-slate-200 hover:border-violet-200 hover:bg-violet-50/30',
+                              ? 'border-[#7C3AED]'
+                              : 'border-slate-200 hover:border-slate-400',
                           ].join(' ')}
                           aria-pressed={isSelected}
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-500">{option.title.toUpperCase()}</p>
-                              <p className="mt-2 text-sm font-medium text-slate-700">
-                                {option.key === 'standard' ? 'Assurance de base' : option.key === 'duo' ? 'Assurance de base' : 'Protection renforcée'}
-                              </p>
-                              {option.key === 'duo' ? <p className="mt-1 text-sm text-violet-600">1 conducteur additionnel</p> : null}
-                              {option.key === 'omnium' ? <p className="mt-1 text-sm text-violet-600">Franchise réduite</p> : null}
-                            </div>
-
-                            {option.key === 'omnium' ? (
-                              <span className="inline-flex shrink-0 items-center rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-[#6D28D9]">
-                                ★ Recommandée
-                              </span>
-                            ) : null}
-                          </div>
-
-                          <div className="mt-4 flex items-end justify-between gap-4">
-                            <div>
-                              <p className="text-sm text-slate-600">
-                                {option.key === 'standard'
-                                  ? 'Une protection essentielle incluse dans votre location.'
-                                  : option.key === 'duo'
-                                    ? 'Ajoutez un second conducteur sans stress ni frais supplémentaires.'
-                                    : 'Moins de franchise, plus de sérénité en cas d’imprévu.'}
-                              </p>
-                              <p className="mt-1 text-base font-semibold text-[#1F2937]">{option.price}</p>
-                            </div>
-                          </div>
-
-                          <ul className="mt-4 space-y-3 text-sm text-slate-700">
-                            {(option.key === 'standard'
-                              ? [
-                                  '✓ Couverture responsabilité civile',
-                                  '✓ Dommages au véhicule (franchise standard)',
-                                  '✓ Vol et incendie',
-                                  '✓ Assistance 24/7',
-                                ]
-                              : option.key === 'duo'
-                                ? [
-                                    '✓ Tout ce qui est inclus dans Standard',
-                                    '✓ 2 conducteurs autorisés',
-                                    '✓ Conduite partagée en toute tranquillité',
-                                    '✓ Idéal pour les couples ou amis',
-                                  ]
-                                : [
-                                    '✓ Tout ce qui est inclus dans Conducteur +',
-                                    '✓ Franchise réduite en cas de dommage',
-                                    '✓ Protection maximale du véhicule',
-                                    '✓ Assistance premium 24/7',
-                                  ]
-                            ).map((feature) => (
-                              <li key={feature} className="flex items-start gap-2.5">
-                                <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-600">
-                                  ✓
-                                </span>
-                                <span className="leading-6">{feature.replace(/^✓\s*/, '')}</span>
-                              </li>
-                            ))}
+                          <p className="text-lg font-bold uppercase">{option.title.toUpperCase()}</p>
+                          <ul className="mt-3 w-full space-y-1 text-left text-sm leading-5">
+                            <li>• Assurance de base incluse</li>
+                            <li>• Franchise{option.key === 'complementary' ? ' réduite' : ''} : <strong>{formatCurrencyFr(option.deductible)}</strong></li>
+                            <li>• Caution : <strong>{cautionLabel}</strong></li>
                           </ul>
-
-                          <p className="mt-4 text-sm font-medium text-violet-600">
+                          <p className="mt-auto pt-4 text-lg font-bold text-[#7C3AED] sm:text-xl">
                             {option.key === 'standard'
-                              ? 'Idéale pour réduire le coût'
-                              : option.key === 'duo'
-                                ? 'Idéale si vous partagez la conduite'
-                                : 'Idéale pour plus de tranquillité'}
-                          </p>
-
-                          <p className="mt-3 text-xs text-slate-500">
-                            {rentalDays > 0
-                              ? `${formatCurrencyFr(optionInsuranceTotal) ?? '0 €'} pour ${rentalDays} jour${rentalDays > 1 ? 's' : ''}`
-                              : 'Montant calculé une fois la période disponible'}
+                              ? '0 € supplémentaire'
+                              : complementaryRate && complementaryTotal && complementaryDays
+                                ? `+${complementaryRate} TVAC/jour — ${complementaryTotal} TVAC pour ${complementaryDays} jour${complementaryDays > 1 ? 's' : ''}`
+                                : complementarySimulationQuery.isPending ? 'Calcul en cours…' : 'Tarif indisponible'}
                           </p>
                         </button>
                       )
                     })}
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 sm:px-5 sm:py-4">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-700 sm:text-base sm:leading-7">
-                      <p className="text-base font-semibold text-slate-900 sm:text-lg">Récapitulatif estimé</p>
-                      <span className="hidden sm:inline text-slate-300">|</span>
-                      <p className="font-medium text-slate-700">Durée: {rentalDays > 0 ? `${rentalDays} jour${rentalDays > 1 ? 's' : ''}` : 'non disponible'}</p>
-                      <p className="font-medium text-slate-700">Location: {formatCurrencyFr(rentalPrice) ?? '0 €'}</p>
-                      <p className="font-medium text-slate-700">Assurance: {effectiveInsuranceSelection ? (formatCurrencyFr(insurancePrice) ?? '0 €') : 'Non sélectionnée'}</p>
-                      <p className="text-base font-bold text-[#1F2937] sm:text-lg">Total: {estimatedTotal !== null ? (formatCurrencyFr(estimatedTotal) ?? '0 €') : 'Non sélectionné'}</p>
-                    </div>
+                  <div className="space-y-1 text-center text-xs text-black">
+                    <p>Franchise : montant qui peut rester à votre charge en cas de dommage.</p>
+                    <p>Caution : préautorisation distincte sur votre carte.</p>
                   </div>
+
+                  {complementarySimulationQuery.isError && effectiveInsuranceSelection !== 'complementary' ? (
+                    <div className="space-y-2">
+                      <Alert variant="danger" title="Tarif complémentaire indisponible" message={getSimulationErrorMessage(complementarySimulationQuery.error).message} />
+                      <Button variant="secondary" onClick={() => void complementarySimulationQuery.refetch()}>Réessayer</Button>
+                    </div>
+                  ) : null}
+
+                  {simulationQuery.isError ? (
+                    <div className="space-y-2">
+                      <Alert variant="danger" title="Tarification indisponible" message={getSimulationErrorMessage(simulationQuery.error).message} />
+                      <Button variant="secondary" onClick={() => void simulationQuery.refetch()}>Réessayer</Button>
+                    </div>
+                  ) : !insuranceSummary ? (
+                    <p className="text-center text-sm text-black">{canRunSimulationQuery ? 'Calcul en cours…' : 'Tarification indisponible'}</p>
+                  ) : (
+                    <div className="mx-auto w-full space-y-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-black md:w-[65%] sm:px-5 sm:text-base">
+                      <div className="flex justify-between"><span>Location</span><span className="font-medium">{formatCurrencyFr(insuranceSummary.rental_amount) ?? 'Non renseigné'}</span></div>
+                      <div className="flex justify-between"><span>Assurance</span><span className="font-medium">{formatCurrencyFr(insuranceSummary.insurance_amount) ?? 'Non renseigné'}</span></div>
+                      <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-bold sm:text-lg"><span>Total</span><span>{formatCurrencyFr(insuranceSummary.total_amount) ?? 'Non renseigné'}{effectiveInsuranceSelection === 'standard' || effectiveInsuranceSelection === 'complementary' ? ' TVAC' : ''}</span></div>
+                    </div>
+                  )}
 
                   <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
                     <Button variant="secondary" onClick={() => setCurrentStep(1)}>Retour</Button>
@@ -1737,123 +1802,101 @@ export default function VehicleDetailPage() {
             </div>
 
             <div className="w-full shrink-0">
-              <Card className="mt-2" header={<h2 className="text-lg font-semibold text-[#1F2937]">Récapitulatif de votre véhicule</h2>}>
-                <div className="space-y-7">
-                  <div className="grid gap-6 md:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] md:items-start">
-                    <div className="w-full">
-                      {gallery.main && resolveMediaUrl(gallery.main.file) ? (
-                        <div className="overflow-hidden rounded-2xl bg-slate-50">
-                          <div className="flex h-[340px] items-center justify-center p-2 sm:h-[380px] sm:p-3">
-                            <img
-                              src={resolveMediaUrl(gallery.main.file) ?? undefined}
-                              alt={`${vehicle.brand} ${vehicle.model_name}`}
-                              className="h-full w-full object-contain"
-                            />
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex h-[340px] items-center justify-center rounded-2xl bg-slate-100 text-sm font-medium text-slate-600 sm:h-[380px]">
-                          Photo indisponible
-                        </div>
-                      )}
+              <Card className="mx-auto mt-2 max-w-3xl" header={<h2 className="text-lg font-semibold text-[#1F2937]">Récapitulatif et paiement</h2>}>
+                <div className="divide-y divide-slate-200 [&>section]:py-4 [&>section:first-child]:pt-0 [&>section:last-child]:pb-0">
+                  <section className="-mx-6 px-5">
+                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Votre réservation</p>
+                    <div className={`mt-3 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] grid-rows-[auto] auto-rows-fr items-center gap-x-4 gap-y-4 text-[15px] text-slate-700 [overflow-wrap:anywhere] sm:text-base md:grid-cols-[260px_minmax(0,1fr)_minmax(0,1fr)] md:gap-x-10 md:gap-y-2 ${isAuthenticated ? 'md:grid-rows-[repeat(7,minmax(1.5rem,1fr))]' : 'md:grid-rows-[repeat(6,minmax(1.5rem,1fr))]'}`}>
+                      <div className="col-span-2 w-full max-w-[260px] justify-self-center md:col-span-1 md:row-span-full">
+                        <ReservationVehicleThumbnail key={vehicle.id} vehicle={vehicle} />
+                      </div>
+                      <dl className="contents [&>div]:contents [&_dd]:text-right [&_dd]:font-semibold [&_dd]:text-slate-900">
+                        <div><dt>Véhicule</dt><dd>{vehicle.brand} {vehicle.model_name}</dd></div>
+                        <div><dt>Départ</dt><dd>{formatDateTimeFr(start)}</dd></div>
+                        <div><dt>Retour</dt><dd>{formatDateTimeFr(end)}</dd></div>
+                        <div><dt>Durée</dt><dd>{paymentDurationLabel}</dd></div>
+                        <div><dt>Assurance</dt><dd>{paymentInsuranceLabel}</dd></div>
+                        {isAuthenticated ? (
+                          <div><dt>Type de permis</dt><dd>{licenseTypeLabel ?? '—'}</dd></div>
+                        ) : null}
+                        <div><dt>Transmission du véhicule</dt><dd>{vehicleTransmissionLabel ?? '—'}</dd></div>
+                      </dl>
                     </div>
+                    {hasShortBilledDay ? (
+                      <p className="mt-3 text-sm text-slate-600">Une journée facturée comporte moins de 24 heures ; le retour est prévu à 10 h.</p>
+                    ) : null}
+                  </section>
 
-                    <div className="flex min-w-0 flex-col justify-center space-y-4 text-slate-700">
-                      <div className="space-y-1.5">
-                        <p className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">{vehicle.brand} {vehicle.model_name}</p>
-                        <p className="text-base font-medium text-slate-600">{vehicle.category || 'Non renseigné'}</p>
+                  <section>
+                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Paiement</p>
+                    {simulationQuery.isLoading ? (
+                      <div className="mt-3 flex items-center gap-3 text-sm text-slate-600">
+                        <LoadingSpinner size="sm" aria-label="Chargement du récapitulatif paiement" />
+                        Calcul en cours...
                       </div>
-
-                      <div className="space-y-2 text-[15px] leading-7 text-slate-700 sm:text-base sm:leading-8">
-                        <p><span className="font-medium text-slate-900">Début :</span> <span className="font-semibold text-slate-900">{formatDateTimeFr(start)}</span></p>
-                        <p><span className="font-medium text-slate-900">Fin :</span> <span className="font-semibold text-slate-900">{formatDateTimeFr(end)}</span></p>
-                        <p><span className="font-medium text-slate-900">Durée :</span> <span className="font-semibold text-slate-900">{rentalDays > 0 ? `${rentalDays} jour${rentalDays > 1 ? 's' : ''}` : 'Non renseignée'}</span></p>
-                        <p><span className="font-medium text-slate-900">Assurance :</span> <span className="font-semibold text-slate-900">{selectedInsuranceOption?.title ?? 'Non sélectionnée'}</span></p>
-                        <p><span className="font-medium text-slate-900">Prix location :</span> <span className="font-semibold text-slate-900">{formatCurrencyFr(rentalPrice) ?? '0 €'}</span></p>
-                        <p><span className="font-medium text-slate-900">Prix assurance :</span> <span className="font-semibold text-slate-900">{effectiveInsuranceSelection ? (formatCurrencyFr(insurancePrice) ?? '0 €') : 'Non sélectionné'}</span></p>
-                        <p><span className="font-medium text-slate-900">Caution :</span> <span className="font-semibold text-slate-900">{cautionLabel}</span></p>
-                      </div>
-
-                      <div className="rounded-2xl border border-violet-100 bg-violet-50/70 px-5 py-4 shadow-[0_8px_24px_rgba(124,58,237,0.08)]">
-                        <p className="text-sm font-semibold uppercase tracking-[0.16em] text-violet-700">Total estimé</p>
-                        <p className="mt-2 text-3xl font-bold tracking-tight text-[#7C3AED] sm:text-4xl">
-                          {estimatedTotal !== null ? (formatCurrencyFr(estimatedTotal) ?? '0 €') : 'Non sélectionné'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                    <Button variant="secondary" onClick={() => setCurrentStep(2)}>Retour</Button>
-                    <Button onClick={() => setCurrentStep(4)} disabled={!effectiveInsuranceSelection}>Confirmer et continuer</Button>
-                  </div>
-                </div>
-              </Card>
-            </div>
-
-            <div className="w-full shrink-0">
-              <Card className="mt-2" header={<h2 className="text-lg font-semibold text-[#1F2937]">Étape 4 · Paiement et vérifications</h2>}>
-                <div className="space-y-8">
-                  <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(320px,0.9fr)] lg:items-start">
-                    <section className="flex h-full flex-col rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-6">
-                      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Votre réservation</p>
-                      <div className="mt-4 space-y-3 text-[15px] leading-7 text-slate-700 sm:text-base sm:leading-8">
-                        <p><span className="font-medium text-slate-900">Véhicule :</span> <span className="font-semibold text-slate-950">{vehicle.brand} {vehicle.model_name}</span></p>
-                        <p><span className="font-medium text-slate-900">Période :</span> <span className="font-semibold text-slate-950">{paymentPeriodLabel}</span></p>
-                        <p><span className="font-medium text-slate-900">Durée :</span> <span className="font-semibold text-slate-950">{paymentDurationLabel}</span></p>
-                        <p><span className="font-medium text-slate-900">Assurance :</span> <span className="font-semibold text-slate-950">{paymentInsuranceLabel}</span></p>
-                      </div>
-                    </section>
-
-                    <section className="flex h-full flex-col rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-6">
-                      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">À payer</p>
-                      <div className="mt-4 flex h-full flex-col justify-between">
-                        {simulationQuery.isLoading ? (
-                          <div className="flex items-center gap-3 text-sm text-slate-600">
-                            <LoadingSpinner size="sm" aria-label="Chargement du récapitulatif paiement" />
-                            Chargement du calcul backend...
-                          </div>
-                        ) : shouldShowSimulationError ? (
-                          <Alert
-                            variant="danger"
-                            title="Récapitulatif indisponible"
-                            message="Impossible de charger le calcul backend du paiement pour le moment."
-                          />
-                        ) : (
-                          <div className="space-y-3 text-[15px] leading-7 text-slate-700 sm:text-base sm:leading-8">
-                            <div className="flex items-center justify-between gap-4">
-                              <span>Location</span>
-                              <span className="text-xl font-semibold text-[#1F2937] sm:text-2xl">{paymentRentalAmountLabel}</span>
-                            </div>
-                            <div className="flex items-center justify-between gap-4">
-                              <span>Assurance</span>
-                              <span className="text-xl font-semibold text-[#1F2937] sm:text-2xl">{paymentInsuranceAmountLabel}</span>
-                            </div>
-                            <div className="flex items-end justify-between gap-4 border-t border-slate-200 pt-3">
-                              <span className="text-base font-medium text-slate-900">Total à payer</span>
-                              <span className="text-3xl font-bold tracking-tight text-[#7C3AED] sm:text-4xl">{paymentTotalAmountLabel}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </section>
-
-                    <div className="space-y-3">
-                      {gallery.main && resolveMediaUrl(gallery.main.file) ? (
-                        <img
-                          src={resolveMediaUrl(gallery.main.file) ?? undefined}
-                          alt={`${vehicle.brand} ${vehicle.model_name}`}
-                          className="h-[380px] w-full object-contain"
+                    ) : shouldShowSimulationError ? (
+                      <div className="mt-3 space-y-3">
+                        <Alert
+                          variant="danger"
+                          title="Récapitulatif indisponible"
+                          message={simulationError.message}
                         />
-                      ) : (
-                        <div className="flex h-[380px] items-center justify-center text-sm text-slate-600">
-                          Photo indisponible
+                        {simulationError.retryable ? (
+                          <Button variant="secondary" onClick={() => void simulationQuery.refetch()}>Réessayer</Button>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <dl className="mt-3 space-y-2 text-[15px] text-slate-700 sm:text-base">
+                        <div className="flex justify-between gap-4"><dt>Location</dt><dd className="font-semibold text-slate-900">{paymentRentalAmountLabel}</dd></div>
+                        <div className="flex justify-between gap-4"><dt>Assurance</dt><dd className="font-semibold text-slate-900">{paymentInsuranceAmountLabel}</dd></div>
+                        <div className="flex items-baseline justify-between gap-4 rounded-xl bg-violet-50 px-4 py-3">
+                          <dt className="font-semibold text-slate-900">Total à payer</dt>
+                          <dd className="text-2xl font-bold tracking-tight text-[#7C3AED] sm:text-3xl">{paymentTotalAmountLabel}</dd>
                         </div>
-                      )}
-                    </div>
-                  </div>
+                        {!hasReservationIdInQuery ? (
+                          <div className="text-xs text-slate-500">TVA de 21 % comprise pour la location et l'assurance.</div>
+                        ) : null}
+                        <div className="flex justify-between gap-4 text-sm text-slate-600">
+                          <dt>Caution (préautorisation séparée)</dt><dd className="font-medium">{cautionLabel}</dd>
+                        </div>
+                      </dl>
+                    )}
+                    {!hasReservationIdInQuery && cautionLabel !== 'Non renseigné' ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Caution de {cautionLabel} préautorisée sur votre carte. Libérée après restitution et contrôle du véhicule, sous réserve des sommes dues.
+                      </p>
+                    ) : null}
+                  </section>
+
+                  {isAuthenticated ? (
+                    <section>
+                      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Vérifications avant paiement</p>
+                      <dl className="mt-3 space-y-2 text-[15px] text-slate-700 sm:text-base">
+                        {[
+                          { label: 'Compte client', check: paymentChecksQuery.data?.account },
+                          { label: "Carte d'identité", check: paymentChecksQuery.data?.identity },
+                          { label: 'Permis de conduire', check: paymentChecksQuery.data?.license },
+                          { label: 'Compatibilité permis/véhicule', check: paymentChecksQuery.data?.compatibility },
+                          { label: 'Disponibilité du véhicule', check: paymentChecksQuery.data?.availability },
+                        ].map(({ label, check }) => (
+                          <div key={label} className="flex justify-between gap-4">
+                            <dt>{label}</dt>
+                            <dd className={`max-w-[65%] text-right font-semibold ${!paymentChecksQuery.isError && check?.valid ? 'text-emerald-600' : check?.state === 'pending' && !paymentChecksQuery.isError ? 'text-amber-700' : 'text-red-600'}`}>
+                              {paymentChecksQuery.isPending ? 'Vérification...'
+                                : paymentChecksQuery.isError || !check ? 'Vérification indisponible'
+                                  : check.state === 'pending' ? check.message : `${check.valid ? '✓' : '✗'} ${check.message}`}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                      {paymentChecksQuery.isError ? (
+                        <Button variant="secondary" onClick={() => void paymentChecksQuery.refetch()}>Réessayer</Button>
+                      ) : null}
+                    </section>
+                  ) : null}
 
                   <section className="space-y-4">
+                    {isAuthenticated ? <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Données de paiement</p> : null}
                     {isAuthenticated ? (
                       <div className="space-y-4">
                         {profileQuery.isLoading || profileProgressQuery.isLoading ? (
@@ -1867,9 +1910,13 @@ export default function VehicleDetailPage() {
                             title="Vérification du profil impossible"
                             message="Impossible de vérifier votre profil pour l’instant. Merci de réessayer plus tard."
                           />
-                        ) : paymentErrors.length > 0 ? (
+                        ) : paymentChecksQuery.isPending ? (
+                          <div className="text-sm text-slate-600">Vérifications avant paiement en cours...</div>
+                        ) : paymentChecksQuery.isError || !paymentChecksQuery.data ? (
+                          <div className="text-sm text-red-600">Vérification indisponible. Réessayez avant de payer.</div>
+                        ) : paymentErrors.length > 0 || !canProceedToPayment ? (
                           <>
-                            <Alert
+                            {paymentErrors.length > 0 ? <Alert
                               variant="danger"
                               title="Paiement impossible pour le moment"
                               message={
@@ -1877,9 +1924,12 @@ export default function VehicleDetailPage() {
                                   {paymentErrors.map((error) => (<li key={error}>{error}</li>))}
                                 </ul>
                               }
-                            />
+                            /> : null}
                             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                              <Button variant="secondary" onClick={() => setCurrentStep(3)}>Retour</Button>
+                              <Button variant="secondary" onClick={() => setCurrentStep(2)}>Retour</Button>
+                              {licenseVehicleCompatibility === 'incompatible' ? (
+                                <Button variant="secondary" onClick={() => navigate('/vehicles')}>Choisir un autre véhicule</Button>
+                              ) : null}
                               <Button variant="secondary" onClick={() => navigate('/client/profile')}>
                                 Compléter mon profil
                               </Button>
@@ -1916,6 +1966,8 @@ export default function VehicleDetailPage() {
                                   Réessayer
                                 </Button>
                               </div>
+                            ) : shouldShowSimulationError ? (
+                              <Button variant="secondary" onClick={() => setCurrentStep(2)}>Retour</Button>
                             ) : !activeReservation || !paymentClientSecret ? (
                               <Alert
                                 variant="info"
@@ -1924,8 +1976,6 @@ export default function VehicleDetailPage() {
                               />
                             ) : (
                               <>
-                                {paymentSetupMessage ? <Alert variant="success" title="Paiement prêt" message={paymentSetupMessage} /> : null}
-
                                 <Elements
                                   stripe={stripePromise}
                                   options={{
@@ -1944,10 +1994,15 @@ export default function VehicleDetailPage() {
                                 >
                                   <StripePaymentForm
                                     clientSecret={paymentClientSecret}
+                                    initialCardholderName={[profileQuery.data?.first_name, profileQuery.data?.last_name].filter(Boolean).join(' ')}
                                     isSubmitting={isConfirmingPayment}
-                                    onBack={() => setCurrentStep(3)}
+                                    onBack={() => setCurrentStep(2)}
                                     returnUrl={stripeReturnUrl}
                                     onSubmit={handlePaymentSuccess}
+                                    verifyBeforePayment={async () => {
+                                      const result = await paymentChecksQuery.refetch()
+                                      return !result.isError && !!result.data && Object.values(result.data).every((check) => check.valid)
+                                    }}
                                   />
                                 </Elements>
                               </>
@@ -1970,15 +2025,12 @@ export default function VehicleDetailPage() {
                                 vehicleId: vehicle.id,
                                 start,
                                 end,
-                                insurance: selectedInsurance,
-                                insurancePrice,
-                                rentalPrice,
-                                estimatedTotal,
+                                insurance: effectiveInsuranceSelection,
                               },
                             }}
                             className="inline-flex"
                           >
-                            <Button className="h-12 min-w-56 bg-linear-to-r from-[#2563EB] to-[#7C3AED] text-white hover:from-[#1D4ED8] hover:to-[#6D28D9]">Se connecter</Button>
+                            <Button variant="secondary" className="h-12 min-w-56">Se connecter</Button>
                           </Link>
                           <Link
                             to="/register"
@@ -1988,26 +2040,20 @@ export default function VehicleDetailPage() {
                                 vehicleId: vehicle.id,
                                 start,
                                 end,
-                                insurance: selectedInsurance,
-                                insurancePrice,
-                                rentalPrice,
-                                estimatedTotal,
+                                insurance: effectiveInsuranceSelection,
                               },
                             }}
                             className="inline-flex"
                           >
                             <Button
                               variant="secondary"
-                              className="h-12 min-w-56 border border-[#F97316] bg-[#FFF7ED] text-[#C2410C] hover:bg-[#FFEDD5]"
+                              className="h-12 min-w-56"
                             >
                               Créer un compte
                             </Button>
                           </Link>
                         </div>
 
-                        <p className="mx-auto max-w-2xl text-xs font-medium text-slate-500 sm:text-sm">
-                          Après connexion, vous pourrez compléter votre profil et faire valider vos documents avant de finaliser votre réservation.
-                        </p>
                       </div>
                     )}
                   </section>
@@ -2016,62 +2062,26 @@ export default function VehicleDetailPage() {
             </div>
 
             <div className="w-full shrink-0">
-              <Card className="mt-2" header={<h2 className="text-lg font-semibold text-[#1F2937]">Étape 5 · Confirmation</h2>}>
+              <Card
+                className="mx-auto mt-2 max-w-[600px]"
+                header={confirmationReservation?.status === 'CONFIRMEE' ? undefined : <h2 className="text-lg font-semibold text-[#1F2937]">Étape 4 · Confirmation</h2>}
+              >
                 {confirmationReservation?.status === 'CONFIRMEE' ? (
-                  <div className="space-y-5">
-                    <Alert
-                      variant="success"
-                      title="✓ Réservation confirmée"
-                      message="Votre paiement a été accepté et votre réservation est confirmée."
-                    />
-
-                    <div className="grid gap-4 text-sm text-slate-700 sm:grid-cols-2">
-                      <div>
-                        <p className="font-medium text-[#1F2937]">Référence réservation</p>
-                        <p className="mt-1">{confirmationReservation.reference}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-[#1F2937]">Véhicule</p>
-                        <p className="mt-1">{confirmationReservation.vehicle.brand} {confirmationReservation.vehicle.model_name}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-[#1F2937]">Date/heure de début</p>
-                        <p className="mt-1">{formatDateTimeFr(confirmationReservation.start_at)}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-[#1F2937]">Date/heure de fin</p>
-                        <p className="mt-1">{formatDateTimeFr(confirmationReservation.end_at)}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-[#1F2937]">Assurance</p>
-                        <p className="mt-1">{selectedInsuranceOption?.title ?? confirmationReservation.insurance_type ?? 'Non renseignée'}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-[#1F2937]">Montant réellement payé</p>
-                        <p className="mt-1">{formatCurrencyFr(confirmationReservation.total_amount) ?? 'Non renseigné'}</p>
-                      </div>
-                      {isDepositConfirmedForDisplay ? (
-                        <div>
-                          <p className="font-medium text-[#1F2937]">Caution</p>
-                          <p className="mt-1">500 € préautorisés</p>
-                        </div>
-                      ) : null}
-                      <div>
-                        <p className="font-medium text-[#1F2937]">Statut paiement</p>
-                        <p className="mt-1">Confirmé</p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-[#1F2937]">Statut de la réservation</p>
-                        <p className="mt-1">{confirmationReservation.status}</p>
-                      </div>
-                    </div>
-
-                    <p className="text-sm text-slate-600">
+                  <div className="flex flex-col items-center py-4 text-center sm:py-6">
+                    <span aria-hidden="true" className="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500 text-white shadow-[0_8px_24px_rgba(16,185,129,0.3)]">
+                      <Check className="h-11 w-11" strokeWidth={3.5} />
+                    </span>
+                    <h2 className="mt-6 text-2xl font-bold tracking-tight text-[#1F2937] sm:text-3xl">Réservation confirmée !</h2>
+                    <p className="mt-3 text-base text-slate-700">
+                      Votre paiement de {formatCurrencyFr(confirmationReservation.rental_amount) ?? 'montant non renseigné'} a été accepté.
+                    </p>
+                    <p className="mt-2 text-sm font-medium text-slate-700">Référence : {confirmationReservation.reference}</p>
+                    <p className="mt-6 max-w-md text-sm leading-6 text-slate-600">
                       La caution restera en attente jusqu'au contrôle du véhicule après sa restitution.
                     </p>
 
-                    <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
-                      <Button onClick={() => navigate(`/client/reservations?highlight=${confirmationReservation.id}`)}>
+                    <div className="mt-7 flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
+                      <Button className="bg-[#7C3AED] hover:bg-[#6D28D9] focus-visible:ring-[#7C3AED]" onClick={() => navigate(`/client/reservations?highlight=${confirmationReservation.id}`)}>
                         Voir ma réservation
                       </Button>
                       <Button variant="secondary" onClick={() => navigate('/')}>
@@ -2079,7 +2089,18 @@ export default function VehicleDetailPage() {
                       </Button>
                     </div>
                   </div>
-                ) : currentStep >= 5 && hasConfirmationTimedOut ? (
+                ) : currentStep >= 4 && hasPaymentFailed ? (
+                  <div className="space-y-5">
+                    <Alert
+                      variant="danger"
+                      title="Paiement échoué"
+                      message="Paiement échoué. Veuillez recommencer votre réservation."
+                    />
+                    <div className="flex justify-center">
+                      <Button onClick={() => window.location.assign(`/vehicles/${id}`)}>Recommencer ma réservation</Button>
+                    </div>
+                  </div>
+                ) : currentStep >= 4 && hasConfirmationTimedOut ? (
                   <div className="space-y-5">
                     <Alert
                       variant="warning"
@@ -2102,7 +2123,7 @@ export default function VehicleDetailPage() {
                       </Button>
                     </div>
                   </div>
-                ) : currentStep >= 5 && isConfirmingPayment ? (
+                ) : currentStep >= 4 && isConfirmingPayment ? (
                   <div className="flex min-h-[32vh] flex-col items-center justify-center px-4 py-10 text-center sm:min-h-[36vh] sm:px-6 sm:py-12">
                     <LoadingSpinner size="lg" aria-label="Confirmation du paiement en cours" />
                     <h3 className="mt-5 text-2xl font-semibold tracking-tight text-[#1F2937] sm:text-3xl">Veuillez patienter</h3>

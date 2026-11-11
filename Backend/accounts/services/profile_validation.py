@@ -101,9 +101,9 @@ def check_vehicle_compatibility_for_client(
             is_compatible=False,
             code="VEHICLE_INCOMPATIBLE_WITH_LICENSE",
             message=(
-                "Votre permis de conduire autorise uniquement les véhicules automatiques. "
-                "Vous ne pouvez pas réserver ce véhicule à boîte manuelle. "
-                "Veuillez sélectionner un véhicule automatique."
+                "Votre permis autorise uniquement les véhicules automatiques. "
+                "Le véhicule sélectionné possède une boîte manuelle. "
+                "Veuillez choisir un véhicule automatique."
             ),
         )
 
@@ -175,11 +175,6 @@ def validate_client_for_reservation(
     if not personal_info_complete:
         errors.append("PROFILE_INCOMPLETE")
 
-    if client.date_of_birth is not None:
-        age = calculate_age_on_date(client.date_of_birth, reservation_start_date)
-        if age < ClientProfile.MINIMUM_AGE_YEARS:
-            errors.append("UNDER_MINIMUM_AGE")
-
     if client.profile_status != ClientProfile.ProfileStatus.VALIDE:
         errors.append("PROFILE_NOT_VALID")
 
@@ -231,6 +226,17 @@ def validate_client_for_reservation(
         if doc.status != ClientDocument.Status.VALIDE:
             errors.append(error_codes["not_valid"])
             continue
+
+        if doc_type == ClientDocument.DocumentType.CARTE_IDENTITE:
+            if doc.verified_date_of_birth is None:
+                errors.append("IDENTITY_CARD_BIRTH_DATE_UNVERIFIED")
+            else:
+                if client.date_of_birth != doc.verified_date_of_birth:
+                    errors.append("IDENTITY_CARD_BIRTH_DATE_MISMATCH")
+                if doc.verified_date_of_birth > reservation_start_date or calculate_age_on_date(
+                    doc.verified_date_of_birth, reservation_start_date
+                ) < ClientProfile.MINIMUM_AGE_YEARS:
+                    errors.append("UNDER_MINIMUM_AGE")
 
         if doc.expiration_date is None or doc.expiration_date < reservation_end_date:
             errors.append(error_codes["expires_too_soon"])

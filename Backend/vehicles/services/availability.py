@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from numbers import Real
 
 from django.apps import apps
@@ -60,6 +60,9 @@ def calculate_duration_hours(start, end):
             "La date de fin doit etre strictement superieure a la date de debut.",
         )
 
+    if timezone.is_aware(normalized_start) and timezone.is_aware(normalized_end):
+        normalized_start = normalized_start.astimezone(datetime_timezone.utc)
+        normalized_end = normalized_end.astimezone(datetime_timezone.utc)
     return (normalized_end - normalized_start).total_seconds() / 3600
 
 
@@ -319,3 +322,42 @@ def validate_availability_period(*, start, end, minimum_hours=None):
         "end": normalized_end,
         "duration_hours": duration_hours,
     }
+
+
+def validate_daily_rental_period(*, start, end):
+    """Validate a calendar-day rental.
+
+    The departure is at local 10:00, except for a same-day booking made after
+    10:00 where it may be any (future) time of the day. Return is at 10:00
+    on a later calendar day.
+    """
+    period = validate_availability_period(start=start, end=end)
+    local_start = timezone.localtime(period["start"]) if timezone.is_aware(period["start"]) else period["start"]
+    local_end = timezone.localtime(period["end"]) if timezone.is_aware(period["end"]) else period["end"]
+    local_now = timezone.localtime() if timezone.is_aware(period["start"]) else datetime.now()
+
+    start_clock = (local_start.hour, local_start.minute, local_start.second, local_start.microsecond)
+    end_clock = (local_end.hour, local_end.minute, local_end.second, local_end.microsecond)
+    is_same_day_late_start = (
+        local_start.date() == local_now.date()
+        and local_now.hour >= 10
+    )
+    if start_clock != (10, 0, 0, 0) and not is_same_day_late_start:
+        _raise_validation_error(
+            "START_NOT_AT_FIXED_HOUR",
+            "L'heure de depart doit etre fixee a 10 h (ou a l'heure actuelle pour une reservation le jour meme apres 10 h).",
+        )
+    if end_clock != (10, 0, 0, 0):
+        _raise_validation_error(
+            "END_NOT_AT_FIXED_HOUR",
+            "L'heure de retour doit etre fixee a 10 h.",
+        )
+
+    billed_days = (local_end.date() - local_start.date()).days
+    if billed_days < 1:
+        _raise_validation_error(
+            "DURATION_TOO_SHORT",
+            "La duree minimale de location est d'une journee.",
+        )
+
+    return {**period, "billed_days": billed_days}

@@ -1,7 +1,8 @@
 import inspect
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from io import BytesIO
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -28,6 +29,7 @@ from inspections.models import Damage, Inspection, InspectionPhoto
 from interventions.models import Intervention, LockingLog, VehicleAccess
 from interventions.services.vehicle_access import activate_vehicle_access
 from invoicing.models import Invoice, InvoiceLine
+from invoicing.services import create_invoice_for_reservation
 from notifications.models import Notification
 from payments.models import Deposit, Payment, Refund
 from reservations.models import Reservation
@@ -201,6 +203,11 @@ class PricingSimulationDataMixin:
 		end_at = start_at + timedelta(hours=duration_hours)
 		return start_at, end_at
 
+	def _daily_period(self, *, days=1, start_offset_days=3):
+		start_date = timezone.localdate() + timedelta(days=start_offset_days)
+		start_at = timezone.make_aware(datetime.combine(start_date, time(10)))
+		return start_at, start_at + timedelta(days=days)
+
 	def _future_period_seconds(self, *, start_delta_hours=2, duration_seconds=60):
 		start_at = timezone.now() + timedelta(hours=start_delta_hours)
 		end_at = start_at + timedelta(seconds=duration_seconds)
@@ -351,6 +358,31 @@ class PriceSimulationServiceTests(PricingSimulationDataMixin, TestCase):
 
 		self.assertTrue(result.insurance_included)
 
+	def test_complementary_insurance_costs_ten_euros_per_billed_day(self):
+		for hours, expected_days in ((24, 1), (72, 3), (168, 7)):
+			start_at, end_at = self._future_period(duration_hours=hours)
+
+			result = calculate_price_simulation(
+				vehicle=self.vehicle_hybrid,
+				start_at=start_at,
+				end_at=end_at,
+				insurance_type="COMPLEMENTAIRE",
+			)
+
+			self.assertEqual(result.insurance_amount, Decimal(10 * expected_days))
+
+	def test_standard_insurance_has_no_extra_cost(self):
+		start_at, end_at = self._future_period(duration_hours=72)
+
+		result = calculate_price_simulation(
+			vehicle=self.vehicle_hybrid,
+			start_at=start_at,
+			end_at=end_at,
+			insurance_type="STANDARD",
+		)
+
+		self.assertEqual(result.insurance_amount, Decimal("0.00"))
+
 	def test_duo_insurance_is_added_to_total_amount(self):
 		start_at, end_at = self._future_period(duration_hours=26)
 
@@ -452,8 +484,9 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		)
 
 	def _payload(self, *, vehicle_id=None, start_at=None, end_at=None, **extra):
-		start = start_at or (timezone.now() + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
-		end = end_at or (start + timedelta(hours=6))
+		start, daily_end = self._daily_period()
+		start = start_at or start
+		end = end_at or (daily_end if start_at is None else start + timedelta(days=1))
 		data = {
 			"vehicle_id": vehicle_id if vehicle_id is not None else self.vehicle_hybrid.id,
 			"start_at": start.isoformat(),
@@ -475,6 +508,7 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 			{
 				"vehicle_id",
 				"duration_hours",
+				"billed_days",
 				"rental_amount",
 				"insurance_type",
 				"insurance_amount",
@@ -485,7 +519,7 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		)
 
 	def test_successful_simulation_returns_base_computed_amounts(self):
-		start_at, end_at = self._future_period(duration_hours=2)
+		start_at, end_at = self._daily_period()
 
 		response = self.client_api.post(
 			self.url,
@@ -495,16 +529,17 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(response.data["vehicle_id"], self.vehicle_hybrid.id)
-		self.assertEqual(Decimal(str(response.data["duration_hours"])), Decimal("2.00"))
-		self.assertEqual(Decimal(str(response.data["rental_amount"])), Decimal("24.00"))
+		self.assertEqual(Decimal(str(response.data["duration_hours"])), Decimal("24.00"))
+		self.assertEqual(response.data["billed_days"], 1)
+		self.assertEqual(Decimal(str(response.data["rental_amount"])), Decimal("50.00"))
 		self.assertEqual(response.data["insurance_type"], "STANDARD")
 		self.assertEqual(Decimal(str(response.data["insurance_amount"])), Decimal("0.00"))
 		self.assertEqual(Decimal(str(response.data["deposit_amount"])), Decimal("500.00"))
-		self.assertEqual(Decimal(str(response.data["total_amount"])), Decimal("24.00"))
+		self.assertEqual(Decimal(str(response.data["total_amount"])), Decimal("50.00"))
 		self.assertTrue(response.data["insurance_included"])
 
-	def test_successful_simulation_with_duo_insurance_includes_insurance_amount(self):
-		start_at, end_at = self._future_period(duration_hours=26)
+	def test_successful_simulation_with_complementary_insurance_includes_insurance_amount(self):
+		start_at, end_at = self._daily_period()
 
 		response = self.client_api.post(
 			self.url,
@@ -512,16 +547,33 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 				vehicle_id=self.vehicle_hybrid.id,
 				start_at=start_at,
 				end_at=end_at,
-				insurance_type="DUO",
+				insurance_type="COMPLEMENTAIRE",
 			),
 			format="json",
 		)
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
-		self.assertEqual(response.data["insurance_type"], "DUO")
-		self.assertEqual(Decimal(str(response.data["insurance_amount"])), Decimal("16.00"))
-		self.assertEqual(Decimal(str(response.data["rental_amount"])), Decimal("100.00"))
-		self.assertEqual(Decimal(str(response.data["total_amount"])), Decimal("116.00"))
+		self.assertEqual(response.data["insurance_type"], "COMPLEMENTAIRE")
+		self.assertEqual(Decimal(str(response.data["insurance_amount"])), Decimal("10.00"))
+		self.assertEqual(Decimal(str(response.data["rental_amount"])), Decimal("50.00"))
+		self.assertEqual(Decimal(str(response.data["total_amount"])), Decimal("60.00"))
+
+	def test_legacy_insurance_types_are_rejected_for_new_simulations(self):
+		start_at, end_at = self._daily_period()
+
+		for legacy_type in ("DUO", "OMNIUM"):
+			response = self.client_api.post(
+				self.url,
+				self._payload(
+					vehicle_id=self.vehicle_hybrid.id,
+					start_at=start_at,
+					end_at=end_at,
+					insurance_type=legacy_type,
+				),
+				format="json",
+			)
+
+			self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 	def test_unknown_vehicle_returns_404(self):
 		response = self.client_api.post(self.url, self._payload(vehicle_id=999999), format="json")
@@ -547,10 +599,11 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 			format="json",
 		)
 
-		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("statut", response.data["detail"].lower())
 
 	def test_reserved_vehicle_with_overlap_returns_400(self):
-		start_at, end_at = self._future_period(duration_hours=2)
+		start_at, end_at = self._daily_period()
 		Reservation.objects.create(
 			client=self.client_profile,
 			vehicle=self.vehicle_hybrid,
@@ -562,9 +615,6 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 			deposit_amount=Decimal("500.00"),
 			confirmed_at=timezone.now(),
 		)
-		self.vehicle_hybrid.status = Vehicle.Status.RESERVE
-		self.vehicle_hybrid.save(update_fields=["status"])
-
 		response = self.client_api.post(
 			self.url,
 			self._payload(vehicle_id=self.vehicle_hybrid.id, start_at=start_at, end_at=end_at),
@@ -726,8 +776,8 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		self.assertIn("start_at", response.data)
 
 	def test_duration_too_short_returns_400(self):
-		start = (timezone.now() + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
-		end = start + timedelta(hours=1)
+		start, _ = self._daily_period()
+		end = start + timedelta(hours=23)
 		response = self.client_api.post(
 			self.url,
 			self._payload(vehicle_id=self.vehicle_min_4h.id, start_at=start, end_at=end),
@@ -735,7 +785,7 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		)
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-		self.assertIn("duree", response.data["detail"].lower())
+		self.assertIn("heure de retour", response.data["detail"])
 
 	@patch(
 		"reservations.views.pricing.calculate_price_simulation",
@@ -778,7 +828,7 @@ class PriceSimulationEndpointTests(PricingSimulationDataMixin, TestCase):
 		mock_is_available.assert_called_once()
 
 	def test_endpoint_does_not_create_reservation_or_payment_and_keeps_vehicle_status(self):
-		start_at, end_at = self._future_period(duration_hours=3)
+		start_at, end_at = self._daily_period()
 
 		reservation_count_before = self._optional_model_count("reservations", "Reservation")
 		payment_count_before = self._optional_model_count("payments", "Payment")
@@ -990,6 +1040,7 @@ class ReservationTestDataMixin:
 			client=profile,
 			document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
 			document_number=f"ID-{suffix}",
+			verified_date_of_birth=profile.date_of_birth,
 			file=_doc_file(f"id-{suffix}.bin"),
 			expiration_date=expiration,
 			status=ClientDocument.Status.VALIDE,
@@ -1011,6 +1062,11 @@ class ReservationTestDataMixin:
 		start_at = (timezone.now() + timedelta(hours=start_hours)).replace(minute=0, second=0, microsecond=0)
 		end_at = start_at + timedelta(hours=duration_hours)
 		return start_at, end_at
+
+	def _daily_period(self, *, days=1, start_offset_days=3):
+		start_date = timezone.localdate() + timedelta(days=start_offset_days)
+		start_at = timezone.make_aware(datetime.combine(start_date, time(10)))
+		return start_at, start_at + timedelta(days=days)
 
 	def _optional_model_count(self, app_label, model_name):
 		try:
@@ -1183,6 +1239,9 @@ class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
 	def setUp(self):
 		self.client_api = APIClient()
 		self.url = reverse("reservations:reservation-list-create")
+
+	def _period(self, *, start_hours=6, duration_hours=4):
+		return self._daily_period()
 
 	def _payload(self, *, vehicle_id=None, start_at=None, end_at=None, **extra):
 		start, end = (start_at, end_at) if start_at and end_at else self._period()
@@ -1425,8 +1484,7 @@ class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
 
 	def test_vehicule_reserve_hors_conflit_accepte(self):
 		self.client_api.force_authenticate(self.client_user_1)
-		start = (timezone.now() + timedelta(days=3)).replace(minute=0, second=0, microsecond=0)
-		end = start + timedelta(hours=4)
+		start, end = self._daily_period()
 
 		response = self.client_api.post(
 			self.url,
@@ -1434,20 +1492,20 @@ class ReservationCreationEndpointTests(ReservationTestDataMixin, TestCase):
 			format="json",
 		)
 
-		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-		self.assertEqual(response.data["vehicle"]["id"], self.vehicle_reserved.id)
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(response.data["code"], "VEHICLE_NOT_BOOKABLE")
 
 	def test_periode_invalide_refuse(self):
 		self.client_api.force_authenticate(self.client_user_1)
-		start = (timezone.now() + timedelta(hours=10)).replace(minute=0, second=0, microsecond=0)
-		end = start - timedelta(hours=1)
+		start, _ = self._daily_period()
+		end = start - timedelta(days=1)
 		response = self.client_api.post(
 			self.url,
 			self._payload(start_at=start, end_at=end),
 			format="json",
 		)
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-		self.assertEqual(response.data["code"], "INVALID_PERIOD")
+		self.assertIn("end_at", response.data)
 
 	def test_vehicule_deja_reserve_refuse(self):
 		self.client_api.force_authenticate(self.client_user_1)
@@ -1510,15 +1568,16 @@ class ReservationClientConsultationTests(ReservationTestDataMixin, TestCase):
 		self.client_api = APIClient()
 		self.list_url = reverse("reservations:reservation-list-create")
 		self.dashboard_url = reverse("reservations:reservation-dashboard")
-		self.owned_reservation = self._create_reservation(client=self.client_profile_1)
+		self.owned_reservation = self._create_reservation(client=self.client_profile_1, status=Reservation.Status.CONFIRMEE)
 		self.owned_reservation_2 = self._create_reservation(
 			client=self.client_profile_1,
-			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+			status=Reservation.Status.TERMINEE,
 			start_at=timezone.now() + timedelta(days=2),
 			end_at=timezone.now() + timedelta(days=2, hours=3),
 		)
 		self.other_reservation = self._create_reservation(
 			client=self.client_profile_2,
+			status=Reservation.Status.CONFIRMEE,
 			start_at=timezone.now() + timedelta(days=3),
 			end_at=timezone.now() + timedelta(days=3, hours=3),
 		)
@@ -1598,7 +1657,7 @@ class ReservationClientConsultationTests(ReservationTestDataMixin, TestCase):
 
 	def test_filtre_par_statut(self):
 		self.client_api.force_authenticate(self.client_user_1)
-		response = self.client_api.get(self.list_url, {"status": Reservation.Status.EN_ATTENTE_PAIEMENT})
+		response = self.client_api.get(self.list_url, {"status": Reservation.Status.TERMINEE})
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		ids = {item["id"] for item in response.data["results"]}
 		self.assertEqual(ids, {self.owned_reservation_2.id})
@@ -1607,6 +1666,7 @@ class ReservationClientConsultationTests(ReservationTestDataMixin, TestCase):
 		for idx in range(25):
 			self._create_reservation(
 				client=self.client_profile_1,
+				status=Reservation.Status.CONFIRMEE,
 				start_at=timezone.now() + timedelta(days=4 + idx),
 				end_at=timezone.now() + timedelta(days=4 + idx, hours=3),
 			)
@@ -1699,6 +1759,66 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 			status=status,
 			authorized_at=timezone.now(),
 		)
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_cancellation_preserves_existing_invoice_and_pdf(self, mocked_refund_create):
+		start = timezone.now() + timedelta(hours=30)
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start,
+			end_at=start + timedelta(hours=2),
+		)
+		self._create_success_payment(reservation, "120.00")
+		self._create_deposit_for_cancellation(reservation)
+		invoice = create_invoice_for_reservation(reservation)
+		invoice.pdf_file.name = "invoices/historical.pdf"
+		invoice.save(update_fields=["pdf_file"])
+		original_values = (invoice.status, invoice.subtotal, invoice.tax_amount, invoice.total_amount, invoice.pdf_file.name)
+		original_lines = list(invoice.lines.values_list("line_type", "description", "quantity", "unit_price", "total_price"))
+		mocked_refund_create.return_value = SimpleNamespace(id="re_historical_invoice", status="succeeded")
+		self.client_api.force_authenticate(self.client_user_1)
+
+		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+			with patch.object(invoice.pdf_file.storage, "delete") as delete_pdf:
+				response = self.client_api.post(
+					reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id}),
+					{"reason": "Changement de plan"},
+					format="json",
+				)
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		invoice.refresh_from_db()
+		self.assertEqual(
+			(invoice.status, invoice.subtotal, invoice.tax_amount, invoice.total_amount, invoice.pdf_file.name),
+			original_values,
+		)
+		self.assertEqual(
+			list(invoice.lines.values_list("line_type", "description", "quantity", "unit_price", "total_price")),
+			original_lines,
+		)
+		delete_pdf.assert_not_called()
+		self.assertEqual(Invoice.objects.filter(reservation=reservation).count(), 1)
+
+	@patch("reservations.services.cancellation.stripe.Refund.create")
+	def test_pending_or_failed_refund_does_not_issue_cancellation_invoice(self, mocked_refund_create):
+		self.client_api.force_authenticate(self.client_user_1)
+		for stripe_status, expected in [("pending", Refund.Status.EN_COURS), ("failed", Refund.Status.ECHOUE)]:
+			with self.subTest(stripe_status=stripe_status):
+				start = timezone.now() + timedelta(hours=30)
+				reservation = self._create_reservation(
+					status=Reservation.Status.CONFIRMEE, start_at=start, end_at=start + timedelta(hours=2),
+				)
+				self._create_success_payment(reservation, "120.00")
+				self._create_deposit_for_cancellation(reservation)
+				mocked_refund_create.return_value = SimpleNamespace(id=f"re_{stripe_status}_{reservation.id}", status=stripe_status)
+				with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
+					response = self.client_api.post(
+						reverse("reservations:reservation-cancel", kwargs={"pk": reservation.id}),
+						{"reason": "Changement de plan"}, format="json",
+					)
+				self.assertEqual(response.status_code, status.HTTP_200_OK)
+				self.assertEqual(Refund.objects.get(reservation=reservation).status, expected)
+				self.assertFalse(Invoice.objects.filter(reservation=reservation).exists())
 
 	def test_proprietaire_peut_annuler_brouillon(self):
 		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
@@ -1831,8 +1951,8 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		result = calculate_cancellation_financials(reservation=reservation, now=now)
 
 		self.assertEqual(result.amount_paid, Decimal("120.00"))
-		self.assertEqual(result.cancellation_fee, Decimal("0.00"))
-		self.assertEqual(result.refundable_amount, Decimal("120.00"))
+		self.assertEqual(result.cancellation_fee, Decimal("20.00"))
+		self.assertEqual(result.refundable_amount, Decimal("100.00"))
 
 	def test_regle_financiere_annulation_exactement_24h(self):
 		now = timezone.now().replace(microsecond=0)
@@ -1848,7 +1968,7 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(result.amount_paid, Decimal("80.00"))
 		self.assertEqual(result.cancellation_fee, Decimal("0.00"))
-		self.assertEqual(result.refundable_amount, Decimal("80.00"))
+		self.assertEqual(result.refundable_amount, Decimal("0.00"))
 
 	def test_regle_financiere_annulation_moins_de_24h(self):
 		now = timezone.now().replace(microsecond=0)
@@ -1863,7 +1983,7 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		result = calculate_cancellation_financials(reservation=reservation, now=now)
 
 		self.assertEqual(result.amount_paid, Decimal("30.00"))
-		self.assertEqual(result.cancellation_fee, Decimal("50.00"))
+		self.assertEqual(result.cancellation_fee, Decimal("0.00"))
 		self.assertEqual(result.refundable_amount, Decimal("0.00"))
 
 	def test_regle_financiere_en_cours_refusee(self):
@@ -1900,8 +2020,8 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertTrue(response.data["can_cancel"])
 		self.assertEqual(response.data["amount_paid"], "120.00")
-		self.assertEqual(response.data["cancellation_fee"], "0.00")
-		self.assertEqual(response.data["refundable_amount"], "120.00")
+		self.assertEqual(response.data["cancellation_fee"], "20.00")
+		self.assertEqual(response.data["refundable_amount"], "100.00")
 		self.assertEqual(response.data["deposit_release"], "Liberee integralement")
 
 	@patch("reservations.services.cancellation.stripe.Refund.create")
@@ -1920,17 +2040,17 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		mocked_refund_create.return_value = SimpleNamespace(id="re_cancel_response_001", status="succeeded")
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
-			response = self.client_api.post(url, {"reason": "Annulation tardive"}, format="json")
+			response = self.client_api.post(url, {"reason": "Annulation tardive", "confirm_no_refund": True}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertIn("cancellation_financials", response.data)
 		self.assertEqual(response.data["cancellation_financials"]["amount_paid"], Decimal("120.00"))
-		self.assertEqual(response.data["cancellation_financials"]["cancellation_fee"], Decimal("50.00"))
-		self.assertEqual(response.data["cancellation_financials"]["refundable_amount"], Decimal("70.00"))
+		self.assertEqual(response.data["cancellation_financials"]["cancellation_fee"], Decimal("0.00"))
+		self.assertEqual(response.data["cancellation_financials"]["refundable_amount"], Decimal("0.00"))
 		self.assertEqual(response.data["cancellation_financials"]["deposit_release"], "Liberee integralement")
 
 	@patch("reservations.services.cancellation.stripe.Refund.create")
-	def test_remboursement_integral_declenche(self, mocked_refund_create):
+	def test_remboursement_partiel_anticipe_declenche(self, mocked_refund_create):
 		now = timezone.now().replace(microsecond=0)
 		start = now + timedelta(hours=30)
 		reservation = self._create_reservation(
@@ -1949,13 +2069,13 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		refund = Refund.objects.get(reservation=reservation)
-		self.assertEqual(refund.amount, Decimal("120.00"))
+		self.assertEqual(refund.amount, Decimal("100.00"))
 		self.assertEqual(refund.status, Refund.Status.REUSSI)
 		kwargs = mocked_refund_create.call_args.kwargs
-		self.assertEqual(kwargs["amount"], 12000)
+		self.assertEqual(kwargs["amount"], 10000)
 
 	@patch("reservations.services.cancellation.stripe.Refund.create")
-	def test_annulation_sans_frais_cree_document_financier_et_notification(self, mocked_refund_create):
+	def test_annulation_anticipee_cree_document_financier_et_notification(self, mocked_refund_create):
 		now = timezone.now().replace(microsecond=0)
 		start = now + timedelta(hours=30)
 		reservation = self._create_reservation(
@@ -1975,12 +2095,12 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		invoice, descriptions = self._invoice_descriptions(reservation)
-		self.assertEqual(invoice.status, Invoice.Status.CANCELLED)
+		self.assertEqual(invoice.status, Invoice.Status.ISSUED)
+		self.assertEqual(invoice.total_amount, Decimal("20.00"))
 		self.assertTrue(any(text.startswith("Annulation - Reservation: Reservation annulee le ") for text in descriptions))
 		self.assertIn("Annulation - Montant initial paye: 120,00 €", descriptions)
-		self.assertIn("Annulation - Frais: 0,00 €", descriptions)
-		self.assertIn("Annulation - Montant rembourse: 120,00 €", descriptions)
-		self.assertIn("Annulation - Caution: Liberee", descriptions)
+		self.assertIn("Annulation - Frais: 20,00 €", descriptions)
+		self.assertIn("Annulation - Montant rembourse: 100,00 €", descriptions)
 
 		notification = Notification.objects.filter(
 			notification_type="RESERVATION_CANCELLED",
@@ -1991,11 +2111,11 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(notification.title, "Reservation annulee")
 		self.assertEqual(
 			notification.message,
-			"Votre reservation a ete annulee. Remboursement : 120,00 €. Frais : 0,00 €. Caution liberee.",
+			"Votre reservation a ete annulee. Remboursement prévu : 100,00 €. Frais : 20,00 €. Caution liberee.",
 		)
 
 	@patch("reservations.services.cancellation.stripe.Refund.create")
-	def test_annulation_avec_frais_50_met_a_jour_document_financier(self, mocked_refund_create):
+	def test_annulation_tardive_cree_document_financier_sans_remboursement(self, mocked_refund_create):
 		now = timezone.now().replace(microsecond=0)
 		start = now + timedelta(hours=5)
 		reservation = self._create_reservation(
@@ -2010,14 +2130,16 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		mocked_refund_create.return_value = SimpleNamespace(id="re_cancel_doc_002", status="succeeded")
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
-			response = self.client_api.post(url, {"reason": "Annulation tardive"}, format="json")
+			response = self.client_api.post(url, {"reason": "Annulation tardive", "confirm_no_refund": True}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		invoice, descriptions = self._invoice_descriptions(reservation)
-		self.assertEqual(invoice.status, Invoice.Status.CANCELLED)
+		self.assertEqual(invoice.status, Invoice.Status.ISSUED)
+		self.assertEqual(invoice.total_amount, Decimal("120.00"))
 		self.assertIn("Annulation - Montant initial paye: 120,00 €", descriptions)
-		self.assertIn("Annulation - Frais: 50,00 €", descriptions)
-		self.assertIn("Annulation - Montant rembourse: 70,00 €", descriptions)
+		self.assertIn("Annulation - Frais: 0,00 €", descriptions)
+		self.assertIn("Annulation - Montant rembourse: 0,00 €", descriptions)
+		mocked_refund_create.assert_not_called()
 
 	@patch("reservations.services.cancellation.stripe.Refund.create")
 	def test_pdf_telechargeable_apres_annulation(self, mocked_refund_create):
@@ -2047,7 +2169,7 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		self.assertTrue(pdf_bytes.startswith(b"%PDF"))
 
 	@patch("reservations.services.cancellation.stripe.Refund.create")
-	def test_remboursement_partiel_avec_frais_50(self, mocked_refund_create):
+	def test_annulation_tardive_ne_cree_pas_de_remboursement(self, mocked_refund_create):
 		now = timezone.now().replace(microsecond=0)
 		start = now + timedelta(hours=5)
 		reservation = self._create_reservation(
@@ -2062,14 +2184,11 @@ class ReservationCancellationTests(ReservationTestDataMixin, TestCase):
 		mocked_refund_create.return_value = SimpleNamespace(id="re_partial_001", status="succeeded")
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_cancel_123"):
-			response = self.client_api.post(url, {"reason": "Annulation tardive"}, format="json")
+			response = self.client_api.post(url, {"reason": "Annulation tardive", "confirm_no_refund": True}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
-		refund = Refund.objects.get(reservation=reservation)
-		self.assertEqual(refund.amount, Decimal("70.00"))
-		self.assertEqual(refund.status, Refund.Status.REUSSI)
-		kwargs = mocked_refund_create.call_args.kwargs
-		self.assertEqual(kwargs["amount"], 7000)
+		self.assertFalse(Refund.objects.filter(reservation=reservation).exists())
+		mocked_refund_create.assert_not_called()
 
 	@patch("reservations.services.cancellation.stripe.Refund.create")
 	def test_caution_est_liberee(self, mocked_refund_create):
@@ -2580,6 +2699,28 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 		self.client_api = APIClient()
 		self.url = lambda reservation_id: reverse("reservations:management-reservation-complete", kwargs={"pk": reservation_id})
 		self.issue_url = lambda reservation_id: reverse("reservations:management-reservation-report-issue", kwargs={"pk": reservation_id})
+		media = TemporaryDirectory()
+		self.addCleanup(media.cleanup)
+		media_settings = override_settings(MEDIA_ROOT=media.name)
+		media_settings.enable()
+		self.addCleanup(media_settings.disable)
+
+	def _prepare_financials(self, reservation):
+		from reservations.services.completion import confirm_return_charges
+
+		Inspection.objects.create(
+			reservation=reservation, inspection_type=Inspection.Type.INITIAL,
+			status=Inspection.Status.TERMINE, completed_at=timezone.now(), energy_level_percent=95,
+		)
+		final = reservation.inspections.get(inspection_type=Inspection.Type.FINAL)
+		final.energy_level_percent = 95
+		final.save(update_fields=["energy_level_percent"])
+		confirm_return_charges(reservation=reservation, requested_by=self.manager_user)
+		Payment.objects.create(
+			reservation=reservation, amount=reservation.rental_amount, currency="EUR",
+			status=Payment.Status.REUSSI, stripe_payment_intent_id=f"pi_completion_{reservation.id}",
+			succeeded_at=timezone.now(),
+		)
 
 	def _make_active_access(self, reservation):
 		if reservation.status != Reservation.Status.EN_COURS:
@@ -2620,6 +2761,7 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 			completed_at=timezone.now(),
 			completed_by=self.client_user_1,
 		)
+		self._prepare_financials(reservation)
 
 		mechanic = get_user_model().objects.create_user(
 			email="mechanic.complete@example.com",
@@ -2905,6 +3047,7 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 			completed_at=timezone.now(),
 			completed_by=self.client_user_1,
 		)
+		self._prepare_financials(reservation)
 		Intervention.objects.create(
 			reservation=reservation,
 			vehicle=reservation.vehicle,
@@ -2948,6 +3091,7 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 		)
 		self.client_api.force_authenticate(self.manager_user)
 		mocked_retrieve.return_value = SimpleNamespace(status="requires_capture")
+		mocked_cancel.return_value = SimpleNamespace(status="canceled")
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
 			with self.captureOnCommitCallbacks(execute=True):
@@ -3750,11 +3894,13 @@ class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase)
 	def setUp(self):
 		self.client_api = APIClient()
 		self.list_url = reverse("reservations:management-reservation-list")
-		self.reservation_client_1 = self._create_reservation(client=self.client_profile_1, vehicle=self.vehicle_available)
+		self.reservation_client_1 = self._create_reservation(
+			client=self.client_profile_1, vehicle=self.vehicle_available, status=Reservation.Status.CONFIRMEE
+		)
 		self.reservation_client_2 = self._create_reservation(
 			client=self.client_profile_2,
 			vehicle=self.vehicle_reserved,
-			status=Reservation.Status.EN_ATTENTE_PAIEMENT,
+			status=Reservation.Status.EN_COURS,
 			start_at=timezone.now() + timedelta(days=2),
 			end_at=timezone.now() + timedelta(days=2, hours=4),
 		)
@@ -3766,6 +3912,32 @@ class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase)
 		ids = {item["id"] for item in response.data["results"]}
 		self.assertIn(self.reservation_client_1.id, ids)
 		self.assertIn(self.reservation_client_2.id, ids)
+
+	def test_manager_detail_exposes_unconfirmed_return_estimate(self):
+		reservation = self.reservation_client_1
+		url = reverse("reservations:management-reservation-detail", kwargs={"pk": reservation.id})
+		self.client_api.force_authenticate(self.manager_user)
+		self.assertIsNone(self.client_api.get(url).data["return_charges_estimate"])
+		Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.INITIAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=reservation.start_at,
+			energy_level_percent=90,
+		)
+		Inspection.objects.create(
+			reservation=reservation,
+			inspection_type=Inspection.Type.FINAL,
+			status=Inspection.Status.TERMINE,
+			completed_at=reservation.end_at + timedelta(hours=24, seconds=1),
+			energy_level_percent=89,
+		)
+		response = self.client_api.get(url)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(
+			response.data["return_charges_estimate"],
+			{"delay_seconds": 86401.0, "delay_fee": "240.00", "fuel_fee": "20.00"},
+		)
 
 	def test_manager_reservation_exposes_invoice_and_can_download_it(self):
 		invoice = Invoice.objects.create(
@@ -3859,10 +4031,12 @@ class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase)
 	def test_filter_cancelled_reservations_by_source(self):
 		client_cancelled = self._create_reservation(status=Reservation.Status.ANNULEE)
 		client_cancelled.cancellation_source = Reservation.CancellationSource.CLIENT
-		client_cancelled.save(update_fields=["cancellation_source", "updated_at"])
+		client_cancelled.confirmed_at = timezone.now()
+		client_cancelled.save(update_fields=["cancellation_source", "confirmed_at", "updated_at"])
 		manager_cancelled = self._create_reservation(status=Reservation.Status.ANNULEE)
 		manager_cancelled.cancellation_source = Reservation.CancellationSource.MANAGER
-		manager_cancelled.save(update_fields=["cancellation_source", "updated_at"])
+		manager_cancelled.confirmed_at = timezone.now()
+		manager_cancelled.save(update_fields=["cancellation_source", "confirmed_at", "updated_at"])
 		self.client_api.force_authenticate(self.manager_user)
 
 		response = self.client_api.get(
@@ -3935,8 +4109,14 @@ class ReservationManagementConsultationTests(ReservationTestDataMixin, TestCase)
 
 	def test_filter_reservation_date_bounds(self):
 		start = timezone.now() + timedelta(days=10)
-		matching = self._create_reservation(start_at=start, end_at=start + timedelta(hours=4))
-		self._create_reservation(start_at=start + timedelta(days=5), end_at=start + timedelta(days=5, hours=4))
+		matching = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE, start_at=start, end_at=start + timedelta(hours=4)
+		)
+		self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=start + timedelta(days=5),
+			end_at=start + timedelta(days=5, hours=4),
+		)
 		self.client_api.force_authenticate(self.manager_user)
 
 		response = self.client_api.get(self.list_url, {

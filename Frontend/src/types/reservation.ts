@@ -1,10 +1,10 @@
-import type { Inspection, InspectionPhoto } from './inspection'
+import type { Inspection, InspectionPhoto, InspectionDamage } from './inspection'
 
 export interface ReservationCreateRequest {
   vehicle_id: number
   start_at: string
   end_at: string
-  insurance_type?: 'STANDARD' | 'DUO' | 'OMNIUM'
+  insurance_type?: 'STANDARD' | 'COMPLEMENTAIRE' | 'DUO' | 'OMNIUM'
 }
 
 export interface ReservationListQueryParams {
@@ -51,22 +51,28 @@ export interface ReservationCreateResponse {
   vehicle: ReservationVehicleSummary
   start_at: string
   end_at: string
+  is_daily_rate_booking: boolean
   status?: ReservationStatus
   rental_amount: string
-  insurance_type?: 'STANDARD' | 'DUO' | 'OMNIUM'
+  insurance_type?: 'STANDARD' | 'COMPLEMENTAIRE' | 'DUO' | 'OMNIUM'
   deposit_amount: string
   total_amount: string
   invoice_id?: number | null
+  invoice_pdf_available?: boolean
   actual_pickup_at?: string | null
   actual_return_at?: string | null
+  unlock_availability?: { allowed: boolean; code: string | null; message: string | null } | null
   created_at: string
   confirmed_at?: string | null
   cancelled_at?: string | null
   cancellation_reason?: string
+  cancellation_source?: 'CLIENT' | 'GESTIONNAIRE' | 'SYSTEME' | null
 }
 
 export interface ReservationInspectionDetail extends Inspection {
   photos: InspectionPhoto[]
+  damages: InspectionDamage[]
+  return_access_secured: boolean
 }
 
 export interface ReservationDetail extends ReservationCreateResponse {
@@ -83,6 +89,7 @@ export interface PaginatedReservationListResponse {
 
 export interface ReservationCancelRequest {
   reason: string
+  confirm_no_refund?: boolean
 }
 
 export interface ReservationCancellationFinancials {
@@ -94,6 +101,7 @@ export interface ReservationCancellationFinancials {
 
 export interface ReservationCancellationPreview extends ReservationCancellationFinancials {
   can_cancel: boolean
+  no_refund: boolean
 }
 
 export interface ReservationCancelResponse {

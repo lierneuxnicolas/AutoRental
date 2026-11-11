@@ -9,79 +9,71 @@ from vehicles.serializers.public import VehicleAvailabilityQuerySerializer
 
 
 class ReservationHourPrecisionValidationTests(TestCase):
-    def _future_hour(self, hours_offset: int):
-        value = timezone.now() + timedelta(hours=hours_offset)
-        return value.replace(minute=0, second=0, microsecond=0)
+    def _future_daily_period(self):
+        start_date = timezone.localdate() + timedelta(days=3)
+        start = timezone.make_aware(datetime.combine(start_date, time(10)))
+        return start, start + timedelta(days=1)
 
-    def _future_half_hour(self, hours_offset: int) -> timezone.datetime:
-        value = self._future_hour(hours_offset)
-        return value.replace(minute=30)
-
-    def test_reservation_create_rejects_half_hour(self):
+    def test_reservation_create_rejects_non_ten_start(self):
+        start, end = self._future_daily_period()
         serializer = ReservationCreateRequestSerializer(
             data={
                 "vehicle_id": 1,
-                "start_at": self._future_half_hour(2).isoformat(),
-                "end_at": self._future_hour(4).isoformat(),
+                "start_at": (start + timedelta(minutes=30)).isoformat(),
+                "end_at": (end + timedelta(minutes=30)).isoformat(),
                 "insurance_type": "STANDARD",
             }
         )
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("start_at", serializer.errors)
-        self.assertIn("minutes = 00", str(serializer.errors["start_at"][0]))
 
-    def test_reservation_create_accepts_full_hour_values(self):
+    def test_reservation_create_accepts_one_day_at_ten(self):
+        start, end = self._future_daily_period()
         serializer = ReservationCreateRequestSerializer(
             data={
                 "vehicle_id": 1,
-                "start_at": self._future_hour(2).isoformat(),
-                "end_at": self._future_hour(7).isoformat(),
+                "start_at": start.isoformat(),
+                "end_at": end.isoformat(),
                 "insurance_type": "STANDARD",
             }
         )
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
 
-    def test_pricing_simulation_rejects_half_hour(self):
+    def test_pricing_simulation_serializer_accepts_minute_precision(self):
+        start, end = self._future_daily_period()
         serializer = PriceSimulationRequestSerializer(
             data={
                 "vehicle_id": 1,
-                "start_at": self._future_hour(3).isoformat(),
-                "end_at": self._future_half_hour(6).isoformat(),
+                "start_at": (start + timedelta(minutes=30)).isoformat(),
+                "end_at": (end + timedelta(minutes=30)).isoformat(),
                 "insurance_type": "STANDARD",
             },
             context={"now": timezone.now()},
         )
 
-        self.assertFalse(serializer.is_valid())
-        self.assertIn("end_at", serializer.errors)
-        self.assertIn("minutes = 00", str(serializer.errors["end_at"][0]))
+        self.assertTrue(serializer.is_valid(), serializer.errors)
 
-    def test_vehicle_availability_rejects_half_hour(self):
+    def test_vehicle_availability_rejects_non_ten_start(self):
+        start, end = self._future_daily_period()
         serializer = VehicleAvailabilityQuerySerializer(
             data={
-                "start": self._future_half_hour(2).isoformat(),
-                "end": self._future_hour(5).isoformat(),
+                "start": (start + timedelta(minutes=30)).isoformat(),
+                "end": (end + timedelta(minutes=30)).isoformat(),
             },
-            context={"minimum_hours": 1},
         )
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("start", serializer.errors)
-        self.assertIn("minutes = 00", str(serializer.errors["start"][0]))
 
-    def test_vehicle_availability_accepts_full_hours_including_night_hours(self):
-        today = timezone.localtime(timezone.now()).date()
-        start = timezone.make_aware(datetime.combine(today + timedelta(days=1), time.min)).replace(hour=23)
-        end = start + timedelta(hours=6)
-
+    def test_vehicle_availability_accepts_one_day_at_ten(self):
+        start, end = self._future_daily_period()
         serializer = VehicleAvailabilityQuerySerializer(
             data={
                 "start": start.isoformat(),
                 "end": end.isoformat(),
-            },
-            context={"minimum_hours": 1},
+            }
         )
 
         self.assertTrue(serializer.is_valid(), serializer.errors)

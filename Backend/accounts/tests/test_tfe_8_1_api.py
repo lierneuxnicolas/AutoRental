@@ -130,7 +130,7 @@ class Tfe81AccountsApiTests(APITestCase):
     def test_07_patch_profile_invalid_data_returns_400(self):
         self._authenticate_client()
 
-        underage_birth_date = date.today().replace(year=date.today().year - 17).isoformat()
+        underage_birth_date = (timezone.localdate() + timedelta(days=1)).isoformat()
         response = self.client.patch(
             self.profile_url,
             {"date_of_birth": underage_birth_date},

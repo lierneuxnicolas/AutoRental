@@ -6,6 +6,7 @@ from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from accounts.models import ClientProfile
 from accounts.services import (
@@ -21,6 +22,7 @@ from vehicles.services import (
     AvailabilityValidationError,
     is_vehicle_available,
     validate_availability_period,
+    validate_daily_rental_period,
 )
 
 
@@ -75,8 +77,8 @@ def _validate_client_eligibility(*, client: ClientProfile, start_at: datetime, e
     try:
         eligibility = validate_client_for_reservation(
             client=client,
-            reservation_start_date=start_at.date(),
-            reservation_end_date=end_at.date(),
+            reservation_start_date=timezone.localtime(start_at).date(),
+            reservation_end_date=timezone.localtime(end_at).date(),
         )
     except ValidationError as exc:
         _raise_reservation_creation_error(
@@ -106,6 +108,9 @@ def _validate_client_eligibility(*, client: ClientProfile, start_at: datetime, e
     document_messages = {
         "IDENTITY_CARD_MISSING": "la carte d'identité est manquante",
         "IDENTITY_CARD_NOT_VALID": "la carte d'identité est en attente ou a été refusée",
+        "IDENTITY_CARD_BIRTH_DATE_UNVERIFIED": "la date de naissance doit être vérifiée par un gestionnaire",
+        "IDENTITY_CARD_BIRTH_DATE_MISMATCH": "la date de naissance diffère du profil",
+        "UNDER_MINIMUM_AGE": "vous devez avoir au moins 21 ans au début de la location",
         "IDENTITY_CARD_EXPIRES_TOO_SOON": "la carte d'identité expire avant la fin de la réservation",
         "DRIVING_LICENSE_MISSING": "le permis de conduire est manquant",
         "DRIVING_LICENSE_NOT_VALID": "le permis de conduire est en attente ou a été refusé",
@@ -128,13 +133,22 @@ def _validate_client_eligibility(*, client: ClientProfile, start_at: datetime, e
     )
 
 
-def _normalize_period(*, start_at: datetime, end_at: datetime) -> tuple[datetime, datetime]:
+def _normalize_period(
+    *,
+    start_at: datetime,
+    end_at: datetime,
+    is_daily_rate_booking: bool = False,
+) -> tuple[datetime, datetime]:
     try:
-        period = validate_availability_period(start=start_at, end=end_at)
+        period = (
+            validate_daily_rental_period(start=start_at, end=end_at)
+            if is_daily_rate_booking
+            else validate_availability_period(start=start_at, end=end_at)
+        )
     except AvailabilityValidationError as exc:
         _raise_reservation_creation_error(
-            "INVALID_PERIOD",
-            "La periode de reservation est invalide.",
+            exc.code,
+            str(exc),
             details={"availability_error": exc.code},
         )
 
@@ -172,6 +186,7 @@ def create_draft_reservation(
     start_at: datetime,
     end_at: datetime,
     insurance_type: str = Reservation.InsuranceType.STANDARD,
+    is_daily_rate_booking: bool = False,
 ) -> Reservation:
     """Create a draft reservation after all business checks pass.
 
@@ -201,7 +216,11 @@ def create_draft_reservation(
     if vehicle_id is None:
         _raise_reservation_creation_error("VEHICLE_NOT_ACTIVE", "Le vehicule fourni est invalide.")
 
-    normalized_start_at, normalized_end_at = _normalize_period(start_at=start_at, end_at=end_at)
+    normalized_start_at, normalized_end_at = _normalize_period(
+        start_at=start_at,
+        end_at=end_at,
+        is_daily_rate_booking=is_daily_rate_booking,
+    )
     _validate_client_eligibility(client=client, start_at=normalized_start_at, end_at=normalized_end_at)
 
     current_vehicle = Vehicle.objects.select_related("category", "brand").filter(pk=vehicle_id).first()
@@ -255,6 +274,7 @@ def create_draft_reservation(
                 start_at=normalized_start_at,
                 end_at=normalized_end_at,
                 insurance_type=insurance_type,
+                is_daily_rate_booking=is_daily_rate_booking,
             )
         except PricingError as exc:
             _raise_reservation_creation_error(
@@ -274,6 +294,7 @@ def create_draft_reservation(
             vehicle=locked_vehicle,
             start_at=normalized_start_at,
             end_at=normalized_end_at,
+            is_daily_rate_booking=is_daily_rate_booking,
             status=Reservation.Status.BROUILLON,
             rental_amount=pricing.rental_amount,
             insurance_type=pricing.insurance_type,

@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from django.test import TestCase
 from django.utils import timezone
@@ -51,8 +51,9 @@ class TfeMvpVehiclesApiTests(TestCase):
         self.client_api = APIClient()
 
     def test_07_list_available_vehicles_returns_200(self):
-        start = (timezone.now() + timedelta(hours=4)).replace(minute=0, second=0, microsecond=0)
-        end = start + timedelta(hours=2)
+        start_date = timezone.localdate() + timedelta(days=3)
+        start = timezone.make_aware(datetime.combine(start_date, time(10)))
+        end = start + timedelta(days=1)
 
         response = self.client_api.get(
             "/api/v1/vehicles/available/",

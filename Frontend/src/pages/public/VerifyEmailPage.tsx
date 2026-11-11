@@ -4,6 +4,7 @@ import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import { verifyEmail } from '../../services/authService'
+import { getReservationResume, readReservationResume } from '../../utils/reservationResume'
 
 export default function VerifyEmailPage() {
   const [searchParams] = useSearchParams()
@@ -50,6 +51,7 @@ export default function VerifyEmailPage() {
 
   const pendingVerification = Boolean((location.state as { pendingVerification?: boolean } | null)?.pendingVerification)
   const email = (location.state as { email?: string } | null)?.email ?? searchParams.get('email') ?? ''
+  const reservationResume = getReservationResume(location.state) ?? readReservationResume()
 
   return (
     <div className="flex min-h-[70vh] items-center justify-center bg-[radial-gradient(circle_at_top,#EFF6FF,#FFFFFF_70%)] px-4 py-12">
@@ -98,7 +100,7 @@ export default function VerifyEmailPage() {
             ) : null}
 
             <div className="flex flex-col gap-3 sm:flex-row">
-              <Link to="/login" className="inline-flex">
+              <Link to="/login" state={reservationResume} className="inline-flex">
                 <Button type="button" className="w-full sm:w-auto">Se connecter</Button>
               </Link>
             </div>

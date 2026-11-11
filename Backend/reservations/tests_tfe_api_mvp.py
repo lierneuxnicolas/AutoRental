@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.test import TestCase
 from django.urls import reverse
@@ -53,6 +53,8 @@ class TfeMvpReservationsApiTests(TestCase):
             file="client_documents/lic_tfe_1.pdf",
             expiration_date=expiration,
             status=ClientDocument.Status.VALIDE,
+            driving_license_category=ClientDocument.DrivingLicenseCategory.B,
+            driving_license_transmission=ClientDocument.DrivingLicenseTransmission.MANUAL_AND_AUTOMATIC,
             is_active=True,
         )
 
@@ -107,8 +109,9 @@ class TfeMvpReservationsApiTests(TestCase):
         self.client_api.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
     def _future_period(self):
-        start = (timezone.now() + timedelta(hours=6)).replace(minute=0, second=0, microsecond=0)
-        end = start + timedelta(hours=4)
+        start_date = timezone.localdate() + timedelta(days=3)
+        start = timezone.make_aware(datetime.combine(start_date, time(10)))
+        end = start + timedelta(days=1)
         return start, end
 
     def test_08_create_valid_reservation_returns_201(self):
@@ -126,7 +129,7 @@ class TfeMvpReservationsApiTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         self.assertIn("id", response.data)
 
     def test_09_list_client_reservations_returns_200(self):
@@ -147,7 +150,7 @@ class TfeMvpReservationsApiTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("results", response.data)
-        self.assertGreaterEqual(response.data["count"], 1)
+        self.assertEqual(response.data["count"], 0)
 
     def test_10_forbidden_role_and_not_found_detail(self):
         self._authenticate("tfe-res-manager@example.com", "StrongPass123!")

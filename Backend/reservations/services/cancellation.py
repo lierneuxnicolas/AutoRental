@@ -62,10 +62,10 @@ def is_status_cancellable(status: str, *, reservation: Reservation | None = None
     if status not in get_cancellable_statuses():
         return False
 
-    if status == Reservation.Status.CONFIRMEE:
-        if reservation is None:
-            return False
+    if reservation is not None:
         return reservation.start_at > timezone.now()
+    if status == Reservation.Status.CONFIRMEE:
+        return False
 
     return True
 
@@ -109,10 +109,11 @@ class CancellationPreview:
     amount_paid: Decimal
     cancellation_fee: Decimal
     refundable_amount: Decimal
+    no_refund: bool
 
 
-FREE_CANCELLATION_WINDOW = timedelta(hours=24)
-LATE_CANCELLATION_FEE = Decimal("50.00")
+CANCELLATION_WINDOW = timedelta(hours=24)
+MANAGEMENT_FEE = Decimal("20.00")
 
 
 def _send_vehicle_unavailable_cancellation_email(*, reservation: Reservation) -> None:
@@ -153,12 +154,13 @@ def calculate_cancellation_financials(*, reservation: Reservation, now=None) -> 
     reference_now = now or timezone.now()
     amount_paid = _get_paid_amount(reservation=reservation)
 
-    if (reservation.start_at - reference_now) >= FREE_CANCELLATION_WINDOW:
-        cancellation_fee = Decimal("0.00")
+    if (reservation.start_at - reference_now) > CANCELLATION_WINDOW:
+        cancellation_fee = min(MANAGEMENT_FEE, amount_paid)
+        refundable_amount = amount_paid - cancellation_fee
     else:
-        cancellation_fee = LATE_CANCELLATION_FEE
+        cancellation_fee = Decimal("0.00")
+        refundable_amount = Decimal("0.00")
 
-    refundable_amount = max(Decimal("0.00"), amount_paid - cancellation_fee)
     return CancellationFinancialBreakdown(
         amount_paid=amount_paid,
         cancellation_fee=cancellation_fee,
@@ -175,6 +177,7 @@ def build_cancellation_preview(*, reservation: Reservation, now=None) -> Cancell
         amount_paid=financials.amount_paid,
         cancellation_fee=financials.cancellation_fee,
         refundable_amount=financials.refundable_amount,
+        no_refund=financials.amount_paid > 0 and reservation.start_at - reference_now <= CANCELLATION_WINDOW,
     )
 
 
@@ -224,11 +227,21 @@ def _sync_cancellation_financial_document(
     financials: CancellationFinancialBreakdown,
     cancelled_at,
 ) -> None:
-    invoice = create_invoice_for_reservation(reservation)
+    if Invoice.objects.select_for_update().filter(reservation=reservation).exists():
+        return
 
-    if invoice.status != Invoice.Status.CANCELLED:
-        invoice.status = Invoice.Status.CANCELLED
-        invoice.save(update_fields=["status", "updated_at"])
+    invoice = create_invoice_for_reservation(reservation)
+    retained = financials.amount_paid - financials.refundable_amount
+    invoice.status = Invoice.Status.ISSUED
+    invoice.subtotal = retained
+    invoice.tax_amount = Decimal("0.00")
+    invoice.total_amount = retained
+    invoice.save(update_fields=["status", "subtotal", "tax_amount", "total_amount", "updated_at"])
+    line = invoice.lines.get(line_type=InvoiceLine.LineType.VEHICLE_RENTAL)
+    line.line_type = InvoiceLine.LineType.CORRECTION
+    line.description = "Annulation - Montant conservé"
+    line.unit_price = retained
+    line.save(update_fields=["line_type", "description", "unit_price", "total_price"])
 
     cancellation_date_display = timezone.localtime(cancelled_at).strftime("%d/%m/%Y %H:%M")
 
@@ -254,15 +267,35 @@ def _sync_cancellation_financial_document(
     )
     _upsert_cancellation_invoice_line(
         invoice=invoice,
-        label_prefix="Annulation - Caution",
-        value_text="Liberee",
+        label_prefix="Annulation - Traitement fiscal",
+        value_text="Validation comptable nécessaire avant exploitation commerciale",
     )
+    from invoicing.services.pdf_generator import ensure_invoice_pdf
+    ensure_invoice_pdf(invoice)
 
-    # Force la regeneration du PDF pour inclure les informations d'annulation.
-    if invoice.pdf_file:
-        invoice.pdf_file.delete(save=False)
-        invoice.pdf_file = None
-        invoice.save(update_fields=["pdf_file", "updated_at"])
+
+def finalize_confirmed_cancellation(*, reservation: Reservation) -> None:
+    if reservation.status != Reservation.Status.ANNULEE or reservation.cancelled_at is None:
+        return
+    refunds = reservation.refunds.filter(reason="Annulation de reservation")
+    if refunds.exclude(status=Refund.Status.REUSSI).exists():
+        return
+    amount_paid = _get_paid_amount(reservation=reservation)
+    refunded = sum((refund.amount for refund in refunds), Decimal("0.00"))
+    if refunded > amount_paid:
+        _raise_cancellation_error("INVALID_REFUND_TOTAL", "Les remboursements dépassent le montant encaissé.")
+    retained = amount_paid - refunded
+    fee = (
+        min(MANAGEMENT_FEE, retained)
+        if reservation.cancellation_source == Reservation.CancellationSource.CLIENT
+        and reservation.start_at - reservation.cancelled_at > CANCELLATION_WINDOW
+        else Decimal("0.00")
+    )
+    _sync_cancellation_financial_document(
+        reservation=reservation,
+        financials=CancellationFinancialBreakdown(amount_paid, fee, refunded),
+        cancelled_at=reservation.cancelled_at,
+    )
 
 
 def _build_refund_idempotency_key(*, reservation: Reservation, payment: Payment, amount: Decimal) -> str:
@@ -381,7 +414,11 @@ def _sync_refund_with_stripe(
 
     refund.stripe_refund_id = getattr(stripe_refund, "id", None)
     refund.status = _status_from_stripe_refund(getattr(stripe_refund, "status", None))
-    refund.save(update_fields=["stripe_refund_id", "status", "updated_at"])
+    if refund.status == Refund.Status.REUSSI:
+        refund.succeeded_at = timezone.now()
+    elif refund.status == Refund.Status.ECHOUE:
+        refund.failed_at = timezone.now()
+    refund.save(update_fields=["stripe_refund_id", "status", "succeeded_at", "failed_at", "updated_at"])
     return refund
 
 
@@ -390,7 +427,8 @@ def _execute_cancellation_financial_operations(
     reservation: Reservation,
     requested_by,
     financials: CancellationFinancialBreakdown,
-) -> None:
+) -> Refund | None:
+    refund = None
     if financials.refundable_amount > Decimal("0.00"):
         payment = _get_latest_successful_payment(reservation=reservation)
         if payment is None:
@@ -398,8 +436,18 @@ def _execute_cancellation_financial_operations(
                 "PAYMENT_NOT_FOUND",
                 "Aucun paiement Stripe reussi n'a ete trouve pour effectuer le remboursement.",
             )
+        if financials.refundable_amount > payment.amount:
+            _raise_cancellation_error(
+                "MULTIPLE_PAYMENTS_REQUIRE_REVIEW",
+                "Le remboursement nécessite une vérification manuelle des paiements.",
+            )
+        if payment.refunds.exclude(status__in=[Refund.Status.ECHOUE, Refund.Status.ANNULE]).exists():
+            _raise_cancellation_error(
+                "EXISTING_REFUND_REQUIRES_REVIEW",
+                "Un remboursement existe déjà pour ce paiement ; une vérification est nécessaire.",
+            )
 
-        _sync_refund_with_stripe(
+        refund = _sync_refund_with_stripe(
             reservation=reservation,
             payment=payment,
             requested_by=requested_by,
@@ -415,6 +463,7 @@ def _execute_cancellation_financial_operations(
             exc.message,
             details=exc.details,
         )
+    return refund
 
 
 # ==============================================================================
@@ -431,6 +480,7 @@ def cancel_reservation(
     vehicle_unavailable: bool = False,
     critical_checkin_anomaly: bool = False,
     cancellation_source: str = Reservation.CancellationSource.CLIENT,
+    confirm_no_refund: bool = False,
 ) -> Reservation:
     """
     Annule une réservation.
@@ -573,9 +623,21 @@ def cancel_reservation(
                 details={"current_status": reservation_locked.status},
             )
 
-        financials = calculate_cancellation_financials(reservation=reservation_locked)
+        cancelled_at = timezone.now()
+        financials = calculate_cancellation_financials(reservation=reservation_locked, now=cancelled_at)
         if (
-            is_manager_cancellation
+            cancellation_source == Reservation.CancellationSource.CLIENT
+            and not is_critical_checkin_cancellation
+            and financials.amount_paid > 0
+            and reservation_locked.start_at - cancelled_at <= CANCELLATION_WINDOW
+            and not confirm_no_refund
+        ):
+            _raise_cancellation_error(
+                "NO_REFUND_CONFIRMATION_REQUIRED",
+                "Confirmez l'annulation sans remboursement.",
+            )
+        if (
+            cancellation_source != Reservation.CancellationSource.CLIENT
             or is_management_reassignment_cancellation
             or is_vehicle_unavailability_cancellation
             or is_critical_checkin_cancellation
@@ -585,13 +647,11 @@ def cancel_reservation(
                 cancellation_fee=Decimal("0.00"),
                 refundable_amount=financials.amount_paid,
             )
-        _execute_cancellation_financial_operations(
+        refund = _execute_cancellation_financial_operations(
             reservation=reservation_locked,
             requested_by=requested_by,
             financials=financials,
         )
-
-        cancelled_at = timezone.now()
 
         # Mettre à jour la réservation
         reservation_locked.status = Reservation.Status.ANNULEE
@@ -602,11 +662,12 @@ def cancel_reservation(
         # Sauvegarder uniquement les champs concernés
         reservation_locked.save(update_fields=["status", "cancelled_at", "cancellation_reason", "cancellation_source", "updated_at"])
 
-        _sync_cancellation_financial_document(
-            reservation=reservation_locked,
-            financials=financials,
-            cancelled_at=cancelled_at,
-        )
+        if refund is None or refund.status == Refund.Status.REUSSI:
+            _sync_cancellation_financial_document(
+                reservation=reservation_locked,
+                financials=financials,
+                cancelled_at=cancelled_at,
+            )
 
         # Exposé temporairement sur l'instance retournée pour usage applicatif futur.
         reservation_locked.cancellation_financials = financials
@@ -634,7 +695,7 @@ def cancel_reservation(
                         if is_vehicle_unavailability_cancellation
                         else (
                             "Votre reservation a ete annulee. "
-                            f"Remboursement : {_format_eur_amount(financials.refundable_amount)}. "
+                            f"Remboursement prévu : {_format_eur_amount(financials.refundable_amount)}. "
                             f"Frais : {_format_eur_amount(financials.cancellation_fee)}. "
                             "Caution liberee."
                         )
@@ -644,6 +705,17 @@ def cancel_reservation(
                 related_object_id=reservation_locked.id,
             )
         )
+        if refund is not None and refund.status in {Refund.Status.ECHOUE, Refund.Status.ANNULE}:
+            transaction.on_commit(
+                lambda: notify_users_with_roles(
+                    role_codes={Role.Code.GESTIONNAIRE_COMPTABLE, Role.Code.ADMINISTRATEUR},
+                    notification_type="REFUND_FAILED",
+                    title="Remboursement à vérifier",
+                    message=f"Le remboursement de la réservation {reservation_locked.reference} a échoué ou a été annulé.",
+                    related_object_type="reservation",
+                    related_object_id=reservation_locked.id,
+                )
+            )
         if is_vehicle_unavailability_cancellation:
             transaction.on_commit(
                 lambda reservation_id=reservation_locked.id: _send_vehicle_unavailable_cancellation_email(
