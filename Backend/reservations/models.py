@@ -3,6 +3,7 @@ import string
 from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q
@@ -23,6 +24,8 @@ class Reservation(models.Model):
 
 	class InsuranceType(models.TextChoices):
 		STANDARD = "STANDARD", "Standard"
+		COMPLEMENTAIRE = "COMPLEMENTAIRE", "Complémentaire"
+		# Formules historiques conservées pour les anciennes réservations (non proposées aux nouveaux clients).
 		DUO = "DUO", "Duo"
 		OMNIUM = "OMNIUM", "Omnium"
 
@@ -62,6 +65,13 @@ class Reservation(models.Model):
 		Status.EN_ATTENTE_PAIEMENT,
 		Status.PAIEMENT_ECHOUE,
 	}
+	# Unpaid reservations stay in the database for Stripe tracking but are never listed.
+	UNLISTED_STATUSES = PRE_CONFIRMATION_STATUSES
+
+	@classmethod
+	def unlisted_filter(cls) -> Q:
+		# Includes drafts auto-cancelled for non-payment: they were never confirmed.
+		return Q(status__in=cls.UNLISTED_STATUSES) | Q(status=cls.Status.ANNULEE, confirmed_at__isnull=True)
 
 	client = models.ForeignKey(
 		"accounts.ClientProfile",
@@ -81,6 +91,7 @@ class Reservation(models.Model):
 	)
 	start_at = models.DateTimeField()
 	end_at = models.DateTimeField()
+	is_daily_rate_booking = models.BooleanField(default=False)
 	status = models.CharField(max_length=24, choices=Status.choices, default=Status.BROUILLON)
 	rental_amount = models.DecimalField(
 		max_digits=10,
@@ -110,6 +121,16 @@ class Reservation(models.Model):
 		null=True,
 		blank=True,
 		help_text="Date a laquelle un gestionnaire a resolu l'indicateur d'anomalie au check-in (badge 'A verifier').",
+	)
+	return_delay_fee = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+	return_fuel_fee = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+	return_charges_confirmed_at = models.DateTimeField(null=True, blank=True)
+	return_charges_confirmed_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.PROTECT,
+		null=True,
+		blank=True,
+		related_name="confirmed_return_charges",
 	)
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)

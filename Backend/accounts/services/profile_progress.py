@@ -18,6 +18,16 @@ def calculate_profile_progress(client_profile):
     identity_card_valid = identity_issue is None
     driving_license_valid = license_issue is None
 
+    license_transmission = None
+    if driving_license_valid:
+        license_document = ClientDocument.objects.filter(
+            client=client_profile,
+            document_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            is_active=True,
+        ).first()
+        if license_document is not None and license_document.driving_license_transmission:
+            license_transmission = license_document.driving_license_transmission
+
     criteria = [
         account_created,
         email_verified,
@@ -70,6 +80,7 @@ def calculate_profile_progress(client_profile):
         "personal_information_complete": personal_information_complete,
         "identity_card_valid": identity_card_valid,
         "driving_license_valid": driving_license_valid,
+        "driving_license_transmission": license_transmission,
         "identity_card_issue": document_issue_label(
             ClientDocument.DocumentType.CARTE_IDENTITE,
             identity_issue,

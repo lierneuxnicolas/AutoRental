@@ -65,6 +65,19 @@ class DocumentManagementEndpointsTests(APITestCase):
         token = response.data["access"]
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
+    def _verification_payload(self, document, **fields):
+        payload = {
+            "document_number": document.document_number,
+            "expiration_date": document.expiration_date.isoformat(),
+        }
+        if document.document_type == ClientDocument.DocumentType.CARTE_IDENTITE:
+            payload.update(
+                first_name=self.client_user.first_name,
+                last_name=self.client_user.last_name,
+                verified_date_of_birth=self.client_profile.date_of_birth.isoformat(),
+            )
+        return {**payload, **fields}
+
     def test_list_accessible_to_manager(self):
         self._authenticate("manager-docs@example.com", "StrongPass123!")
         response = self.client.get(self.management_list_url)
@@ -218,7 +231,7 @@ class DocumentManagementEndpointsTests(APITestCase):
         validate_url = reverse("accounts:management-documents-validate", kwargs={"pk": self.document.pk})
 
         with self.captureOnCommitCallbacks(execute=True):
-            response = self.client.post(validate_url, {}, format="json")
+            response = self.client.post(validate_url, self._verification_payload(self.document), format="json")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.document.refresh_from_db()
@@ -276,7 +289,7 @@ class DocumentManagementEndpointsTests(APITestCase):
 
         response = self.client.post(
             reverse("accounts:management-documents-validate", kwargs={"pk": license_document.pk}),
-            {},
+            self._verification_payload(license_document),
             format="json",
         )
 
@@ -302,9 +315,9 @@ class DocumentManagementEndpointsTests(APITestCase):
 
         response = self.client.post(
             reverse("accounts:management-documents-validate", kwargs={"pk": license_document.pk}),
-            {
+            self._verification_payload(license_document, **{
                 "driving_license_transmission": "MANUAL_AND_AUTOMATIC",
-            },
+            }),
             format="json",
         )
 
@@ -335,9 +348,9 @@ class DocumentManagementEndpointsTests(APITestCase):
 
         response = self.client.post(
             reverse("accounts:management-documents-validate", kwargs={"pk": license_document.pk}),
-            {
+            self._verification_payload(license_document, **{
                 "driving_license_transmission": "AUTOMATIC_ONLY",
-            },
+            }),
             format="json",
         )
 
@@ -390,7 +403,7 @@ class DocumentManagementEndpointsTests(APITestCase):
 
         response = self.client.post(
             reverse("accounts:management-documents-validate", kwargs={"pk": license_document.pk}),
-            {},
+            self._verification_payload(license_document),
             format="json",
         )
 
@@ -415,9 +428,9 @@ class DocumentManagementEndpointsTests(APITestCase):
 
         response = self.client.post(
             reverse("accounts:management-documents-validate", kwargs={"pk": license_document.pk}),
-            {
+            self._verification_payload(license_document, **{
                 "driving_license_transmission": "AUTOMATIC_ONLY",
-            },
+            }),
             format="json",
         )
 
@@ -482,7 +495,7 @@ class DocumentManagementEndpointsTests(APITestCase):
         validate_url = reverse("accounts:management-documents-validate", kwargs={"pk": self.document.pk})
 
         with self.captureOnCommitCallbacks(execute=True):
-            first_response = self.client.post(validate_url, {}, format="json")
+            first_response = self.client.post(validate_url, self._verification_payload(self.document), format="json")
         logs_before_second_attempt = SystemLog.objects.filter(action__in=self.tracked_actions).count()
         second_response = self.client.post(validate_url, {}, format="json")
 

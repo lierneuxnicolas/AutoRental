@@ -115,6 +115,7 @@ class ReservationClientListCreateView(generics.ListCreateAPIView):
 
         return (
             Reservation.objects.filter(client__user=self.request.user)
+            .exclude(Reservation.unlisted_filter())
             .select_related(
                 "client",
                 "client__user",
@@ -183,6 +184,7 @@ class ReservationClientListCreateView(generics.ListCreateAPIView):
                 start_at=payload["start_at"],
                 end_at=payload["end_at"],
                 insurance_type=payload.get("insurance_type", Reservation.InsuranceType.STANDARD),
+                is_daily_rate_booking=True,
             )
         except ReservationCreationError as exc:
             detail = {"code": exc.code, "message": exc.message}
@@ -242,9 +244,6 @@ class ClientDashboardReservationsView(generics.ListAPIView):
         )
         upcoming_reservations = Q(
             status__in=[
-                Reservation.Status.BROUILLON,
-                Reservation.Status.EN_ATTENTE_CAUTION,
-                Reservation.Status.EN_ATTENTE_PAIEMENT,
                 Reservation.Status.CONFIRMEE,
                 Reservation.Status.REAFFECTATION_REQUIRED,
             ],
@@ -399,6 +398,7 @@ class ReservationClientCancelView(generics.GenericAPIView):
                 reservation=reservation,
                 requested_by=request.user,
                 reason=reason,
+                confirm_no_refund=serializer.validated_data["confirm_no_refund"],
             )
         except CancellationError as exc:
             detail = {"code": exc.code, "message": exc.message}
@@ -534,6 +534,7 @@ class ReservationClientCancelPreviewView(generics.GenericAPIView):
         preview = build_cancellation_preview(reservation=reservation)
         response_payload = {
             "can_cancel": preview.can_cancel,
+            "no_refund": preview.no_refund,
             "amount_paid": preview.amount_paid,
             "cancellation_fee": preview.cancellation_fee,
             "refundable_amount": preview.refundable_amount,

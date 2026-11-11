@@ -10,6 +10,7 @@ import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import { useAuth } from '../../hooks/useAuth'
 import type { LoginCredentials } from '../../types/auth'
+import { clearReservationResume, getReservationResume } from '../../utils/reservationResume'
 
 const loginSchema = z.object({
   email: z.string().trim().email('Une adresse e-mail valide est requise.'),
@@ -40,9 +41,11 @@ export default function LoginPage() {
     try {
       await login(credentials)
       const fromPath = (location.state as { from?: string } | null)?.from
+      const resume = getReservationResume(location.state)
 
       if (typeof fromPath === 'string' && fromPath.startsWith('/')) {
-        navigate(fromPath)
+        if (resume) clearReservationResume()
+        navigate(fromPath, { state: resume ? { reservationDraft: resume.reservationDraft } : undefined })
         return
       }
 
@@ -73,30 +76,9 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-4 py-12">
-      <div className="w-full max-w-5xl overflow-hidden rounded-4xl shadow-[0_20px_60px_-20px_rgba(37,99,235,0.35)]">
-        <div className="grid gap-0 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="bg-[#0F172A] p-8 text-white sm:p-10 lg:p-12">
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-blue-200">GetaCar</p>
-            <h1 className="mt-4 text-3xl font-semibold sm:text-4xl">Bienvenue à bord</h1>
-            <p className="mt-4 max-w-md text-sm leading-7 text-slate-300 sm:text-base">
-              Connectez-vous pour gérer vos réservations, suivre vos véhicules et profiter d’une expérience de location fluide.
-            </p>
-
-            <div className="mt-8 rounded-3xl border border-white/10 bg-white/10 p-5 backdrop-blur-sm">
-              <p className="text-sm font-medium text-blue-100">Pourquoi se connecter ?</p>
-              <ul className="mt-3 space-y-2 text-sm text-slate-200">
-                <li>• Accéder à votre espace personnel</li>
-                <li>• Suivre l’état de vos réservations</li>
-                <li>• Consulter vos documents et factures</li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="bg-white p-8 sm:p-10 lg:p-12">
+      <div className="w-full max-w-xl rounded-4xl border border-slate-200 bg-white p-6 shadow-[0_20px_60px_-20px_rgba(37,99,235,0.35)] sm:p-10">
             <div className="mb-8">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Connexion</p>
-              <h2 className="mt-2 text-2xl font-semibold text-[#0F172A]">Accédez à votre espace</h2>
-              <p className="mt-2 text-sm text-slate-600">Saisissez vos identifiants pour continuer.</p>
+              <h1 className="text-center text-2xl font-semibold text-[#0F172A]">Accédez à votre espace</h1>
             </div>
 
             {serverError ? (
@@ -122,7 +104,7 @@ export default function LoginPage() {
                 {...register('password')}
               />
 
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
+              <Button type="submit" variant="violet" className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? (
                   <span className="flex items-center justify-center gap-2">
                     <LoadingSpinner size="sm" aria-label="Connexion en cours" />
@@ -134,15 +116,13 @@ export default function LoginPage() {
               </Button>
             </form>
 
-            <div className="mt-6 flex flex-col gap-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3 text-center text-xs text-slate-600 sm:text-sm">
               <Link to="/forgot-password" className="font-medium text-[#2563EB] transition hover:text-[#1D4ED8]">
                 Mot de passe oublié ?
               </Link>
-              <Link to="/register" className="font-medium text-[#2563EB] transition hover:text-[#1D4ED8]">
+              <Link to="/register" state={location.state} className="font-medium text-[#2563EB] transition hover:text-[#1D4ED8]">
                 Créer un compte
               </Link>
-            </div>
-          </div>
         </div>
       </div>
     </div>

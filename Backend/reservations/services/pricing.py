@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timezone as datetime_timezone
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 from typing import Any
 
 from vehicles.models import Vehicle
+from django.utils import timezone
+
 from vehicles.services.availability import validate_availability_period
 
 
@@ -12,10 +15,14 @@ DECIMAL_QUANTIZER = Decimal("0.01")
 HOURS_PER_DAY = Decimal("24")
 FIXED_DEPOSIT_AMOUNT = Decimal("500.00")
 INSURANCE_STANDARD = "STANDARD"
+INSURANCE_COMPLEMENTARY = "COMPLEMENTAIRE"
 INSURANCE_DUO = "DUO"
 INSURANCE_OMNIUM = "OMNIUM"
+BOOKABLE_INSURANCE_TYPES = [INSURANCE_STANDARD, INSURANCE_COMPLEMENTARY]
 INSURANCE_DAILY_RATES = {
     INSURANCE_STANDARD: Decimal("0.00"),
+    INSURANCE_COMPLEMENTARY: Decimal("10.00"),
+    # Tarifs historiques, utilisés uniquement pour recalculer d'anciennes réservations.
     INSURANCE_DUO: Decimal("8.00"),
     INSURANCE_OMNIUM: Decimal("25.00"),
 }
@@ -60,7 +67,12 @@ def _to_decimal(value: Any) -> Decimal:
 
 def _calculate_duration_hours(*, start_at, end_at) -> Decimal:
     validated_period = validate_availability_period(start=start_at, end=end_at)
-    duration = validated_period["end"] - validated_period["start"]
+    start = validated_period["start"]
+    end = validated_period["end"]
+    if timezone.is_aware(start) and timezone.is_aware(end):
+        start = start.astimezone(datetime_timezone.utc)
+        end = end.astimezone(datetime_timezone.utc)
+    duration = end - start
     duration_hours = (
         (Decimal(duration.days) * HOURS_PER_DAY)
         + Decimal(duration.seconds) / Decimal("3600")
@@ -80,7 +92,14 @@ def normalize_insurance_type(insurance_type: str | None) -> str:
     return raw_value
 
 
-def calculate_price_simulation(*, vehicle, start_at, end_at, insurance_type: str = INSURANCE_STANDARD) -> PriceSimulationResult:
+def calculate_price_simulation(
+    *,
+    vehicle,
+    start_at,
+    end_at,
+    insurance_type: str = INSURANCE_STANDARD,
+    is_daily_rate_booking: bool = False,
+) -> PriceSimulationResult:
     if vehicle is None:
         _raise_pricing_error("VEHICLE_REQUIRED", "Un vehicule est obligatoire.")
 
@@ -102,14 +121,24 @@ def calculate_price_simulation(*, vehicle, start_at, end_at, insurance_type: str
     if not category.is_active:
         _raise_pricing_error("CATEGORY_INACTIVE", "La categorie du vehicule est inactive.")
 
-    duration_hours = _calculate_duration_hours(start_at=start_at, end_at=end_at)
+    if is_daily_rate_booking:
+        period = validate_availability_period(start=start_at, end=end_at)
+        duration_hours = _to_decimal(period["duration_hours"])
+        local_start = timezone.localtime(period["start"]) if timezone.is_aware(period["start"]) else period["start"]
+        local_end = timezone.localtime(period["end"]) if timezone.is_aware(period["end"]) else period["end"]
+        billed_days = (local_end.date() - local_start.date()).days
+        if billed_days < 1:
+            _raise_pricing_error("DURATION_TOO_SHORT", "La duree minimale de location est d'une journee.")
+    else:
+        duration_hours = _calculate_duration_hours(start_at=start_at, end_at=end_at)
 
-    minimum_rental_hours = int(category.minimum_rental_hours)
-    if duration_hours < Decimal(minimum_rental_hours):
-        _raise_pricing_error(
-            "DURATION_TOO_SHORT",
-            "La duree demandee est inferieure a la duree minimale requise.",
-        )
+        minimum_rental_hours = int(category.minimum_rental_hours)
+        if duration_hours < Decimal(minimum_rental_hours):
+            _raise_pricing_error(
+                "DURATION_TOO_SHORT",
+                "La duree demandee est inferieure a la duree minimale requise.",
+            )
+        billed_days = int(_ceil_decimal(duration_hours / HOURS_PER_DAY))
 
     daily_rate = getattr(category, "daily_rate", None)
     hourly_rate = getattr(category, "hourly_rate", None)
@@ -124,21 +153,28 @@ def calculate_price_simulation(*, vehicle, start_at, end_at, insurance_type: str
     normalized_insurance = normalize_insurance_type(insurance_type)
     deposit_amount = _quantize_amount(_to_decimal(deposit_amount))
     billed_hours = int(_ceil_decimal(duration_hours))
-    billed_days = int(_ceil_decimal(duration_hours / HOURS_PER_DAY))
+    if is_daily_rate_booking:
+        if daily_rate is None:
+            _raise_pricing_error(
+                "PRICING_NOT_CONFIGURED",
+                "Aucun tarif journalier n'est configure pour cette categorie.",
+            )
+        rental_amount = _quantize_amount(_to_decimal(daily_rate) * Decimal(billed_days))
+        pricing_method = "DAILY"
+    else:
+        pricing_method = "DAILY" if hourly_rate is None else "HOURLY"
+        rental_amount = None
 
-    pricing_method = "DAILY" if hourly_rate is None else "HOURLY"
-    rental_amount = None
+        if hourly_rate is not None:
+            hourly_amount = _quantize_amount(_to_decimal(hourly_rate) * Decimal(billed_hours))
+            rental_amount = hourly_amount
+            pricing_method = "HOURLY"
 
-    if hourly_rate is not None:
-        hourly_amount = _quantize_amount(_to_decimal(hourly_rate) * Decimal(billed_hours))
-        rental_amount = hourly_amount
-        pricing_method = "HOURLY"
-
-    if daily_rate is not None:
-        daily_amount = _quantize_amount(_to_decimal(daily_rate) * Decimal(billed_days))
-        if rental_amount is None or daily_amount < rental_amount:
-            rental_amount = daily_amount
-            pricing_method = "DAILY"
+        if daily_rate is not None:
+            daily_amount = _quantize_amount(_to_decimal(daily_rate) * Decimal(billed_days))
+            if rental_amount is None or daily_amount < rental_amount:
+                rental_amount = daily_amount
+                pricing_method = "DAILY"
 
     if rental_amount is None:
         _raise_pricing_error(

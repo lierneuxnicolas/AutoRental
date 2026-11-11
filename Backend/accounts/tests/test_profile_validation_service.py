@@ -41,6 +41,8 @@ class ProfileValidationServiceTests(TestCase):
                 "driving_license_category": ClientDocument.DrivingLicenseCategory.B,
                 "driving_license_transmission": ClientDocument.DrivingLicenseTransmission.MANUAL_AND_AUTOMATIC,
             }
+        elif doc_type == ClientDocument.DocumentType.CARTE_IDENTITE:
+            license_details = {"verified_date_of_birth": self.profile.date_of_birth}
         return ClientDocument.objects.create(
             client=self.profile,
             document_type=doc_type,
@@ -84,6 +86,9 @@ class ProfileValidationServiceTests(TestCase):
         self._make_fully_valid_documents()
         self.profile.date_of_birth = self.start_date - timedelta(days=20 * 365)
         self.profile.save(update_fields=["date_of_birth"])
+        ClientDocument.objects.filter(client=self.profile, document_type=ClientDocument.DocumentType.CARTE_IDENTITE).update(
+            verified_date_of_birth=self.profile.date_of_birth,
+        )
 
         result = validate_client_for_reservation(self.profile, self.start_date, self.end_date)
         self.assertIn("UNDER_MINIMUM_AGE", result.errors)
@@ -92,6 +97,9 @@ class ProfileValidationServiceTests(TestCase):
         self._make_fully_valid_documents()
         self.profile.date_of_birth = ClientProfile._subtract_years(self.start_date, 21)
         self.profile.save(update_fields=["date_of_birth"])
+        ClientDocument.objects.filter(client=self.profile, document_type=ClientDocument.DocumentType.CARTE_IDENTITE).update(
+            verified_date_of_birth=self.profile.date_of_birth,
+        )
 
         result = validate_client_for_reservation(self.profile, self.start_date, self.end_date)
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AxiosError } from 'axios'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, LockKeyhole, MapPin, Smartphone } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
@@ -32,6 +32,7 @@ import type {
 } from '../../types/inspection'
 import type { ReservationInspectionDetail } from '../../types/reservation'
 import { resolveMediaUrl } from '../../utils/media'
+import { finalizeReturnAndRead, isReturnCompleted } from '../../utils/returnFinalization'
 
 type ApiErrorPayload = {
   detail?: string
@@ -864,27 +865,48 @@ export function ReturnInspectionInteriorPage() {
 
 export function ReturnInspectionVehicleStatePage() {
   const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
   const reservationId = Number(id)
   const isReservationIdValid = Number.isInteger(reservationId) && reservationId > 0
-
   const reservationQuery = useQuery({
     queryKey: ['client-reservation', reservationId],
     queryFn: () => getReservationById(reservationId),
     enabled: isReservationIdValid,
   })
 
+  if (!isReservationIdValid) {
+    return <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+  }
+  if (reservationQuery.isLoading) {
+    return <LoadingSpinner aria-label="Chargement de la restitution" />
+  }
+  if (reservationQuery.isError || !reservationQuery.data) {
+    return <Alert variant="danger" title="Chargement impossible" message="Impossible de charger la restitution." />
+  }
+  return <ReturnVehicleStateForm key={reservationId} reservationId={reservationId} />
+}
+
+function ReturnVehicleStateForm({ reservationId }: { reservationId: number }) {
+  const navigate = useNavigate()
+  const isReservationIdValid = true
+  const reservationQuery = useQuery({
+    queryKey: ['client-reservation', reservationId],
+    queryFn: () => getReservationById(reservationId),
+  })
   const inspection = reservationQuery.data?.return_inspection ?? null
   const departureMileage = reservationQuery.data?.departure_inspection?.mileage ?? null
-  const [mileageInput, setMileageInput] = useState('')
-  const [energyInput, setEnergyInput] = useState('')
-  const [hasDamage, setHasDamage] = useState<boolean | null>(null)
-  const [damageDescription, setDamageDescription] = useState('')
-  const [damageSeverity, setDamageSeverity] = useState<Severity | ''>('')
+  const savedDamage = inspection?.damages?.find((damage) => damage.location === 'Etat du vehicule')
+  const [mileageInput, setMileageInput] = useState(() => inspection?.mileage?.toString() ?? '')
+  const [energyInput, setEnergyInput] = useState(() => inspection?.energy_level_percent?.toString() ?? '')
+  const [hasDamage, setHasDamage] = useState<boolean | null>(() =>
+    inspection?.mileage != null && inspection?.energy_level_percent != null ? Boolean(savedDamage) : null,
+  )
+  const [damageDescription, setDamageDescription] = useState(() => savedDamage?.description ?? '')
+  const [damageSeverity, setDamageSeverity] = useState<Severity | ''>(() => savedDamage?.severity ?? '')
   const [anomalyPhotoState, setAnomalyPhotoState] = useState<Record<AnomalyPhotoSlotKey, AnomalyPhotoSlotState>>(
     buildInitialAnomalyPhotoState,
   )
   const [globalError, setGlobalError] = useState<string | null>(null)
+  const savingStateRef = useRef(false)
   const anomalyPhotoInputRefs = useRef<Record<AnomalyPhotoSlotKey, HTMLInputElement | null>>({
     slot1: null,
     slot2: null,
@@ -1017,13 +1039,34 @@ export function ReturnInspectionVehicleStatePage() {
 
       navigate(`/client/reservations/${reservationId}/return-inspection/lock`)
     },
-    onError: (error) => {
+    onError: async (error, payload) => {
+      const refreshed = await reservationQuery.refetch()
+      const saved = refreshed.data?.return_inspection
+      const damage = saved?.damages?.find((item) => item.location === 'Etat du vehicule')
+      const sameDamage = payload.anomaly_present
+        ? Boolean(damage && damage.description === payload.anomaly_description
+          && damage.severity === payload.anomaly_severity
+          && [...damage.photo_ids].sort().join(',') === [...(payload.photo_ids ?? [])].sort().join(','))
+        : !damage
+      if (saved && saved.mileage === payload.mileage && saved.energy_level_percent === payload.energy_level_percent && sameDamage) {
+        setGlobalError(null)
+        navigate(`/client/reservations/${reservationId}/return-inspection/lock`)
+        return
+      }
       setGlobalError(toVehicleStateErrorMessage(error))
     },
   })
 
   const onSaveVehicleState = () => {
-    if (!inspection || !canContinue || mileageValue === null || energyValue === null || hasDamage === null) {
+    if (!inspection || !canContinue || mileageValue === null || energyValue === null || hasDamage === null || savingStateRef.current) {
+      return
+    }
+
+    if (inspection.mileage === mileageValue && inspection.energy_level_percent === energyValue
+      && ((!hasDamage && !savedDamage)
+        || (hasDamage && savedDamage && damageDescription.trim() === savedDamage.description
+          && damageSeverity === savedDamage.severity && uploadedAnomalyPhotoIds.length === 0))) {
+      navigate(`/client/reservations/${reservationId}/return-inspection/lock`)
       return
     }
 
@@ -1042,7 +1085,8 @@ export function ReturnInspectionVehicleStatePage() {
     }
 
     setGlobalError(null)
-    void saveStateMutation.mutateAsync(payload)
+    savingStateRef.current = true
+    saveStateMutation.mutate(payload, { onSettled: () => { savingStateRef.current = false } })
   }
 
   if (!isReservationIdValid) {
@@ -1050,6 +1094,22 @@ export function ReturnInspectionVehicleStatePage() {
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
         <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
       </section>
+    )
+  }
+
+  if (inspection?.status === 'TERMINE') {
+    return (
+      <ReturnInspectionLayout stepIndex={4} inspection={inspection} progress={50} showInspectionSummary={false}>
+        <Card>
+          <h1 className="text-xl font-semibold">État du véhicule enregistré</h1>
+          <p>Kilométrage final : {inspection.mileage ?? 'non renseigné'} km</p>
+          <p>Carburant ou batterie : {inspection.energy_level_percent ?? 'non renseigné'} %</p>
+          <p>{inspection.damages?.length ? 'Anomalie enregistrée' : 'Aucune anomalie enregistrée'}</p>
+          <Button className="mt-4" onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/lock`)}>
+            Continuer vers le verrouillage
+          </Button>
+        </Card>
+      </ReturnInspectionLayout>
     )
   }
 
@@ -1152,6 +1212,7 @@ export function ReturnInspectionConfirmationPage() {
 function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean }) {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const reservationId = Number(id)
   const isReservationIdValid = Number.isInteger(reservationId) && reservationId > 0
   const reservationQuery = useQuery({
@@ -1163,6 +1224,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
   const inspection = reservationQuery.data?.return_inspection ?? null
   const reservation = reservationQuery.data
   const [globalError, setGlobalError] = useState<string | null>(null)
+  const [verificationRequired, setVerificationRequired] = useState(false)
   const [demoKeyCheckResult, setDemoKeyCheckResult] = useState<{ inspectionId: number, completedAt: string } | null>(null)
   const [invoiceDownloadError, setInvoiceDownloadError] = useState<string | null>(null)
   const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false)
@@ -1171,7 +1233,9 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
   const vehicleLabel = reservation ? `${reservation.vehicle.brand} ${reservation.vehicle.model_name}` : 'Non disponible'
   const effectiveMileage = inspection?.mileage ?? null
   const effectiveEnergyLevelPercent = inspection?.energy_level_percent ?? null
-  const isInspectionCompleted = reservation?.status === 'TERMINEE' && inspection?.status === 'TERMINE'
+  const isInspectionCompleted = isReturnCompleted(reservation)
+  const needsReturnAccessRecovery = reservation?.status === 'A_CONTROLER'
+    && inspection?.status === 'TERMINE' && !inspection.return_access_secured
 
   const currentVehicleQuery = useQuery({
     queryKey: ['client-return-confirmation-vehicle', reservation?.vehicle.id],
@@ -1181,7 +1245,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
 
   const invoiceQuery = useQuery({
     queryKey: ['client-return-confirmation-invoice', reservationId],
-    enabled: isReservationIdValid && isInspectionCompleted,
+    enabled: isReservationIdValid && isInspectionCompleted && Boolean(reservation?.invoice_pdf_available),
     queryFn: async () => {
       let page = 1
       let hasNextPage = true
@@ -1238,8 +1302,33 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
     },
   })
 
+  const readFreshReservation = async () => {
+    await queryClient.cancelQueries({ queryKey: ['client-reservation', reservationId], exact: true })
+    const fresh = await getReservationById(reservationId)
+    await queryClient.cancelQueries({ queryKey: ['client-reservation', reservationId], exact: true })
+    queryClient.setQueryData(['client-reservation', reservationId], fresh)
+    return fresh
+  }
+
+  const verificationMutation = useMutation({
+    mutationFn: readFreshReservation,
+    onSuccess: (fresh) => {
+      setGlobalError(null)
+      setVerificationRequired(false)
+      if (isReturnCompleted(fresh)) {
+        navigate(`/client/reservations/${reservationId}/return-inspection/confirmation`, { replace: true })
+      } else {
+        setGlobalError("La restitution n'est pas encore confirmée. Vérifiez les informations avant de réessayer.")
+      }
+    },
+    onError: () => {
+      setVerificationRequired(true)
+      setGlobalError("Impossible de vérifier l'état de la restitution. Vérifiez votre connexion puis réessayez la vérification.")
+    },
+  })
+
   const completeMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: () => finalizeReturnAndRead(async () => {
       if (!inspection || effectiveMileage == null || effectiveEnergyLevelPercent == null) {
         throw new Error('Inspection ou donnees de restitution incompletes.')
       }
@@ -1253,38 +1342,25 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
         payload.comments = inspection.comments.trim()
       }
 
-      if (inspection.status === 'TERMINE') {
-        throw new Error('Cette inspection a déjà été terminée.')
-      }
-
-      return completeInspection(inspection.id, payload)
-    },
-    onSuccess: async (completedInspection) => {
-      if (completedInspection.status !== 'TERMINE') {
-        setGlobalError("Le verrouillage du véhicule n'a pas été confirmé.")
+      await completeInspection(inspection.id, payload)
+    }, readFreshReservation),
+    onSuccess: (result) => {
+      if (result.kind === 'unverified') {
+        setVerificationRequired(true)
+        setGlobalError("Impossible de vérifier l'état de la restitution. Vérifiez votre connexion puis réessayez la vérification.")
         return
       }
 
+      if (!isReturnCompleted(result.reservation)) {
+        setVerificationRequired(true)
+        setGlobalError(result.submissionError
+          ? toErrorMessage(result.submissionError)
+          : "La restitution n'a pas encore pu être confirmée. Vérifiez son état avant de réessayer.")
+        return
+      }
+      setVerificationRequired(false)
       setGlobalError(null)
-      const refreshedReservation = await reservationQuery.refetch()
-      if (refreshedReservation.data?.status !== 'TERMINEE' || refreshedReservation.data.return_inspection?.status !== 'TERMINE') {
-        setGlobalError("La confirmation de fin de location n'a pas pu être vérifiée. Veuillez réessayer.")
-        return
-      }
-
       navigate(`/client/reservations/${reservationId}/return-inspection/confirmation`, { replace: true })
-    },
-    onError: async (error) => {
-      const axiosError = error as AxiosError<ApiErrorPayload>
-      const errorCode = axiosError.response?.data?.code
-      if (errorCode === 'INSPECTION_ALREADY_COMPLETED' || errorCode === 'ALREADY_LOCKED') {
-        const refreshedReservation = await reservationQuery.refetch()
-        if (refreshedReservation.data?.status === 'TERMINEE' && refreshedReservation.data.return_inspection?.status === 'TERMINE') {
-          navigate(`/client/reservations/${reservationId}/return-inspection/confirmation`, { replace: true })
-          return
-        }
-      }
-      setGlobalError(toErrorMessage(error))
     },
   })
 
@@ -1299,8 +1375,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
     .filter((photoType) => !returnPhotoTypes.has(photoType))
   const canLockVehicle = Boolean(
     inspection
-    && reservation?.status === 'EN_COURS'
-    && inspection.status !== 'TERMINE'
+    && ((reservation?.status === 'EN_COURS' && inspection.status !== 'TERMINE') || needsReturnAccessRecovery)
     && effectiveMileage !== null
     && effectiveEnergyLevelPercent !== null
     && missingReturnPhotoTypes.length === 0,
@@ -1325,10 +1400,11 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
   }
 
   const handleLockVehicle = () => {
-    if (!canFinalizeReturn || completeMutation.isPending || finalizationInFlightRef.current) {
+    if (!canFinalizeReturn || verificationRequired || completeMutation.isPending || finalizationInFlightRef.current) {
       return
     }
 
+    setGlobalError(null)
     finalizationInFlightRef.current = true
     completeMutation.mutate(undefined, {
       onSettled: () => {
@@ -1375,7 +1451,14 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
       allStepsDone={!isLockStep && isInspectionCompleted}
     >
       {isLockStep && globalError ? (
-        <Alert className="mb-4" variant="danger" title="Verrouillage impossible" message={globalError} />
+        <div className="mb-4">
+          <Alert variant="danger" title="Vérification de la restitution" message={globalError} />
+          {verificationRequired ? (
+            <Button className="mt-3" disabled={verificationMutation.isPending} onClick={() => verificationMutation.mutate()}>
+              {verificationMutation.isPending ? 'Vérification en cours...' : 'Vérifier la restitution'}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
 
       {reservationQuery.isLoading || (isLockStep && reservationQuery.isFetching) ? (
@@ -1391,7 +1474,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
         <Alert variant="danger" title="Chargement impossible" message="Les informations de la restitution n'ont pas pu être chargées." />
       ) : null}
 
-      {isLockStep && !reservationQuery.isLoading && !reservationQuery.isError && !isInspectionCompleted ? (
+      {isLockStep && !reservationQuery.isLoading && !reservationQuery.isFetching && !reservationQuery.isError && !isInspectionCompleted ? (
         <div className="mx-auto w-full max-w-xl space-y-4">
           {inspection && !canLockVehicle ? (
             <Alert
@@ -1460,7 +1543,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
                 className={`w-full ${canFinalizeReturn
                   ? 'bg-[#6D28D9] text-white hover:bg-[#5B21B6] focus-visible:ring-[#6D28D9]'
                   : 'cursor-not-allowed bg-slate-300 text-slate-600 hover:bg-slate-300 focus-visible:ring-slate-300'}`}
-                disabled={!canFinalizeReturn || completeMutation.isPending}
+                disabled={!canFinalizeReturn || verificationRequired || completeMutation.isPending || verificationMutation.isPending}
                 onClick={handleLockVehicle}
               >
                 {completeMutation.isPending ? (
@@ -1515,9 +1598,9 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
               <div className="mb-5 flex h-28 w-28 items-center justify-center rounded-full bg-[#16A34A] shadow-[0_16px_40px_rgba(22,163,74,0.3)]">
                 <Check aria-hidden="true" className="text-white" size={60} strokeWidth={3} />
               </div>
-              <h1 className="text-3xl font-semibold text-[#0F172A] sm:text-4xl">Location terminée</h1>
+              <h1 className="text-3xl font-semibold text-[#0F172A] sm:text-4xl">Véhicule restitué</h1>
               <p className="mt-3 text-base text-slate-700">
-                Votre véhicule a bien été verrouillé. La location est maintenant terminée.
+                Votre véhicule a bien été verrouillé et restitué. Le gestionnaire vérifiera les frais avant la clôture financière.
               </p>
             </div>
           </Card>
@@ -1550,7 +1633,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
               </div>
 
               <div className="rounded-2xl bg-[#F8FAFC] px-4 py-3 text-left lg:text-right">
-                <p className="text-sm font-medium text-slate-600">Location terminée le</p>
+                <p className="text-sm font-medium text-slate-600">Véhicule restitué le</p>
                 <p className="mt-1 text-base font-semibold text-[#0F172A]">
                   {reservation?.actual_return_at || inspection?.completed_at
                     ? formatDateTime(reservation?.actual_return_at ?? inspection!.completed_at!)
@@ -1569,7 +1652,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
           ) : null}
 
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
-            <Button
+            {reservation?.invoice_pdf_available ? <Button
               className="w-full sm:w-auto"
               disabled={isDownloadingInvoice || invoiceQuery.isLoading || !invoiceQuery.data}
               onClick={() => {
@@ -1586,7 +1669,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
               ) : (
                 'Télécharger ma facture'
               )}
-            </Button>
+            </Button> : null}
 
             <Button variant="secondary" className="w-full sm:w-auto" onClick={() => navigate('/client/reservations')}>
               Retour à mes réservations

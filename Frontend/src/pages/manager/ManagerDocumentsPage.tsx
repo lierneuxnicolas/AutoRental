@@ -34,6 +34,21 @@ function mapDocTypeToLabel(type: DocumentType): string {
   }
 }
 
+function mapTransmissionToLabel(
+  doc: Pick<ManagerClientDocumentList, 'document_type' | 'status' | 'driving_license_transmission'>,
+): string | null {
+  if (doc.document_type !== 'PERMIS_CONDUIRE' || doc.status !== 'VALIDE') {
+    return null
+  }
+  if (doc.driving_license_transmission === 'MANUAL_AND_AUTOMATIC') {
+    return 'Manuel'
+  }
+  if (doc.driving_license_transmission === 'AUTOMATIC_ONLY') {
+    return 'Automatique'
+  }
+  return null
+}
+
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat('fr-FR', {
     day: '2-digit',
@@ -80,8 +95,9 @@ function DocumentCard({ doc }: { doc: ManagerClientDocumentList }) {
           <div>
             <span className="text-slate-500">Type : </span>
             {mapDocTypeToLabel(doc.document_type)}
-          </div>
-          <div>
+            {mapTransmissionToLabel(doc) ? <span className="block text-xs text-slate-500">{mapTransmissionToLabel(doc)}</span> : null}
+                      </div>
+                      <div>
             <span className="text-slate-500">Envoyé le : </span>
             {formatDateTime(doc.uploaded_at)}
           </div>
@@ -115,7 +131,10 @@ function DocumentRow({ doc }: { doc: ManagerClientDocumentList }) {
         <p className="font-medium">{doc.client_first_name} {doc.client_last_name}</p>
         <p className="text-slate-500">{doc.client_email}</p>
       </td>
-      <td className="px-4 py-3 text-sm text-[#1F2937]">{mapDocTypeToLabel(doc.document_type)}</td>
+      <td className="px-4 py-3 text-sm text-[#1F2937]">
+        {mapDocTypeToLabel(doc.document_type)}
+        {mapTransmissionToLabel(doc) ? <p className="text-xs text-slate-500">{mapTransmissionToLabel(doc)}</p> : null}
+      </td>
       <td className="px-4 py-3">
         <StatusBadge variant={variant} label={label} />
       </td>

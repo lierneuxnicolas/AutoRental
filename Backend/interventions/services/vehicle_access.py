@@ -209,15 +209,14 @@ def _assert_unlock_business_rules(
         )
 
     now = timezone.now()
-    unlock_early_tolerance = timedelta(
-        minutes=getattr(settings, "VEHICLE_UNLOCK_EARLY_TOLERANCE_MINUTES", 30)
-    )
+    early_minutes = getattr(settings, "VEHICLE_UNLOCK_EARLY_TOLERANCE_MINUTES", 30)
+    unlock_early_tolerance = timedelta(minutes=early_minutes)
     unlock_available_at = reservation.start_at - unlock_early_tolerance
 
     if now < unlock_available_at:
         _raise_vehicle_access_error(
             "ACCESS_NOT_STARTED",
-            "Le deverrouillage sera disponible 30 minutes avant le debut de la reservation.",
+            f"Le déverrouillage sera disponible {early_minutes} minutes avant le début de la réservation.",
             http_status=409,
         )
 
@@ -227,6 +226,43 @@ def _assert_unlock_business_rules(
             "Le deverrouillage n'est plus autorise apres la fin de la reservation.",
             http_status=409,
         )
+
+    if not vehicle.is_active or vehicle.status in {
+        Vehicle.Status.A_CONTROLER,
+        Vehicle.Status.MAINTENANCE,
+        Vehicle.Status.NETTOYAGE,
+        Vehicle.Status.ACCIDENTE,
+        Vehicle.Status.INDISPONIBLE,
+    }:
+        _raise_vehicle_access_error(
+            "VEHICLE_UNAVAILABLE",
+            "Le véhicule est indisponible ou en attente de contrôle. Veuillez contacter le gestionnaire.",
+            http_status=409,
+        )
+
+    if reservation.status == Reservation.Status.CONFIRMEE:
+        if vehicle.status == Vehicle.Status.LOUE and vehicle_access.lock_state != VehicleAccess.LockState.UNLOCKED:
+            _raise_vehicle_access_error(
+                "VEHICLE_IN_USE",
+                "Le véhicule est actuellement en location. Veuillez attendre ou contacter le gestionnaire.",
+                http_status=409,
+            )
+        other_rentals = Reservation.objects.filter(vehicle_id=vehicle.id).exclude(pk=reservation.pk)
+        outstanding_return = other_rentals.filter(status=Reservation.Status.EN_COURS).exists() or (
+            other_rentals.filter(status=Reservation.Status.A_CONTROLER)
+            .exclude(inspections__inspection_type=Inspection.Type.FINAL, inspections__status=Inspection.Status.TERMINE)
+            .exists()
+        )
+        other_unlocked_access = VehicleAccess.objects.filter(
+            vehicle_id=vehicle.id, is_active=True, status=VehicleAccess.Status.ACTIVE,
+            lock_state=VehicleAccess.LockState.UNLOCKED,
+        ).exclude(reservation=reservation).exists()
+        if outstanding_return or other_unlocked_access:
+            _raise_vehicle_access_error(
+                "VEHICLE_IN_USE",
+                "Le véhicule n'a pas encore été restitué. Veuillez attendre ou contacter le gestionnaire.",
+                http_status=409,
+            )
 
     if vehicle_access.vehicle_id != reservation.vehicle_id:
         _raise_vehicle_access_error(
@@ -304,6 +340,28 @@ def _assert_unlock_business_rules(
             "Etat de verrouillage invalide.",
             http_status=409,
         )
+
+
+def get_unlock_availability(*, reservation: Reservation, requested_by) -> dict:
+    if reservation.status != Reservation.Status.CONFIRMEE:
+        return {"allowed": False, "code": "INVALID_RESERVATION_STATUS", "message": "La réservation n'est pas confirmée."}
+    access = VehicleAccess.objects.filter(reservation=reservation).first()
+    if access is None:
+        valid_from, valid_until = _build_validity_window(reservation=reservation)
+        access = VehicleAccess(
+            reservation=reservation, vehicle=reservation.vehicle, client=reservation.client.user,
+            status=VehicleAccess.Status.ACTIVE, is_active=True,
+            lock_state=VehicleAccess.LockState.LOCKED, valid_from=valid_from, valid_until=valid_until,
+        )
+    try:
+        _assert_unlock_identity(requested_by=requested_by)
+        _assert_unlock_business_rules(
+            reservation=reservation, requested_by=requested_by,
+            vehicle=reservation.vehicle, vehicle_access=access,
+        )
+    except VehicleAccessError as exc:
+        return {"allowed": False, "code": exc.code, "message": exc.message}
+    return {"allowed": True, "code": None, "message": None}
 
 
 def _log_unlock_failure(
@@ -437,14 +495,17 @@ def _assert_lock_business_rules(
             http_status=409,
         )
 
-    if vehicle_access.lock_state == VehicleAccess.LockState.LOCKED:
+    if vehicle_access.lock_state == VehicleAccess.LockState.LOCKED and not final_lock:
         _raise_vehicle_access_error(
             "ALREADY_LOCKED",
             "Le vehicule est deja verrouille.",
             http_status=409,
         )
 
-    if vehicle_access.lock_state != VehicleAccess.LockState.UNLOCKED:
+    if vehicle_access.lock_state not in (
+        {VehicleAccess.LockState.UNLOCKED, VehicleAccess.LockState.LOCKED}
+        if final_lock else {VehicleAccess.LockState.UNLOCKED}
+    ):
         _raise_vehicle_access_error(
             "ALREADY_LOCKED",
             "Etat de verrouillage invalide pour un verrouillage client.",
@@ -502,6 +563,11 @@ def _lock_vehicle_internal(
                 and not vehicle_access_locked.is_active
                 and vehicle_access_locked.lock_state == VehicleAccess.LockState.LOCKED
             ):
+                if reservation_locked.client.user_id != requested_by.id or vehicle_access_locked.client_id != requested_by.id:
+                    _raise_vehicle_access_error("NOT_OWNER", "Cette reservation n'appartient pas a l'utilisateur authentifie.", http_status=403)
+                final_inspection = _find_final_inspection(reservation=reservation_locked)
+                if final_inspection is None or final_inspection.status != Inspection.Status.TERMINE:
+                    _raise_vehicle_access_error("FINAL_INSPECTION_REQUIRED", "Inspection finale terminée requise.", http_status=409)
                 return {
                     "state": VehicleAccess.LockState.LOCKED,
                     "locked_at": vehicle_access_locked.last_locked_at,
@@ -515,22 +581,24 @@ def _lock_vehicle_internal(
                 final_lock=final_lock,
             )
 
-            locked_at = timezone.now()
-            vehicle_access_locked.lock_state = VehicleAccess.LockState.LOCKED
-            vehicle_access_locked.last_locked_at = locked_at
-            vehicle_access_locked.save(update_fields=["lock_state", "last_locked_at", "updated_at"])
+            locked_at = vehicle_access_locked.last_locked_at
+            if vehicle_access_locked.lock_state != VehicleAccess.LockState.LOCKED:
+                locked_at = timezone.now()
+                vehicle_access_locked.lock_state = VehicleAccess.LockState.LOCKED
+                vehicle_access_locked.last_locked_at = locked_at
+                vehicle_access_locked.save(update_fields=["lock_state", "last_locked_at", "updated_at"])
 
-            LockingLog.objects.create(
-                vehicle_access=vehicle_access_locked,
-                reservation=reservation_locked,
-                vehicle=vehicle_locked,
-                user=requested_by,
-                action=LockingLog.Action.LOCK,
-                result=LockingLog.Result.SUCCESS,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                metadata={},
-            )
+                LockingLog.objects.create(
+                    vehicle_access=vehicle_access_locked,
+                    reservation=reservation_locked,
+                    vehicle=vehicle_locked,
+                    user=requested_by,
+                    action=LockingLog.Action.LOCK,
+                    result=LockingLog.Result.SUCCESS,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    metadata={},
+                )
 
             if revoke_after_lock:
                 now = timezone.now()

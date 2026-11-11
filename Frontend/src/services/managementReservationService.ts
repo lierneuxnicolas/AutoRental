@@ -90,6 +90,11 @@ export async function validateManagementReservationReturn(
   return data
 }
 
+export async function confirmManagementReturnCharges(id: number | string): Promise<ReservationManagementDetail> {
+  const { data } = await api.post<ReservationManagementDetail>(`/management/reservations/${id}/confirm-return-charges/`)
+  return data
+}
+
 export async function reportManagementReservationIssue(
   id: number | string,
   payload: ManagementReservationIssueRequest,

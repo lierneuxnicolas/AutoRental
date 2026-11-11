@@ -8,8 +8,7 @@ from django.utils import timezone
 from accounts.models import Role, User
 from inspections.models import Damage, Inspection, InspectionPhoto
 from inspections.services.departure import DepartureInspectionError
-from interventions.models import VehicleAccess
-from interventions.services.vehicle_access import VehicleAccessError, lock_and_revoke_after_return
+from interventions.services.vehicle_access import lock_and_revoke_after_return
 from notifications.services import create_notification
 from payments.services.deposits import mark_authorized_deposit_for_verification
 from reservations.models import Reservation
@@ -64,7 +63,9 @@ def _assert_return_creation_eligibility(*, reservation: Reservation) -> None:
             details={"initial_inspection_status": initial_inspection.status},
         )
 
-def _assert_return_completion_eligibility(*, inspection: Inspection, mileage: int, energy_level_percent: int) -> None:
+def _assert_return_completion_eligibility(
+    *, inspection: Inspection, mileage: int, energy_level_percent: int, allow_completed: bool = False,
+) -> None:
     if inspection.inspection_type != Inspection.Type.FINAL:
         _raise_return_error(
             "INVALID_INSPECTION_TYPE",
@@ -72,13 +73,14 @@ def _assert_return_completion_eligibility(*, inspection: Inspection, mileage: in
             details={"inspection_type": inspection.inspection_type},
         )
 
-    if inspection.status == Inspection.Status.TERMINE:
+    if inspection.status == Inspection.Status.TERMINE and not allow_completed:
         _raise_return_error(
             "INSPECTION_ALREADY_COMPLETED",
             "Cette inspection est deja terminee.",
         )
 
-    if inspection.reservation.status != Reservation.Status.EN_COURS:
+    allowed_status = Reservation.Status.A_CONTROLER if allow_completed else Reservation.Status.EN_COURS
+    if inspection.reservation.status != allowed_status:
         _raise_return_error(
             "INVALID_RESERVATION_STATUS",
             "La reservation doit etre EN_COURS pour cloturer l'etat des lieux de retour.",
@@ -298,14 +300,6 @@ def _integrate_intervention_for_major_or_critical_damage(*, inspection: Inspecti
     """Integration hook for intervention creation when workflows are implemented."""
 
 
-def _is_vehicle_already_locked(*, reservation: Reservation) -> bool:
-    access = VehicleAccess.objects.filter(reservation=reservation).first()
-    if access is None:
-        return False
-
-    return access.lock_state == VehicleAccess.LockState.LOCKED
-
-
 def create_return_inspection(*, reservation: Reservation, requested_by) -> Inspection:
     _assert_request_context(reservation=reservation, requested_by=requested_by)
 
@@ -376,6 +370,18 @@ def complete_return_inspection(
         vehicle_locked = Vehicle.objects.select_for_update().get(pk=reservation_locked.vehicle_id)
 
         _assert_request_context(reservation=reservation_locked, requested_by=requested_by)
+        if inspection_locked.status == Inspection.Status.TERMINE:
+            if (reservation_locked.status != Reservation.Status.A_CONTROLER
+                    or inspection_locked.mileage != mileage
+                    or inspection_locked.energy_level_percent != energy_level_percent
+                    or inspection_locked.demo_key_check_completed_at is None):
+                _raise_return_error("INSPECTION_ALREADY_COMPLETED", "Cette inspection est deja terminee.")
+            _assert_return_completion_eligibility(
+                inspection=inspection_locked, mileage=mileage,
+                energy_level_percent=energy_level_percent, allow_completed=True,
+            )
+            lock_and_revoke_after_return(reservation=reservation_locked, requested_by=requested_by)
+            return inspection_locked
         _assert_return_completion_eligibility(
             inspection=inspection_locked,
             mileage=mileage,
@@ -403,16 +409,10 @@ def complete_return_inspection(
             ]
         )
 
-        vehicle_already_locked = _is_vehicle_already_locked(reservation=reservation_locked)
-        if not vehicle_already_locked:
-            try:
-                lock_and_revoke_after_return(
-                    reservation=reservation_locked,
-                    requested_by=requested_by,
-                )
-            except VehicleAccessError as exc:
-                if exc.code != "ALREADY_LOCKED":
-                    raise
+        lock_and_revoke_after_return(
+            reservation=reservation_locked,
+            requested_by=requested_by,
+        )
 
         has_major_or_critical_damage = inspection_locked.damages.filter(
             severity__in=[Damage.Severity.MAJEUR, Damage.Severity.CRITIQUE]
@@ -420,7 +420,7 @@ def complete_return_inspection(
         if has_major_or_critical_damage:
             _integrate_intervention_for_major_or_critical_damage(inspection=inspection_locked)
 
-        reservation_locked.status = Reservation.Status.TERMINEE
+        reservation_locked.status = Reservation.Status.A_CONTROLER
         reservation_locked.save(update_fields=["status", "updated_at"])
 
         if mileage >= vehicle_locked.mileage:
@@ -511,6 +511,25 @@ def save_return_vehicle_state(
             )
 
         cleaned_description = (anomaly_description or "").strip()
+        existing_damage = inspection_locked.damages.filter(location="Etat du vehicule").first()
+        if existing_damage is not None:
+            same_damage = (
+                anomaly_present
+                and existing_damage.description == cleaned_description
+                and existing_damage.severity == anomaly_severity
+                and (not normalized_photo_ids
+                     or set(existing_damage.evidence_photos.values_list("id", flat=True)) == set(normalized_photo_ids))
+            )
+            if same_damage:
+                if inspection_locked.mileage != mileage or inspection_locked.energy_level_percent != energy_level_percent:
+                    inspection_locked.mileage = mileage
+                    inspection_locked.energy_level_percent = energy_level_percent
+                    inspection_locked.save(update_fields=["mileage", "energy_level_percent", "updated_at"])
+                return inspection_locked, existing_damage, vehicle_locked.status
+            _raise_return_error(
+                "VEHICLE_STATE_ALREADY_SAVED",
+                "Une anomalie a déjà été enregistrée ; contactez un gestionnaire pour la corriger.",
+            )
         created_damage = None
         is_critical = False
         if anomaly_present:

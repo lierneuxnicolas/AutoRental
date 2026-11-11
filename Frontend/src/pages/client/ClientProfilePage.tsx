@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
@@ -124,15 +124,10 @@ function validateDateOfBirth(value: string): true | string {
 
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const youngestAllowedBirthDate = subtractYears(today, MINIMUM_AGE)
   const oldestAllowedBirthDate = subtractYears(today, MAXIMUM_AGE)
 
   if (birthDate > today) {
     return 'La date de naissance ne peut pas etre dans le futur.'
-  }
-
-  if (birthDate > youngestAllowedBirthDate) {
-    return 'Vous devez avoir au moins 21 ans pour utiliser GetaCar.'
   }
 
   if (birthDate < oldestAllowedBirthDate) {
@@ -195,6 +190,7 @@ export default function ClientProfilePage() {
 
   const {
     register,
+    control,
     handleSubmit,
     reset,
     setError,
@@ -210,6 +206,11 @@ export default function ClientProfilePage() {
       address: '',
     },
   })
+  const declaredBirthDate = useWatch({ control, name: 'date_of_birth' })
+  const parsedBirthDate = parseDateInput(declaredBirthDate)
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const isUnderMinimumAge = parsedBirthDate !== null && parsedBirthDate <= today && parsedBirthDate > subtractYears(today, MINIMUM_AGE)
 
   useEffect(() => {
     if (profileQuery.data) {
@@ -234,11 +235,13 @@ export default function ClientProfilePage() {
   const updateProfileMutation = useMutation({
     mutationFn: async (values: ProfileFormValues) => {
       const payload: ClientProfileUpdateRequest = {
-        first_name: values.first_name.trim(),
-        last_name: values.last_name.trim(),
         phone: values.phone.trim(),
-        date_of_birth: values.date_of_birth ? values.date_of_birth : null,
         address: values.address.trim(),
+        ...(!profileQuery.data?.identity_locked ? {
+          first_name: values.first_name.trim(),
+          last_name: values.last_name.trim(),
+          date_of_birth: values.date_of_birth ? values.date_of_birth : null,
+        } : {}),
       }
 
       return updateClientProfile(payload)
@@ -406,11 +409,13 @@ export default function ClientProfilePage() {
               <div className="grid gap-5 md:grid-cols-2">
                 <Input
                   label="Prénom"
+                  readOnly={profileQuery.data?.identity_locked}
                   error={errors.first_name?.message}
                   {...register('first_name', { validate: (value) => validatePersonName(value, 'prénom') })}
                 />
                 <Input
                   label="Nom"
+                  readOnly={profileQuery.data?.identity_locked}
                   error={errors.last_name?.message}
                   {...register('last_name', { validate: (value) => validatePersonName(value, 'nom') })}
                 />
@@ -422,16 +427,22 @@ export default function ClientProfilePage() {
                   error={errors.phone?.message}
                   {...register('phone', { validate: validatePhoneNumber })}
                 />
-                <Input
-                  label="Date de naissance"
-                  type="date"
-                  min={dateInputValue(subtractYears(new Date(), MAXIMUM_AGE))}
-                  max={dateInputValue(subtractYears(new Date(), MINIMUM_AGE))}
-                  error={errors.date_of_birth?.message}
-                  {...register('date_of_birth', {
-                    validate: validateDateOfBirth,
-                  })}
-                />
+                <div>
+                  <Input
+                    label="Date de naissance"
+                    type="date"
+                    readOnly={profileQuery.data?.identity_locked}
+                    min={dateInputValue(subtractYears(new Date(), MAXIMUM_AGE))}
+                    max={dateInputValue(new Date())}
+                    error={errors.date_of_birth?.message}
+                    {...register('date_of_birth', {
+                      validate: (value) => profileQuery.data?.identity_locked || validateDateOfBirth(value),
+                    })}
+                  />
+                  <p className={`mt-1 text-sm ${isUnderMinimumAge ? 'text-red-600' : 'text-slate-500'}`}>
+                    Vous devez avoir au moins 21 ans pour louer un véhicule.
+                  </p>
+                </div>
               </div>
               <Input label="Adresse du domicile" error={errors.address?.message} {...register('address')} />
 

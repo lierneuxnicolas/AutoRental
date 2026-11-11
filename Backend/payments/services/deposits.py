@@ -12,7 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import ClientProfile
-from accounts.services import validate_client_for_reservation
+from accounts.services import check_vehicle_compatibility_for_client, validate_client_for_reservation
 from notifications.services import create_notification
 from payments.models import Deposit
 from reservations.models import Reservation
@@ -20,7 +20,7 @@ from reservations.services.pricing import PricingError, calculate_price_simulati
 from vehicles.services import is_vehicle_available
 
 
-@dataclass(frozen=True)
+@dataclass
 class DepositAuthorizationError(ValueError):
     code: str
     message: str
@@ -86,14 +86,28 @@ def _validate_request_context(*, reservation: Reservation, requested_by) -> Clie
 
     eligibility = validate_client_for_reservation(
         client=client_profile,
-        reservation_start_date=reservation.start_at.date(),
-        reservation_end_date=reservation.end_at.date(),
+        reservation_start_date=timezone.localtime(reservation.start_at).date(),
+        reservation_end_date=timezone.localtime(reservation.end_at).date(),
     )
     if not eligibility.is_eligible:
+        message = "Le profil client ou les documents ne sont plus valides pour cette reservation."
+        if "IDENTITY_CARD_BIRTH_DATE_UNVERIFIED" in eligibility.errors:
+            message = "Faites vérifier votre date de naissance par un gestionnaire."
+        elif "IDENTITY_CARD_BIRTH_DATE_MISMATCH" in eligibility.errors:
+            message = "La date de naissance du profil diffère de celle vérifiée. Corrigez votre profil et contactez le gestionnaire."
+        elif "UNDER_MINIMUM_AGE" in eligibility.errors:
+            message = "Vous devez avoir au moins 21 ans au début de la location."
         _raise_deposit_error(
             "PROFILE_NOT_ELIGIBLE",
-            "Le profil client ou les documents ne sont plus valides pour cette reservation.",
+            message,
             details={"eligibility_errors": list(eligibility.errors)},
+        )
+
+    compatibility = check_vehicle_compatibility_for_client(client=client_profile, vehicle=reservation.vehicle)
+    if not compatibility.is_compatible:
+        _raise_deposit_error(
+            compatibility.code or "VEHICLE_INCOMPATIBLE_WITH_LICENSE",
+            compatibility.message or "Le vehicule est incompatible avec le permis du client.",
         )
 
     return client_profile
@@ -109,6 +123,7 @@ def _recalculate_deposit_amount(reservation: Reservation) -> Decimal:
             vehicle=reservation.vehicle,
             start_at=reservation.start_at,
             end_at=reservation.end_at,
+            is_daily_rate_booking=reservation.is_daily_rate_booking,
         )
     except PricingError as exc:
         _raise_deposit_error(
@@ -180,7 +195,7 @@ def _build_release_idempotency_key(*, deposit: Deposit) -> str:
 
 def _release_stripe_deposit_hold(*, deposit: Deposit) -> None:
     if not deposit.stripe_payment_intent_id:
-        return
+        _raise_deposit_release_error("DEPOSIT_REFERENCE_MISSING", "La référence Stripe de la caution est absente.")
 
     stripe_api_key = getattr(settings, "STRIPE_SECRET_KEY", "")
     if not stripe_api_key:
@@ -203,19 +218,23 @@ def _release_stripe_deposit_hold(*, deposit: Deposit) -> None:
         )
 
     stripe_status = getattr(payment_intent, "status", "")
-    if stripe_status in {"canceled", "succeeded"}:
+    if stripe_status == "canceled":
         return
+    if stripe_status == "succeeded":
+        _raise_deposit_release_error("DEPOSIT_ALREADY_CAPTURED", "La caution Stripe a été capturée ; elle ne peut pas être déclarée libérée.")
 
     try:
-        stripe.PaymentIntent.cancel(
+        canceled_intent = stripe.PaymentIntent.cancel(
             deposit.stripe_payment_intent_id,
             cancellation_reason="abandoned",
             idempotency_key=_build_release_idempotency_key(deposit=deposit),
         )
+        if getattr(canceled_intent, "status", None) != "canceled":
+            _raise_deposit_release_error("DEPOSIT_RELEASE_UNCONFIRMED", "Stripe n'a pas confirmé la libération de la caution.")
     except stripe.error.InvalidRequestError as exc:
         error_code = getattr(exc, "code", None)
         if error_code == "payment_intent_unexpected_state":
-            return
+            _raise_deposit_release_error("DEPOSIT_STATE_CHANGED", "L'état de la caution Stripe a changé ; vérifiez-la avant de réessayer.")
         _raise_deposit_release_error(
             "STRIPE_ERROR",
             "Stripe refuse la liberation de la caution.",

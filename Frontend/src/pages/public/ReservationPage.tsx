@@ -35,7 +35,7 @@ type ProfileEligibility = {
   shouldShowDocumentsCta: boolean
 }
 
-type InsuranceKey = 'standard' | 'duo' | 'omnium'
+type InsuranceKey = 'standard' | 'complementary'
 
 type ReservationFlowParams = ReservationCreateRequest & {
   insurance: InsuranceKey
@@ -48,14 +48,12 @@ const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : 
 
 const INSURANCE_LABELS: Record<InsuranceKey, string> = {
   standard: 'Standard',
-  duo: 'Duo',
-  omnium: 'Omnium',
+  complementary: 'Complémentaire',
 }
 
 const INSURANCE_DAILY_PRICE: Record<InsuranceKey, number> = {
   standard: 0,
-  duo: 8,
-  omnium: 25,
+  complementary: 10,
 }
 
 function formatDateTimeLabel(value: string): string {
@@ -91,7 +89,11 @@ function toFiniteNumber(value: unknown): number | null {
   return parsedValue
 }
 
-function computeInsuranceDays(durationHours: string | number): number | null {
+function computeInsuranceDays(durationHours: string | number, billedDays?: number): number | null {
+  if (typeof billedDays === 'number' && billedDays > 0) {
+    return billedDays
+  }
+
   const parsedHours = toFiniteNumber(durationHours)
 
   if (parsedHours === null || parsedHours <= 0) {
@@ -111,7 +113,11 @@ function formatEuroAmount(value: string | number): string {
   return `${new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(parsedValue)} €`
 }
 
-function formatDurationLabel(value: string | number): string {
+function formatDurationLabel(value: string | number, billedDays?: number): string {
+  if (typeof billedDays === 'number' && billedDays > 0) {
+    return `${billedDays} jour${billedDays > 1 ? 's' : ''}`
+  }
+
   const parsedHours = toFiniteNumber(value)
 
   if (parsedHours === null || parsedHours <= 0) {
@@ -151,22 +157,15 @@ function formatInsuranceTypeLabel(value: string | undefined, fallback: string): 
   }
 
   const normalized = value.toLowerCase()
-  if (normalized === 'standard' || normalized === 'duo' || normalized === 'omnium') {
-    return INSURANCE_LABELS[normalized as InsuranceKey]
+  if (normalized === 'standard' || normalized === 'complementary' || normalized === 'complementaire') {
+    return INSURANCE_LABELS[normalized === 'standard' ? 'standard' : 'complementary']
   }
 
   return fallback
 }
 
-function mapInsuranceToBackend(insurance: InsuranceKey): 'STANDARD' | 'DUO' | 'OMNIUM' {
-  switch (insurance) {
-    case 'duo':
-      return 'DUO'
-    case 'omnium':
-      return 'OMNIUM'
-    default:
-      return 'STANDARD'
-  }
+function mapInsuranceToBackend(insurance: InsuranceKey): 'STANDARD' | 'COMPLEMENTAIRE' {
+  return insurance === 'complementary' ? 'COMPLEMENTAIRE' : 'STANDARD'
 }
 
 function readReservationFlowParams(searchParams: URLSearchParams): ReservationFlowParams | null {
@@ -182,7 +181,7 @@ function readReservationFlowParams(searchParams: URLSearchParams): ReservationFl
   }
 
   const normalizedInsurance = insuranceRaw.toLowerCase()
-  if (normalizedInsurance !== 'standard' && normalizedInsurance !== 'duo' && normalizedInsurance !== 'omnium') {
+  if (normalizedInsurance !== 'standard' && normalizedInsurance !== 'complementary') {
     return null
   }
 
@@ -603,9 +602,8 @@ export default function ReservationPage() {
   }
 
   const insuranceOptions = [
-    { key: 'standard' as const, label: 'Standard', description: 'Assurance de base, 1 conducteur' },
-    { key: 'duo' as const, label: 'Duo', description: 'Assurance de base + 1 conducteur additionnel' },
-    { key: 'omnium' as const, label: 'Omnium', description: 'Protection renforcée + franchise réduite' },
+    { key: 'standard' as const, label: 'Standard', description: 'Assurance de base incluse dans le prix' },
+    { key: 'complementary' as const, label: 'Complémentaire', description: 'Franchise réduite en cas de dommage couvert' },
   ]
 
   const isLoadingData = vehicleQuery.isLoading || simulationQuery.isLoading
@@ -664,7 +662,9 @@ export default function ReservationPage() {
     && !transmissionCompatibilityError,
   )
 
-  const insuranceDays = simulationQuery.data ? computeInsuranceDays(simulationQuery.data.duration_hours) : null
+  const insuranceDays = simulationQuery.data
+    ? computeInsuranceDays(simulationQuery.data.duration_hours, simulationQuery.data.billed_days)
+    : null
   const computedInsuranceAmount = simulationQuery.data ? toFiniteNumber(simulationQuery.data.insurance_amount) : null
   const computedTotalAmount = simulationQuery.data ? toFiniteNumber(simulationQuery.data.total_amount) : null
   const insurancePriceDelta = computedInsuranceAmount !== null
@@ -726,13 +726,13 @@ export default function ReservationPage() {
   const reservationPaidAmount = confirmationReservation?.total_amount ?? simulationQuery.data?.total_amount ?? flowPayload.estimatedTotal
   const reservationDepositAmount = confirmationReservation?.deposit_amount ?? simulationQuery.data?.deposit_amount ?? flowPayload.insurancePrice
   const reservationInsuranceLabel = confirmationReservation?.insurance_type
-    ? INSURANCE_LABELS[confirmationReservation.insurance_type.toLowerCase() as InsuranceKey] ?? selectedInsuranceLabel
+    ? formatInsuranceTypeLabel(confirmationReservation.insurance_type, selectedInsuranceLabel)
     : selectedInsuranceLabel
   const paymentVehicleLabel = vehicleQuery.data
     ? `${vehicleQuery.data.brand} ${vehicleQuery.data.model_name}`
     : 'Véhicule indisponible'
   const paymentDurationLabel = simulationQuery.data
-    ? formatDurationLabel(simulationQuery.data.duration_hours)
+    ? formatDurationLabel(simulationQuery.data.duration_hours, simulationQuery.data.billed_days)
     : 'Durée indisponible'
   const paymentInsuranceLabel = simulationQuery.data
     ? formatInsuranceTypeLabel(simulationQuery.data.insurance_type, reservationInsuranceLabel)
@@ -784,7 +784,7 @@ export default function ReservationPage() {
             >
               <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Étape 1 · Choix de l’assurance</h2>}>
                 <div className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     {insuranceOptions.map((option) => {
                       const isSelected = selectedInsurance === option.key
 

@@ -1,8 +1,9 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models import Q
 from rest_framework import serializers
 
-from accounts.models import ClientProfile
+from accounts.models import ClientDocument, ClientProfile
 from accounts.services.profile_status import (
     get_effective_profile_status,
     recalculate_profile_status,
@@ -20,6 +21,7 @@ class ClientProfileMeSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField(read_only=True)
     profile_status = serializers.SerializerMethodField(read_only=True)
     date_joined = serializers.DateTimeField(source="user.date_joined", read_only=True)
+    identity_locked = serializers.SerializerMethodField()
 
     class Meta:
         model = ClientProfile
@@ -33,6 +35,7 @@ class ClientProfileMeSerializer(serializers.ModelSerializer):
             "role",
             "date_joined",
             "date_of_birth",
+            "identity_locked",
             "address",
             "profile_status",
             "rejection_reason",
@@ -59,6 +62,15 @@ class ClientProfileMeSerializer(serializers.ModelSerializer):
     def get_profile_status(self, obj) -> str:
         return get_effective_profile_status(obj)
 
+    def get_identity_locked(self, obj) -> bool:
+        return ClientDocument.objects.filter(
+            client=obj, document_type=ClientDocument.DocumentType.CARTE_IDENTITE,
+        ).filter(
+            Q(status=ClientDocument.Status.VALIDE)
+            | Q(status=ClientDocument.Status.EXPIRE, validated_at__isnull=False)
+            | Q(verified_date_of_birth__isnull=False)
+        ).exists()
+
     def validate_first_name(self, value):
         return validate_person_name(value, label="prénom")
 
@@ -82,10 +94,20 @@ class ClientProfileMeSerializer(serializers.ModelSerializer):
         return value
 
     def update(self, instance, validated_data):
-        user_data = validated_data.pop("user", {})
-        user = instance.user
-
         with transaction.atomic():
+            instance = ClientProfile.objects.select_for_update().select_related("user").get(pk=instance.pk)
+            user_data = validated_data.pop("user", {})
+            user = instance.user
+            if self.get_identity_locked(instance):
+                locked = {
+                    "first_name": (user_data.get("first_name", user.first_name), user.first_name),
+                    "last_name": (user_data.get("last_name", user.last_name), user.last_name),
+                    "date_of_birth": (validated_data.get("date_of_birth", instance.date_of_birth), instance.date_of_birth),
+                }
+                errors = {field: "Cette information est vérifiée et ne peut être modifiée que par un gestionnaire."
+                          for field, (submitted, current) in locked.items() if submitted != current}
+                if errors:
+                    raise serializers.ValidationError(errors)
             user_changed_fields = []
             for field in ("first_name", "last_name", "phone"):
                 if field in user_data:
@@ -103,7 +125,8 @@ class ClientProfileMeSerializer(serializers.ModelSerializer):
                     profile_changed_fields.append(field)
 
             if profile_changed_fields:
-                instance.full_clean()
+                if "date_of_birth" in profile_changed_fields:
+                    instance.full_clean()
                 profile_changed_fields.append("updated_at")
                 instance.save(update_fields=profile_changed_fields)
 
@@ -118,6 +141,7 @@ class ClientProfileProgressSerializer(serializers.Serializer):
     personal_information_complete = serializers.BooleanField()
     identity_card_valid = serializers.BooleanField()
     driving_license_valid = serializers.BooleanField()
+    driving_license_transmission = serializers.CharField(allow_null=True, required=False)
     identity_card_issue = serializers.CharField(allow_null=True)
     driving_license_issue = serializers.CharField(allow_null=True)
     profile_status = serializers.ChoiceField(choices=ClientProfile.ProfileStatus.choices)

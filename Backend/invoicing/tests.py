@@ -153,6 +153,20 @@ class InvoiceDownloadEndpointTests(TestCase):
 
 		self.assertTrue(pdf_bytes.startswith(b"%PDF"))
 
+	def test_generated_pdf_includes_complementary_insurance_amount(self):
+		Reservation.objects.filter(pk=self.reservation.pk).update(
+			insurance_type=Reservation.InsuranceType.COMPLEMENTAIRE,
+		)
+		self.invoice.refresh_from_db()
+
+		pdf_bytes = build_invoice_pdf(self.invoice)
+		pdf_document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+		pdf_text = "\n".join(page.get_text() for page in pdf_document)
+
+		self.assertIn("Assurance Complémentaire", pdf_text)
+		self.assertIn(format_french_amount(Decimal("10.00")), pdf_text)
+		self.assertIn(format_french_amount(Decimal("90.00")), pdf_text)
+
 	def test_generated_pdf_includes_reservation_details(self):
 		pdf_bytes = build_invoice_pdf(self.invoice)
 		reservation = self.reservation

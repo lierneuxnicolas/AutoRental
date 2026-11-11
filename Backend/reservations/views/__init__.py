@@ -13,6 +13,7 @@ from .client import (
 from .management import (
     ReservationManagementCancellationView,
     ReservationManagementCompleteView,
+    ReservationManagementConfirmChargesView,
     ReservationManagementDepositReleaseView,
     ReservationManagementDetailView,
     ReservationManagementIssueView,
@@ -39,6 +40,7 @@ __all__ = [
     "ReservationManagementDetailView",
     "ReservationManagementCancellationView",
     "ReservationManagementCompleteView",
+    "ReservationManagementConfirmChargesView",
     "ReservationManagementIssueView",
     "ReservationManagementReviewDecisionView",
     "ReservationManagementDepositReleaseView",

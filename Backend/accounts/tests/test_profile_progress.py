@@ -74,6 +74,19 @@ class ProfileProgressEndpointTests(APITestCase):
         self.profile.address = "Rue Test"
         self.profile.save(update_fields=["date_of_birth", "address"])
 
+    def test_progress_exposes_license_transmission_only_when_valid(self):
+        self._authenticate()
+        self.assertIsNone(self._get_progress()["driving_license_transmission"])
+
+        self._create_document(
+            doc_type=ClientDocument.DocumentType.PERMIS_CONDUIRE,
+            status_value=ClientDocument.Status.VALIDE,
+            expiration_date=timezone.localdate() + timedelta(days=400),
+        )
+        progress = self._get_progress()
+        self.assertTrue(progress["driving_license_valid"])
+        self.assertEqual(progress["driving_license_transmission"], "MANUAL_AND_AUTOMATIC")
+
     def test_progress_is_20_percent_with_account_only(self):
         self._authenticate()
         progress = self._get_progress()

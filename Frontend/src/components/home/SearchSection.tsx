@@ -1,11 +1,11 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import type { ComponentType } from 'react'
 import { CarFront, CreditCard, MapPin, Search, Smartphone, Unlock } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import Alert from '../feedback/Alert'
 import Card from '../ui/Card'
 import Button from '../ui/Button'
-import { RENTAL_TIME_OPTIONS } from '../../constants/rentalTimeOptions'
+import { buildRentalDateTime, getFollowingDate, getMinimumStartDate, getRentalClock, RETURN_CLOCK } from '../../utils/rentalPeriod'
 
 type HighlightCard = {
   title: string
@@ -36,120 +36,33 @@ const HIGHLIGHT_CARDS: HighlightCard[] = [
   },
 ]
 
-function toComparableDateTime(value: string): Date | null {
-  if (!value) {
-    return null
-  }
 
-  const normalizedValue = value.length === 16 ? `${value}:00` : value
-  const parsedValue = new Date(normalizedValue)
-
-  if (Number.isNaN(parsedValue.getTime())) {
-    return null
-  }
-
-  return parsedValue
-}
-
-function toDateValue(value: Date): string {
-  const year = value.getFullYear()
-  const month = `${value.getMonth() + 1}`.padStart(2, '0')
-  const day = `${value.getDate()}`.padStart(2, '0')
-
-  return `${year}-${month}-${day}`
-}
-
-function combineDateAndTime(dateValue: string, timeValue: string): string {
-  if (!dateValue || !timeValue) {
-    return ''
-  }
-
-  return `${dateValue}T${timeValue}`
-}
-
-function hasThirtyMinuteStep(value: string): boolean {
-  if (!value) {
-    return false
-  }
-
-  const parsedValue = new Date(value.length === 16 ? `${value}:00` : value)
-  if (Number.isNaN(parsedValue.getTime())) {
-    return false
-  }
-
-  return parsedValue.getMinutes() === 0 || parsedValue.getMinutes() === 30
-}
-
-function roundUpToNextHalfHour(value: Date): Date {
-  const rounded = new Date(value)
-  rounded.setSeconds(0, 0)
-
-  const minutes = rounded.getMinutes()
-  if (minutes === 0 || minutes === 30) {
-    return rounded
-  }
-
-  if (minutes < 30) {
-    rounded.setMinutes(30)
-    return rounded
-  }
-
-  rounded.setHours(rounded.getHours() + 1, 0, 0, 0)
-  return rounded
-}
-
-type SearchDateTimeFieldProps = {
+type SearchDateFieldProps = {
   label: string
-  dateId: string
-  timeId: string
-  dateValue: string
-  timeValue: string
+  id: string
+  value: string
   minDate: string
-  onDateChange: (value: string) => void
-  onTimeChange: (value: string) => void
+  onChange: (value: string) => void
 }
 
-function SearchDateTimeField({
+function SearchDateField({
   label,
-  dateId,
-  timeId,
-  dateValue,
-  timeValue,
+  id,
+  value,
   minDate,
-  onDateChange,
-  onTimeChange,
-}: SearchDateTimeFieldProps) {
+  onChange,
+}: SearchDateFieldProps) {
   return (
     <div className="space-y-2">
       <label className="block text-sm font-medium text-[#1F2937]">{label}</label>
-      <div className="grid min-h-14 grid-cols-[minmax(0,1fr)_1px_6.5rem] items-center overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white shadow-sm transition focus-within:border-[#2563EB] focus-within:ring-2 focus-within:ring-blue-100">
-          <input
-            id={dateId}
-            type="date"
-            value={dateValue}
-            min={minDate}
-            onChange={(event) => onDateChange(event.target.value)}
-            aria-label={`${label} - date`}
-            className="h-14 min-w-0 border-0 bg-transparent px-4 text-sm text-[#1F2937] outline-none transition focus:bg-blue-50/40"
-          />
-
-          <span className="h-8 w-px bg-[#E5E7EB]" aria-hidden="true" />
-
-          <select
-            id={timeId}
-            value={timeValue}
-            onChange={(event) => onTimeChange(event.target.value)}
-            aria-label={`${label} - heure`}
-            className="h-14 min-w-0 border-0 bg-transparent px-4 text-sm text-[#1F2937] outline-none transition focus:bg-blue-50/40"
-          >
-            <option value="">--:--</option>
-            {RENTAL_TIME_OPTIONS.map((timeOption) => (
-              <option key={timeOption} value={timeOption}>
-                {timeOption}
-              </option>
-            ))}
-          </select>
-        </div>
+      <input
+        id={id}
+        type="date"
+        value={value}
+        min={minDate}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-14 w-full min-w-0 rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:bg-blue-50/40 focus:ring-2 focus:ring-blue-100"
+      />
     </div>
   )
 }
@@ -157,57 +70,34 @@ function SearchDateTimeField({
 export default function SearchSection() {
   const navigate = useNavigate()
   const [startDateValue, setStartDateValue] = useState('')
-  const [startTimeValue, setStartTimeValue] = useState('')
   const [endDateValue, setEndDateValue] = useState('')
-  const [endTimeValue, setEndTimeValue] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
-  const minimumDateTime = useMemo(() => roundUpToNextHalfHour(new Date()), [])
-  const minimumDate = useMemo(() => toDateValue(minimumDateTime), [minimumDateTime])
-  const endMinimumDate = startDateValue || minimumDate
+  const minimumDate = getMinimumStartDate()
+  const endMinimumDate = startDateValue ? getFollowingDate(startDateValue) : getFollowingDate(minimumDate)
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setFormError(null)
 
-    const startDateTimeInput = combineDateAndTime(startDateValue, startTimeValue)
-    const endDateTimeInput = combineDateAndTime(endDateValue, endTimeValue)
-    const normalizedStart = startDateTimeInput.trim()
-    const normalizedEnd = endDateTimeInput.trim()
-    if (!normalizedStart || !normalizedEnd) {
+    if (!startDateValue || !endDateValue) {
       setFormError('Veuillez renseigner une date de début et une date de fin.')
       return
     }
 
-    if (!hasThirtyMinuteStep(normalizedStart) || !hasThirtyMinuteStep(normalizedEnd)) {
-      setFormError('Les horaires doivent être sélectionnés par tranches de 30 minutes.')
-      return
-    }
-
-    const parsedStartDateTime = toComparableDateTime(normalizedStart)
-    const parsedEndDateTime = toComparableDateTime(normalizedEnd)
-
-    if (!parsedStartDateTime || !parsedEndDateTime) {
-      setFormError('Les dates saisies sont invalides.')
-      return
-    }
-
-    const startDate = parsedStartDateTime
-    const endDate = parsedEndDateTime
-    const now = new Date()
-
-    if (startDate < now) {
+    if (startDateValue < getMinimumStartDate()) {
       setFormError('La date de départ ne peut pas être dans le passé.')
       return
     }
 
-    if (endDate <= startDate) {
-      setFormError('La date de fin doit être postérieure à la date de début.')
+    if (endDateValue <= startDateValue) {
+      setFormError('La date de retour doit être postérieure à la date de départ.')
       return
     }
 
+    const clock = getRentalClock(startDateValue)
     const searchParams = new URLSearchParams()
-    searchParams.set('start', normalizedStart)
-    searchParams.set('end', normalizedEnd)
+    searchParams.set('start', buildRentalDateTime(startDateValue, clock))
+    searchParams.set('end', buildRentalDateTime(endDateValue, RETURN_CLOCK))
 
     navigate(`/vehicles?${searchParams.toString()}`)
   }
@@ -235,26 +125,20 @@ export default function SearchSection() {
             </a>
           </div>
 
-          <SearchDateTimeField
+          <SearchDateField
             label="Date de début"
-            dateId="search-start-date"
-            timeId="search-start-time"
-            dateValue={startDateValue}
-            timeValue={startTimeValue}
+            id="search-start-date"
+            value={startDateValue}
             minDate={minimumDate}
-            onDateChange={setStartDateValue}
-            onTimeChange={setStartTimeValue}
+            onChange={setStartDateValue}
           />
 
-          <SearchDateTimeField
+          <SearchDateField
             label="Date de fin"
-            dateId="search-end-date"
-            timeId="search-end-time"
-            dateValue={endDateValue}
-            timeValue={endTimeValue}
+            id="search-end-date"
+            value={endDateValue}
             minDate={endMinimumDate}
-            onDateChange={setEndDateValue}
-            onTimeChange={setEndTimeValue}
+            onChange={setEndDateValue}
           />
 
           <div className="flex items-end">

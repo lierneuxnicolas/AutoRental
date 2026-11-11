@@ -8,16 +8,15 @@ import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import Input from '../../components/ui/Input'
-import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
+import StatusBadge from '../../components/ui/StatusBadge'
 import { getInvoiceDownload } from '../../services/invoiceService'
 import { cancelManagementReservation, getManagementReservations } from '../../services/managementReservationService'
 import type {
   ManagementReservationListQueryParams,
-  ManagementReservationStatus,
-  ReservationCancellationSource,
   ReservationManagementDetail,
 } from '../../types/managementReservation'
 import { resolveMediaUrl } from '../../utils/media'
+import { getReservationStatusUi } from '../../utils/reservationStatus'
 
 interface ManagerReservationsPageProps {
   basePath?: string
@@ -25,7 +24,6 @@ interface ManagerReservationsPageProps {
 
 type ReservationFilter =
   | ''
-  | 'BROUILLON'
   | 'CONFIRMEE'
   | 'REAFFECTATION_REQUIRED'
   | 'EN_COURS'
@@ -37,7 +35,6 @@ type ReservationFilter =
 
 const statusFilters: Array<{ value: ReservationFilter; label: string }> = [
   { value: '', label: 'Tous les statuts' },
-  { value: 'BROUILLON', label: 'Brouillon' },
   { value: 'CONFIRMEE', label: 'Confirmée' },
   { value: 'REAFFECTATION_REQUIRED', label: 'À réaffecter' },
   { value: 'EN_COURS', label: 'En cours' },
@@ -64,43 +61,12 @@ const emptyFilters: ReservationFilters = {
   vehicleSearch: '',
 }
 
-function mapStatusToUi(
-  status: ManagementReservationStatus,
-  cancellationSource: ReservationCancellationSource | null,
-): { label: string; variant: StatusVariant } {
-  switch (status) {
-    case 'BROUILLON':
-      return { label: 'Brouillon', variant: 'neutral' }
-    case 'EN_ATTENTE_CAUTION':
-      return { label: 'En attente caution', variant: 'warning' }
-    case 'EN_ATTENTE_PAIEMENT':
-      return { label: 'En attente paiement', variant: 'warning' }
-    case 'CONFIRMEE':
-      return { label: 'Confirmée', variant: 'success' }
-    case 'REAFFECTATION_REQUIRED':
-      return { label: 'À réaffecter', variant: 'warning' }
-    case 'EN_COURS':
-      return { label: 'En cours', variant: 'info' }
-    case 'A_CONTROLER':
-      return { label: 'À contrôler', variant: 'warning' }
-    case 'TERMINEE':
-      return { label: 'Terminée', variant: 'success' }
-    case 'NON_UTILISEE':
-      return { label: 'Non utilisée', variant: 'neutral' }
-    case 'ANNULEE':
-      if (cancellationSource === 'CLIENT') return { label: 'Annulée par le client', variant: 'danger' }
-      if (cancellationSource === 'GESTIONNAIRE') return { label: 'Annulée par le gestionnaire', variant: 'danger' }
-      return { label: 'Annulée', variant: 'danger' }
-    case 'PAIEMENT_ECHOUE':
-      return { label: 'Paiement échoué', variant: 'danger' }
-  }
-}
-
 const actionButtonClassName = 'shrink-0 whitespace-nowrap px-2.5! text-[13px]!'
 const cancelButtonClassName = `${actionButtonClassName} gap-1.5! border border-red-200 bg-red-50! text-red-700! hover:bg-red-100! focus-visible:ring-red-400!`
 
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat('fr-FR', {
+    timeZone: 'Europe/Brussels',
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
@@ -332,7 +298,7 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
         <>
           <div className="space-y-4 lg:hidden">
             {reservations.map((reservation) => {
-              const status = mapStatusToUi(reservation.status, reservation.cancellation_source)
+              const status = getReservationStatusUi(reservation.status, reservation.cancellation_source)
               const canCancel = reservation.status === 'CONFIRMEE'
               return (
                 <Card key={reservation.id}>
@@ -421,7 +387,7 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
               </thead>
               <tbody>
                 {reservations.map((reservation) => {
-                  const status = mapStatusToUi(reservation.status, reservation.cancellation_source)
+                  const status = getReservationStatusUi(reservation.status, reservation.cancellation_source)
                   const canCancel = reservation.status === 'CONFIRMEE'
                   return (
                     <tr key={reservation.id} className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F9FAFB]">

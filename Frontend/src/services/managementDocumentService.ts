@@ -31,7 +31,7 @@ export async function getManagementDocumentFile(id: number): Promise<Blob> {
 
 export async function validateManagementDocument(
   id: number,
-  payload: ManagerValidateDocumentRequest = {},
+  payload: ManagerValidateDocumentRequest,
 ): Promise<ManagerClientDocumentDetail> {
   const { data } = await api.post<ManagerClientDocumentDetail>(
     `/management/documents/${id}/validate/`,

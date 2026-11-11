@@ -19,6 +19,7 @@ export interface ClientProfileMe {
   role: string | null
   date_joined: string
   date_of_birth: string | null
+  identity_locked: boolean
   address: string
   profile_status: ClientProfileStatus
   rejection_reason: string
@@ -27,10 +28,10 @@ export interface ClientProfileMe {
 }
 
 export interface ClientProfileUpdateRequest {
-  first_name: string
-  last_name: string
+  first_name?: string
+  last_name?: string
   phone: string
-  date_of_birth: string | null
+  date_of_birth?: string | null
   address: string
 }
 
@@ -41,6 +42,7 @@ export interface ClientProfileProgress {
   personal_information_complete: boolean
   identity_card_valid: boolean
   driving_license_valid: boolean
+  driving_license_transmission?: 'MANUAL_AND_AUTOMATIC' | 'AUTOMATIC_ONLY' | null
   identity_card_issue: string | null
   driving_license_issue: string | null
   profile_status: ClientProfileStatus

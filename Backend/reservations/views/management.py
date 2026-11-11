@@ -54,6 +54,7 @@ from reservations.serializers.management import (
     ReservationDepositReleaseResponseSerializer,
 )
 from reservations.services import ReservationCompletionError, complete_reservation, report_return_issue
+from reservations.services.completion import confirm_return_charges
 from reservations.services.reassignment import (
     ReservationReassignmentError,
     get_replacement_vehicles,
@@ -198,7 +199,7 @@ class ReservationManagementListView(generics.ListAPIView):
 
         expire_missed_reservations()
 
-        return Reservation.objects.select_related(
+        return Reservation.objects.exclude(Reservation.unlisted_filter()).select_related(
             "client",
             "client__user",
             "invoice",
@@ -656,6 +657,20 @@ class ReservationVehicleUnavailableCancellationView(generics.GenericAPIView):
             ).data,
             status=status.HTTP_200_OK,
         )
+
+
+class ReservationManagementConfirmChargesView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    queryset = Reservation.objects.all()
+
+    def post(self, request, *args, **kwargs):
+        if request.data:
+            return Response({"code": "UNEXPECTED_INPUT", "message": "Les frais sont calculés par le serveur."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            reservation = confirm_return_charges(reservation=self.get_object(), requested_by=request.user)
+        except ReservationCompletionError as exc:
+            return Response({"code": exc.code, "message": exc.message}, status=exc.http_status)
+        return Response(ReservationManagementDetailSerializer(reservation, context={"request": request}).data)
 
 
 class ReservationManagementCompleteView(generics.GenericAPIView):

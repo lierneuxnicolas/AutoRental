@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 
 from django.core.files.base import ContentFile
+from django.db import transaction
 from django.utils import timezone
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
@@ -16,7 +17,7 @@ from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer,
 
 from invoicing.models import Invoice, InvoiceLine
 from payments.models import Deposit, Payment
-from reservations.services.pricing import calculate_price_simulation
+from reservations.services.pricing import INSURANCE_DAILY_RATES, calculate_price_simulation
 from vehicles.services.availability import AvailabilityValidationError
 
 
@@ -154,10 +155,16 @@ def _fallback_pricing_breakdown(*, invoice: Invoice) -> dict[str, Decimal]:
 	hourly_rate = getattr(category, "hourly_rate", None)
 	daily_rate = getattr(category, "daily_rate", None)
 	rental_amount = None
-	if hourly_rate is not None:
+	if reservation.is_daily_rate_booking:
+		start_at = timezone.localtime(reservation.start_at)
+		end_at = timezone.localtime(reservation.end_at)
+		billed_days = max((end_at.date() - start_at.date()).days, 1)
+		if daily_rate is not None:
+			rental_amount = _quantize_amount(Decimal(str(daily_rate)) * Decimal(billed_days))
+	elif hourly_rate is not None:
 		hourly_amount = _quantize_amount(Decimal(str(hourly_rate)) * Decimal(billed_hours))
 		rental_amount = hourly_amount
-	if daily_rate is not None:
+	if not reservation.is_daily_rate_booking and daily_rate is not None:
 		daily_amount = _quantize_amount(Decimal(str(daily_rate)) * Decimal(billed_days))
 		if rental_amount is None or daily_amount < rental_amount:
 			rental_amount = daily_amount
@@ -165,12 +172,7 @@ def _fallback_pricing_breakdown(*, invoice: Invoice) -> dict[str, Decimal]:
 	if rental_amount is None:
 		rental_amount = _quantize_amount(Decimal("0.00"))
 
-	insurance_daily_rates = {
-		"STANDARD": Decimal("0.00"),
-		"DUO": Decimal("8.00"),
-		"OMNIUM": Decimal("25.00"),
-	}
-	insurance_amount = _quantize_amount(insurance_daily_rates.get(reservation.insurance_type, Decimal("0.00")) * Decimal(billed_days))
+	insurance_amount = _quantize_amount(INSURANCE_DAILY_RATES.get(reservation.insurance_type, Decimal("0.00")) * Decimal(billed_days))
 
 	return {
 		"rental_amount": rental_amount,
@@ -186,6 +188,7 @@ def _build_pricing_breakdown(*, invoice: Invoice) -> dict[str, Decimal]:
 			start_at=reservation.start_at,
 			end_at=reservation.end_at,
 			insurance_type=reservation.insurance_type,
+			is_daily_rate_booking=reservation.is_daily_rate_booking,
 		)
 		return {
 			"rental_amount": pricing.rental_amount,
@@ -216,7 +219,45 @@ def _build_billed_to_details(invoice: Invoice) -> dict[str, str | None]:
 
 def build_invoice_financial_details(invoice: Invoice) -> dict[str, object]:
 	reservation = invoice.reservation
-	pricing = _build_pricing_breakdown(invoice=invoice)
+	is_cancellation_document = invoice.lines.filter(
+		line_type=InvoiceLine.LineType.CORRECTION,
+		description="Annulation - Montant conservé",
+	).exists()
+	if is_cancellation_document:
+		deposit = _get_latest_deposit(reservation)
+		payment = _get_latest_payment(reservation)
+		line_items = [
+			{
+				"label": line.description,
+				"amount": line.total_price,
+				"amount_display": format_french_amount(line.total_price, invoice.currency),
+			}
+			for line in invoice.lines.all()
+		]
+		return {
+			"is_cancellation_document": True,
+			"line_items": line_items,
+			"total_display": format_french_amount(invoice.total_amount, invoice.currency),
+			"payment": {
+				"available": payment is not None,
+				"status": format_payment_status(payment.status) if payment is not None else None,
+				"date": format_french_datetime(payment.succeeded_at or payment.created_at) if payment is not None else None,
+				"method": "Stripe" if payment is not None else None,
+				"reference": payment.stripe_payment_intent_id if payment is not None and payment.stripe_payment_intent_id else None,
+			},
+			"deposit": {
+				"available": deposit is not None,
+				"amount_display": format_french_amount(deposit.amount if deposit is not None else reservation.deposit_amount, invoice.currency),
+				"status": format_deposit_status(deposit.status) if deposit is not None else None,
+				"date": format_french_datetime(deposit.authorized_at or deposit.created_at) if deposit is not None else None,
+				"reference": deposit.stripe_payment_intent_id if deposit is not None and deposit.stripe_payment_intent_id else None,
+			},
+		}
+	is_final_snapshot = invoice.lines.filter(description="Location et assurance (montant total confirmé)").exists()
+	pricing = (
+		{"rental_amount": invoice.subtotal, "insurance_amount": Decimal("0.00")}
+		if is_final_snapshot else _build_pricing_breakdown(invoice=invoice)
+	)
 	other_fees = _build_other_fees(invoice)
 	other_fees_total = sum((fee["amount"] for fee in other_fees), Decimal("0.00"))
 	subtotal_htva = _quantize_amount(pricing["rental_amount"] + pricing["insurance_amount"] + other_fees_total)
@@ -242,6 +283,15 @@ def build_invoice_financial_details(invoice: Invoice) -> dict[str, object]:
 	for fee in other_fees:
 		line_items.append(fee)
 
+	if is_final_snapshot:
+		subtotal_htva = invoice.subtotal
+		total_tvac = invoice.total_amount
+		line_items = [{
+			"label": "Location et assurance (montant total confirmé)",
+			"amount": invoice.subtotal,
+			"amount_display": format_french_amount(invoice.subtotal, invoice.currency),
+		}]
+
 	return {
 		"line_items": line_items,
 		"subtotal": subtotal_htva,
@@ -258,6 +308,8 @@ def build_invoice_financial_details(invoice: Invoice) -> dict[str, object]:
 			"date": format_french_datetime(payment.succeeded_at or payment.created_at) if payment is not None else None,
 			"method": "Stripe" if payment is not None else None,
 			"reference": payment.stripe_payment_intent_id if payment is not None and payment.stripe_payment_intent_id else None,
+			"amount_display": format_french_amount(payment.amount, invoice.currency) if is_final_snapshot and payment is not None and payment.status == Payment.Status.REUSSI else None,
+			"balance_display": format_french_amount(Decimal("0.00"), invoice.currency) if is_final_snapshot else None,
 		},
 		"deposit": {
 			"available": deposit is not None,
@@ -325,7 +377,7 @@ def build_invoice_pdf(invoice: Invoice) -> bytes:
 	elements: list = []
 
 	payment = financial["payment"]
-	is_paid = bool(payment["available"] and payment["status"] == format_payment_status(Payment.Status.REUSSI))
+	is_paid = bool(not financial.get("is_cancellation_document") and payment["available"] and payment["status"] == format_payment_status(Payment.Status.REUSSI))
 
 	meta_lines = [
 		Paragraph("FACTURE", invoice_title_style),
@@ -388,9 +440,11 @@ def build_invoice_pdf(invoice: Invoice) -> bytes:
 		[Paragraph(item["label"], cell_value_style), Paragraph(item["amount_display"], amount_style)]
 		for item in financial["line_items"]
 	]
-	financial_rows.append([Paragraph("Sous-total HTVA", cell_value_style), Paragraph(financial["subtotal_display"], amount_style)])
-	financial_rows.append([Paragraph(f"TVA ({financial['tax_rate_display']})", cell_value_style), Paragraph(financial["tax_amount_display"], amount_style)])
-	financial_rows.append([Paragraph("Total TVAC", total_label_style), Paragraph(financial["total_display"], total_value_style)])
+	if not financial.get("is_cancellation_document"):
+		financial_rows.append([Paragraph("Sous-total HTVA", cell_value_style), Paragraph(financial["subtotal_display"], amount_style)])
+		financial_rows.append([Paragraph(f"TVA ({financial['tax_rate_display']})", cell_value_style), Paragraph(financial["tax_amount_display"], amount_style)])
+	total_label = "Montant définitif conservé" if financial.get("is_cancellation_document") else "Total TVAC"
+	financial_rows.append([Paragraph(total_label, total_label_style), Paragraph(financial["total_display"], total_value_style)])
 	financial_table = Table(financial_rows, colWidths=[130 * mm, 44 * mm])
 	financial_table.setStyle(TableStyle([
 		("GRID", (0, 0), (-1, -2), 0.6, border_grey),
@@ -416,6 +470,10 @@ def build_invoice_pdf(invoice: Invoice) -> bytes:
 		]
 		if payment.get("reference"):
 			payment_rows.append(("R\u00e9f\u00e9rence du paiement", payment["reference"]))
+		if payment.get("amount_display"):
+			payment_rows.append(("Montant encaissé", payment["amount_display"]))
+		if payment.get("balance_display"):
+			payment_rows.append(("Solde restant dû", payment["balance_display"]))
 		elements.append(_info_table(payment_rows))
 	else:
 		elements.append(Paragraph("Aucune information de paiement disponible dans le backend pour cette facture.", muted_style))
@@ -450,10 +508,12 @@ def build_invoice_pdf(invoice: Invoice) -> bytes:
 
 def ensure_invoice_pdf(invoice: Invoice) -> Invoice:
 	"""Generate and persist PDF file if missing, then return the invoice."""
-	if invoice.pdf_file:
-		return invoice
+	with transaction.atomic():
+		invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
+		if invoice.pdf_file:
+			return invoice
 
-	pdf_bytes = build_invoice_pdf(invoice)
-	filename = f"{invoice.number}.pdf"
-	invoice.pdf_file.save(filename, ContentFile(pdf_bytes), save=True)
-	return invoice
+		pdf_bytes = build_invoice_pdf(invoice)
+		filename = f"{invoice.number}.pdf"
+		invoice.pdf_file.save(filename, ContentFile(pdf_bytes), save=True)
+		return invoice

@@ -13,6 +13,8 @@ import { getInvoiceDownload } from '../../services/invoiceService'
 import {
   getManagementReservationById,
   releaseManagementReservationDeposit,
+  confirmManagementReturnCharges,
+  validateManagementReservationReturn,
 } from '../../services/managementReservationService'
 import type {
   ManagementInspection,
@@ -117,6 +119,11 @@ function toErrorState(error: unknown): { title: string; message: string } {
       title: 'Retour introuvable',
       message: 'La reservation demandee est introuvable.',
     }
+  }
+
+  const data: unknown = error.response?.data
+  if (typeof data === 'object' && data !== null && 'message' in data && typeof data.message === 'string') {
+    return { title: 'Action impossible', message: data.message }
   }
 
   return {
@@ -499,6 +506,21 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
     },
   })
 
+  const refreshReservation = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['manager-reservations'] }),
+      queryClient.invalidateQueries({ queryKey: ['manager-reservation-detail', reservationId] }),
+    ])
+  }
+  const confirmChargesMutation = useMutation({
+    mutationFn: () => confirmManagementReturnCharges(reservationId),
+    onSuccess: refreshReservation,
+  })
+  const completeMutation = useMutation({
+    mutationFn: () => validateManagementReservationReturn(reservationId),
+    onSuccess: refreshReservation,
+  })
+
   const controlReservation = useMemo(
     () => (detailQuery.data?.status === 'A_CONTROLER' ? detailQuery.data : detailQuery.data),
     [detailQuery.data],
@@ -591,11 +613,11 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
           <Button
             variant="secondary"
             size="sm"
-            disabled={!reservation.invoice_id || isInvoiceDownloading}
-            title={reservation.invoice_id ? undefined : 'Aucune facture disponible'}
+            disabled={!reservation.invoice_id || !reservation.invoice_pdf_available || isInvoiceDownloading}
+            title={reservation.invoice_pdf_available ? undefined : 'Aucune facture disponible'}
             onClick={() => void handleInvoiceDownload()}
           >
-            {isInvoiceDownloading ? 'Téléchargement...' : reservation.invoice_id ? 'Télécharger la facture' : 'Facture indisponible'}
+            {isInvoiceDownloading ? 'Téléchargement...' : reservation.invoice_pdf_available ? 'Télécharger la facture' : 'Facture indisponible'}
           </Button>
           <StatusBadge variant={reservation.status === 'NON_UTILISEE' ? 'neutral' : 'success'} label={reservationStatusLabel} />
           {isDepositDecisionPending ? <StatusBadge variant="info" label="Caution à décider" /> : null}
@@ -668,6 +690,45 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
             headerClassName="border-[#BFDBFE] bg-[#EFF6FF]"
           />
         </div>
+        {reservation.return_charges_estimate ? (
+          <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-700">
+            <p className="font-semibold">{reservation.return_charges_confirmed_at ? 'Frais de restitution confirmés' : 'Frais de restitution à confirmer'}</p>
+            <p>Retard constaté : {Math.ceil(reservation.return_charges_estimate.delay_seconds / 60)} min</p>
+            <p>Retard : {formatCurrency(reservation.return_delay_fee ?? reservation.return_charges_estimate.delay_fee)}</p>
+            <p>
+              Carburant : {reservation.return_charges_estimate.fuel_fee === null
+                ? 'Niveaux insuffisamment renseignés'
+                : formatCurrency(reservation.return_fuel_fee ?? reservation.return_charges_estimate.fuel_fee)}
+            </p>
+            {reservation.return_charges_confirmed_at ? (
+              <>
+                <p>Confirmés le {new Date(reservation.return_charges_confirmed_at).toLocaleString('fr-BE')} par le gestionnaire n°{reservation.return_charges_confirmed_by}.</p>
+                {Number(reservation.return_delay_fee) + Number(reservation.return_fuel_fee) > 0 ? (
+                  <p className="mt-2 text-amber-800">Frais à régler : l’encaissement complémentaire n’est pas encore disponible. La clôture est bloquée.</p>
+                ) : null}
+              </>
+            ) : reservation.status === 'A_CONTROLER' ? (
+              <Button className="mt-3" disabled={confirmChargesMutation.isPending || reservation.return_charges_estimate.fuel_fee === null} onClick={() => confirmChargesMutation.mutate()}>
+                Confirmer les frais
+              </Button>
+            ) : null}
+            {confirmChargesMutation.isError ? <Alert variant="danger" title="Confirmation impossible" message={toErrorState(confirmChargesMutation.error).message} /> : null}
+            {reservation.status === 'A_CONTROLER' && reservation.return_charges_confirmed_at && Number(reservation.return_delay_fee) + Number(reservation.return_fuel_fee) === 0 ? (
+              <Button className="mt-3" disabled={completeMutation.isPending} onClick={() => completeMutation.mutate()}>
+                Clôturer la location
+              </Button>
+            ) : null}
+            {completeMutation.isError ? <Alert variant="danger" title="Clôture impossible" message={toErrorState(completeMutation.error).message} /> : null}
+          </div>
+        ) : null}
+        {reservation.status === 'TERMINEE' && !reservation.invoice_pdf_available ? (
+          <div className="mt-4">
+            <Button disabled={completeMutation.isPending} onClick={() => completeMutation.mutate()}>
+              Réessayer la génération de la facture
+            </Button>
+            {completeMutation.isError ? <Alert variant="danger" title="Génération impossible" message={toErrorState(completeMutation.error).message} /> : null}
+          </div>
+        ) : null}
       </section>
 
       <section>

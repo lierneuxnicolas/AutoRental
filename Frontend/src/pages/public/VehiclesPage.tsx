@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert, EmptyState, LoadingSpinner } from '../../components/feedback'
 import { VehicleCard } from '../../components/vehicles'
 import { Card, Input, Select } from '../../components/ui'
-import { RENTAL_TIME_SELECT_OPTIONS } from '../../constants/rentalTimeOptions'
 import { getAvailableVehicles, getVehicles } from '../../services/vehicleService'
 import type { PublicVehicle } from '../../types/vehicle'
+import { buildRentalDateTime, getFollowingDate, getMinimumStartDate, getRentalClock, RETURN_CLOCK } from '../../utils/rentalPeriod'
 
 const SORT_OPTIONS = [
   { value: 'popularity', label: 'Popularité' },
@@ -37,18 +37,14 @@ function toNumericPrice(value: string | number) {
   return Number.isFinite(normalizedValue) ? normalizedValue : 0
 }
 
-function toDateTimeValue(date: string, time: string) {
-  return `${date}T${time}`
-}
-
-function splitDateTimeParam(value: string | null): { date: string, time: string } | null {
+function splitDateTimeParam(value: string | null): string | null {
   if (!value) {
     return null
   }
 
-  const directMatch = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
+  const directMatch = value.match(/^(\d{4}-\d{2}-\d{2})/)
   if (directMatch) {
-    return { date: directMatch[1], time: directMatch[2] }
+    return directMatch[1]
   }
 
   const parsedValue = new Date(value)
@@ -59,13 +55,7 @@ function splitDateTimeParam(value: string | null): { date: string, time: string 
   const year = parsedValue.getFullYear()
   const month = `${parsedValue.getMonth() + 1}`.padStart(2, '0')
   const day = `${parsedValue.getDate()}`.padStart(2, '0')
-  const hours = `${parsedValue.getHours()}`.padStart(2, '0')
-  const minutes = `${parsedValue.getMinutes()}`.padStart(2, '0')
-
-  return {
-    date: `${year}-${month}-${day}`,
-    time: `${hours}:${minutes}`,
-  }
+  return `${year}-${month}-${day}`
 }
 
 function isValidDateTimeValue(value: string) {
@@ -94,8 +84,8 @@ function toVehicleList(payload: Awaited<ReturnType<typeof getVehicles>>): Public
 
 export default function VehiclesPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const initialStartDateTime = splitDateTimeParam(searchParams.get('start'))
-  const initialEndDateTime = splitDateTimeParam(searchParams.get('end'))
+  const initialStartDate = splitDateTimeParam(searchParams.get('start'))
+  const initialEndDate = splitDateTimeParam(searchParams.get('end'))
   const [vehicles, setVehicles] = useState<PublicVehicle[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -103,17 +93,19 @@ export default function VehiclesPage() {
   const [selectedCategory, setSelectedCategory] = useState('')
   const [selectedTransmission, setSelectedTransmission] = useState('')
   const [selectedFuelType, setSelectedFuelType] = useState('')
-  const [selectedPriceMax, setSelectedPriceMax] = useState('')
-  const [startDate, setStartDate] = useState(() => initialStartDateTime?.date ?? searchParams.get('startDate') ?? '')
-  const [startTime, setStartTime] = useState(() => initialStartDateTime?.time ?? searchParams.get('startTime') ?? '')
-  const [endDate, setEndDate] = useState(() => initialEndDateTime?.date ?? searchParams.get('endDate') ?? '')
-  const [endTime, setEndTime] = useState(() => initialEndDateTime?.time ?? searchParams.get('endTime') ?? '')
+  const [startDate, setStartDate] = useState(() => initialStartDate ?? searchParams.get('startDate') ?? '')
+  const [endDate, setEndDate] = useState(() => initialEndDate ?? searchParams.get('endDate') ?? '')
   const [availableVehicleIds, setAvailableVehicleIds] = useState<Set<number> | null>(null)
   const [availabilityErrorMessage, setAvailabilityErrorMessage] = useState<string | null>(null)
   const [isCheckingAvailability, setIsCheckingAvailability] = useState(false)
   const [vehiclesReloadKey, setVehiclesReloadKey] = useState(0)
   const [availabilityReloadKey, setAvailabilityReloadKey] = useState(0)
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false)
+  const [clockNow, setClockNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 30000)
+    return () => window.clearInterval(timer)
+  }, [])
   const detailQueryString = useMemo(() => {
     const nextParams = new URLSearchParams()
     const start = searchParams.get('start')
@@ -130,26 +122,33 @@ export default function VehiclesPage() {
     return nextParams.toString()
   }, [searchParams])
 
-  const isDateRangeComplete = Boolean(startDate && startTime && endDate && endTime)
+  const isDateRangeComplete = Boolean(startDate && endDate)
+  const rentalClock = useMemo(() => getRentalClock(startDate, new Date(clockNow)), [startDate, clockNow])
+  const toDateTimeValue = useCallback((date: string) => buildRentalDateTime(date, rentalClock), [rentalClock])
+  const toReturnDateTimeValue = useCallback((date: string) => buildRentalDateTime(date, RETURN_CLOCK), [])
 
   const dateValidationMessage = useMemo(() => {
     if (!isDateRangeComplete) {
       return null
     }
 
-    const startDateTimeValue = toDateTimeValue(startDate, startTime)
-    const endDateTimeValue = toDateTimeValue(endDate, endTime)
+    const startDateTimeValue = toDateTimeValue(startDate)
+    const endDateTimeValue = toReturnDateTimeValue(endDate)
 
     if (!isValidDateTimeValue(startDateTimeValue) || !isValidDateTimeValue(endDateTimeValue)) {
       return 'Les dates saisies sont invalides.'
     }
 
+    if (startDate < getMinimumStartDate()) {
+      return 'La date de départ ne peut pas être dans le passé.'
+    }
+
     if (new Date(endDateTimeValue).getTime() <= new Date(startDateTimeValue).getTime()) {
-      return 'La date et l heure de fin doivent être postérieures au début.'
+      return 'La date de retour doit être postérieure à la date de départ.'
     }
 
     return null
-  }, [endDate, endTime, isDateRangeComplete, startDate, startTime])
+  }, [endDate, isDateRangeComplete, startDate, toDateTimeValue, toReturnDateTimeValue])
 
   const isAvailabilityFilterActive = isDateRangeComplete && !dateValidationMessage
   const isResultsLoading = isLoading || (isAvailabilityFilterActive && isCheckingAvailability)
@@ -163,32 +162,20 @@ export default function VehiclesPage() {
       nextParams.delete('startDate')
     }
 
-    if (startTime) {
-      nextParams.set('startTime', startTime)
-    } else {
-      nextParams.delete('startTime')
-    }
-
     if (endDate) {
       nextParams.set('endDate', endDate)
     } else {
       nextParams.delete('endDate')
     }
 
-    if (endTime) {
-      nextParams.set('endTime', endTime)
-    } else {
-      nextParams.delete('endTime')
-    }
-
-    if (startDate && startTime) {
-      nextParams.set('start', toDateTimeValue(startDate, startTime))
+    if (startDate) {
+      nextParams.set('start', toDateTimeValue(startDate))
     } else {
       nextParams.delete('start')
     }
 
-    if (endDate && endTime) {
-      nextParams.set('end', toDateTimeValue(endDate, endTime))
+    if (endDate) {
+      nextParams.set('end', toReturnDateTimeValue(endDate))
     } else {
       nextParams.delete('end')
     }
@@ -196,7 +183,7 @@ export default function VehiclesPage() {
     if (nextParams.toString() !== searchParams.toString()) {
       setSearchParams(nextParams, { replace: true })
     }
-  }, [endDate, endTime, searchParams, setSearchParams, startDate, startTime])
+  }, [endDate, searchParams, setSearchParams, startDate, toDateTimeValue, toReturnDateTimeValue])
 
   useEffect(() => {
     let isMounted = true
@@ -267,8 +254,8 @@ export default function VehiclesPage() {
       setAvailableVehicleIds(null)
 
       try {
-        const start = `${toDateTimeValue(startDate, startTime)}:00`
-        const end = `${toDateTimeValue(endDate, endTime)}:00`
+        const start = toDateTimeValue(startDate)
+        const end = toReturnDateTimeValue(endDate)
 
         const ids = new Set<number>()
         let page = 1
@@ -308,7 +295,7 @@ export default function VehiclesPage() {
     return () => {
       isMounted = false
     }
-  }, [availabilityReloadKey, endDate, endTime, isAvailabilityFilterActive, startDate, startTime])
+  }, [availabilityReloadKey, endDate, isAvailabilityFilterActive, startDate, toDateTimeValue, toReturnDateTimeValue])
 
   const filteredVehicles = useMemo(() => {
     return vehicles.filter((vehicle) => {
@@ -324,13 +311,9 @@ export default function VehiclesPage() {
         !selectedFuelType ||
         normalizeFilterValue(vehicle.fuel_type) === normalizeFilterValue(selectedFuelType)
 
-      const priceMaxMatches =
-        !selectedPriceMax ||
-        toNumericPrice(vehicle.category_daily_rate) <= toNumericPrice(selectedPriceMax)
-
-      return categoryMatches && transmissionMatches && fuelTypeMatches && priceMaxMatches
+      return categoryMatches && transmissionMatches && fuelTypeMatches
     })
-  }, [selectedCategory, selectedFuelType, selectedPriceMax, selectedTransmission, vehicles])
+  }, [selectedCategory, selectedFuelType, selectedTransmission, vehicles])
 
   const cards = useMemo(() => {
     const mappedVehicles = filteredVehicles.map((vehicle) => {
@@ -407,11 +390,8 @@ export default function VehiclesPage() {
     setSelectedCategory('')
     setSelectedTransmission('')
     setSelectedFuelType('')
-    setSelectedPriceMax('')
     setStartDate('')
-    setStartTime('')
     setEndDate('')
-    setEndTime('')
     setAvailableVehicleIds(null)
     setAvailabilityErrorMessage(null)
   }
@@ -419,41 +399,23 @@ export default function VehiclesPage() {
   function renderFilterFields() {
     return (
       <>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Input
-              label="Date de début"
-              name="startDate"
-              type="date"
-              value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
-            />
-            <Select
-              label="Heure"
-              name="startTime"
-              options={RENTAL_TIME_SELECT_OPTIONS}
-              placeholder="HH:MM"
-              value={startTime}
-              onChange={(event) => setStartTime(event.target.value)}
-            />
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Input
-              label="Date de fin"
-              name="endDate"
-              type="date"
-              value={endDate}
-              onChange={(event) => setEndDate(event.target.value)}
-            />
-            <Select
-              label="Heure"
-              name="endTime"
-              options={RENTAL_TIME_SELECT_OPTIONS}
-              placeholder="HH:MM"
-              value={endTime}
-              onChange={(event) => setEndTime(event.target.value)}
-            />
-          </div>
+        <div className="space-y-3">
+          <Input
+            label="Date de départ"
+            name="startDate"
+            type="date"
+            min={getMinimumStartDate()}
+            value={startDate}
+            onChange={(event) => setStartDate(event.target.value)}
+          />
+          <Input
+            label="Date de retour"
+            name="endDate"
+            type="date"
+            min={startDate ? getFollowingDate(startDate) : getFollowingDate(getMinimumStartDate())}
+            value={endDate}
+            onChange={(event) => setEndDate(event.target.value)}
+          />
         </div>
 
         <Select
@@ -487,33 +449,22 @@ export default function VehiclesPage() {
           <p className="text-sm text-slate-600">Verification des disponibilites en cours...</p>
         ) : null}
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Input label="Prix par jour min" name="priceMin" type="number" min={0} placeholder="0" />
-          <Input
-            label="Prix par jour max"
-            name="priceMax"
-            type="number"
-            min={0}
-            placeholder="200"
-            value={selectedPriceMax}
-            onChange={(event) => setSelectedPriceMax(event.target.value)}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
+          <Select
+            label="Transmission"
+            name="transmission"
+            value={selectedTransmission}
+            onChange={(event) => setSelectedTransmission(event.target.value)}
+            options={transmissionFilterOptions}
+          />
+          <Select
+            label="Carburant"
+            name="fuelType"
+            value={selectedFuelType}
+            onChange={(event) => setSelectedFuelType(event.target.value)}
+            options={fuelFilterOptions}
           />
         </div>
-
-        <Select
-          label="Transmission"
-          name="transmission"
-          value={selectedTransmission}
-          onChange={(event) => setSelectedTransmission(event.target.value)}
-          options={transmissionFilterOptions}
-        />
-        <Select
-          label="Carburant"
-          name="fuelType"
-          value={selectedFuelType}
-          onChange={(event) => setSelectedFuelType(event.target.value)}
-          options={fuelFilterOptions}
-        />
 
         <div className="flex justify-center pt-1">
           <button

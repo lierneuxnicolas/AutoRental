@@ -7,51 +7,23 @@ import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
-import { cn } from '../../components/ui/cn'
-import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
+import StatusBadge from '../../components/ui/StatusBadge'
 import { getInvoiceById, getInvoiceDownload } from '../../services/invoiceService'
 import {
   cancelReservation,
   getReservationCancellationPreview,
   getReservations,
 } from '../../services/reservationService'
-import type { ReservationDetail, ReservationListQueryParams, ReservationStatus } from '../../types/reservation'
-import { getUnlockWindowAvailability, isReservationCancellable } from '../../utils/reservationActionRules'
+import type { ReservationDetail, ReservationListQueryParams } from '../../types/reservation'
+import { isReservationCancellable } from '../../utils/reservationActionRules'
+import { getReservationStatusUi } from '../../utils/reservationStatus'
 
 // Shared sizing so every card action button lines up (height/radius already come from Button's "sm" size).
 const actionButtonClassName = 'min-w-44 justify-center'
 
-function mapStatusToUi(status: ReservationStatus | undefined): { label: string; variant: StatusVariant } {
-  switch (status) {
-    case 'BROUILLON':
-      return { label: 'Brouillon', variant: 'neutral' }
-    case 'EN_ATTENTE_CAUTION':
-      return { label: 'En attente caution', variant: 'warning' }
-    case 'EN_ATTENTE_PAIEMENT':
-      return { label: 'En attente paiement', variant: 'warning' }
-    case 'CONFIRMEE':
-      return { label: 'Confirmée', variant: 'success' }
-    case 'REAFFECTATION_REQUIRED':
-      return { label: 'À réaffecter', variant: 'warning' }
-    case 'EN_COURS':
-      return { label: 'En cours', variant: 'info' }
-    case 'A_CONTROLER':
-      return { label: 'A contrôler', variant: 'warning' }
-    case 'TERMINEE':
-      return { label: 'Terminée', variant: 'success' }
-    case 'NON_UTILISEE':
-      return { label: 'Non utilisée', variant: 'neutral' }
-    case 'ANNULEE':
-      return { label: 'Annulée', variant: 'danger' }
-    case 'PAIEMENT_ECHOUE':
-      return { label: 'Paiement échoué', variant: 'danger' }
-    default:
-      return { label: 'Inconnu', variant: 'neutral' }
-  }
-}
-
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat('fr-FR', {
+    timeZone: 'Europe/Brussels',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -69,31 +41,6 @@ function formatDateTimeOrDash(value: string | null | undefined): string {
 
 function vehicleLabel(reservation: ReservationDetail): string {
   return `${reservation.vehicle.brand} ${reservation.vehicle.model_name}`
-}
-
-const DRAFT_HOLD_MINUTES = 15
-
-function isDraftExpired(reservation: ReservationDetail): boolean {
-  const createdAt = new Date(reservation.created_at).getTime()
-  if (Number.isNaN(createdAt)) {
-    return false
-  }
-
-  return Date.now() - createdAt >= DRAFT_HOLD_MINUTES * 60 * 1000
-}
-
-function canContinuePayment(reservation: ReservationDetail): boolean {
-  const status = reservation.status
-  if (status !== 'BROUILLON' && status !== 'EN_ATTENTE_CAUTION' && status !== 'EN_ATTENTE_PAIEMENT') {
-    return false
-  }
-
-  // A BROUILLON older than the hold window is being (or about to be) auto-cancelled server-side.
-  if (status === 'BROUILLON' && isDraftExpired(reservation)) {
-    return false
-  }
-
-  return true
 }
 
 function buildInvoicePdfFilename(invoiceNumber: string): string {
@@ -148,32 +95,11 @@ export default function ClientReservationsPage() {
   const [downloadingReservationId, setDownloadingReservationId] = useState<number | null>(null)
   const [invoiceDownloadError, setInvoiceDownloadError] = useState<string | null>(null)
   const [cancelingReservationId, setCancelingReservationId] = useState<number | null>(null)
-  const [unlockHintReservationId, setUnlockHintReservationId] = useState<number | null>(null)
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const highlightedReservationId = Number(searchParams.get('highlight'))
   const isHighlightValid = Number.isInteger(highlightedReservationId) && highlightedReservationId > 0
   const cardRefs = useRef<Map<number, HTMLDivElement>>(new Map())
-  const unlockHintTimeoutRef = useRef<number | null>(null)
-
-  const showUnlockHint = (reservationId: number) => {
-    setUnlockHintReservationId(reservationId)
-    if (unlockHintTimeoutRef.current !== null) {
-      window.clearTimeout(unlockHintTimeoutRef.current)
-    }
-    unlockHintTimeoutRef.current = window.setTimeout(() => {
-      setUnlockHintReservationId(null)
-    }, 3000)
-  }
-
-  useEffect(() => {
-    return () => {
-      if (unlockHintTimeoutRef.current !== null) {
-        window.clearTimeout(unlockHintTimeoutRef.current)
-      }
-    }
-  }, [])
-
   const queryParams: ReservationListQueryParams = {
     page,
     ordering: '-created_at',
@@ -182,6 +108,7 @@ export default function ClientReservationsPage() {
   const reservationsQuery = useQuery({
     queryKey: ['client-reservations', queryParams],
     queryFn: () => getReservations(queryParams),
+    refetchInterval: 30000,
   })
 
   const reservations = useMemo(() => reservationsQuery.data?.results ?? [], [reservationsQuery.data?.results])
@@ -202,7 +129,10 @@ export default function ClientReservationsPage() {
 
   const cancelMutation = useMutation({
     mutationFn: () =>
-      cancelReservation(cancelingReservationId!, { reason: 'Annulation demandee par le client depuis l espace client.' }),
+      cancelReservation(cancelingReservationId!, {
+        reason: 'Annulation demandee par le client depuis l espace client.',
+        confirm_no_refund: cancellationPreviewQuery.data?.no_refund ?? false,
+      }),
     onSuccess: async () => {
       setCancelingReservationId(null)
       await reservationsQuery.refetch()
@@ -281,8 +211,8 @@ export default function ClientReservationsPage() {
       {!reservationsQuery.isLoading && !reservationsQuery.isError && reservations.length > 0 ? (
         <div className="space-y-4">
           {reservations.map((reservation) => {
-            const status = mapStatusToUi(reservation.status)
-            const unlockAvailability = getUnlockWindowAvailability(reservation.status, reservation.start_at, reservation.end_at)
+            const status = getReservationStatusUi(reservation.status, reservation.cancellation_source)
+            const unlockAvailability = reservation.unlock_availability
             const showCancelButton = isReservationCancellable(reservation.status, reservation.start_at)
             const showReturnButton = reservation.status === 'EN_COURS'
             const isHighlighted = isHighlightValid && reservation.id === highlightedReservationId
@@ -367,35 +297,25 @@ export default function ClientReservationsPage() {
 
                 <div className="mt-4 grid grid-cols-1 items-center gap-3 sm:grid-cols-3">
                   <div className="flex justify-center sm:justify-start">
-                    {reservation.invoice_id ? invoiceButton : null}
+                    {reservation.invoice_id && reservation.invoice_pdf_available ? invoiceButton : null}
                   </div>
 
                   <div className="flex justify-center">
-                    {canContinuePayment(reservation) ? (
-                      <Link to={`/payment?reservationId=${reservation.id}`}>
-                        <Button size="sm" className={actionButtonClassName}>Continuer le paiement</Button>
-                      </Link>
-                    ) : null}
-                    {unlockAvailability.isVisible ? (
-                      <div className="relative inline-flex">
-                        {unlockAvailability.isEnabled ? (
+                    {reservation.status === 'CONFIRMEE' ? (
+                      <div className="flex flex-col items-center gap-2">
+                        {unlockAvailability?.allowed || unlockAvailability?.code === 'ALREADY_UNLOCKED' ? (
                           <Link to={`/client/reservations/${reservation.id}/unlock`}>
                             <Button size="sm" className={actionButtonClassName}>Déverrouiller le véhicule</Button>
                           </Link>
                         ) : (
-                          <Button
-                            size="sm"
-                            aria-disabled="true"
-                            className={cn(actionButtonClassName, 'opacity-50 hover:opacity-50')}
-                            onClick={() => showUnlockHint(reservation.id)}
-                          >
+                          <Button size="sm" disabled className={actionButtonClassName}>
                             Déverrouiller le véhicule
                           </Button>
                         )}
-                        {unlockHintReservationId === reservation.id ? (
-                          <div className="absolute -top-9 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white shadow-lg">
-                            Disponible 15 min avant le départ
-                          </div>
+                        {!unlockAvailability?.allowed && unlockAvailability?.code !== 'ALREADY_UNLOCKED' ? (
+                          <p role="status" className="max-w-xs text-center text-xs text-slate-600">
+                            {unlockAvailability?.message ?? 'Disponibilité du déverrouillage impossible à vérifier. Actualisez la page.'}
+                          </p>
                         ) : null}
                       </div>
                     ) : null}
@@ -407,6 +327,16 @@ export default function ClientReservationsPage() {
                         onClick={() => navigate(`/client/reservations/${reservation.id}/return-inspection`)}
                       >
                         Restituer au parking
+                      </Button>
+                    ) : null}
+                    {reservation.status === 'A_CONTROLER' && reservation.actual_return_at ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className={actionButtonClassName}
+                        onClick={() => navigate(`/client/reservations/${reservation.id}/return-inspection/lock`)}
+                      >
+                        Voir la restitution
                       </Button>
                     ) : null}
                   </div>
@@ -474,9 +404,14 @@ export default function ClientReservationsPage() {
 
               {cancellationPreviewQuery.data ? (
                 <div className="space-y-1">
+                  {cancellationPreviewQuery.data.no_refund ? (
+                    <p className="font-semibold text-red-700">
+                      Vous annulez moins de 24 heures avant le départ. Aucun remboursement ne sera effectué.
+                    </p>
+                  ) : null}
                   <p>Montant payé : {formatEuro(cancellationPreviewQuery.data.amount_paid)}</p>
                   <p>Frais d'annulation : {formatEuro(cancellationPreviewQuery.data.cancellation_fee)}</p>
-                  <p>Montant remboursé : {formatEuro(cancellationPreviewQuery.data.refundable_amount)}</p>
+                  <p>Remboursement prévu : {formatEuro(cancellationPreviewQuery.data.refundable_amount)}</p>
                   <p>Caution : libérée intégralement</p>
                 </div>
               ) : null}

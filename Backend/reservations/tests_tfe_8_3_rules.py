@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -18,6 +18,11 @@ class Tfe83ReservationRulesTests(ReservationTestDataMixin, TestCase):
         self.client_api = APIClient()
         self.client_api.force_authenticate(self.client_user_1)
         self.reservations_url = reverse("reservations:reservation-list-create")
+
+    def _period(self, *, start_hours=6, duration_hours=4):
+        start_date = timezone.localdate() + timedelta(days=3)
+        start_at = timezone.make_aware(datetime.combine(start_date, time(10)))
+        return start_at, start_at + timedelta(days=max(1, duration_hours // 24))
 
     def _create_authorized_deposit(self, reservation):
         return Deposit.objects.create(
@@ -96,7 +101,7 @@ class Tfe83ReservationRulesTests(ReservationTestDataMixin, TestCase):
 
     def test_04_invalid_reservation_dates_are_refused(self):
         start_at, _end_at = self._period()
-        invalid_end_at = start_at - timedelta(hours=1)
+        invalid_end_at = start_at - timedelta(days=1)
 
         response = self.client_api.post(
             self.reservations_url,
@@ -110,7 +115,7 @@ class Tfe83ReservationRulesTests(ReservationTestDataMixin, TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(response.data["code"], "INVALID_PERIOD")
+        self.assertIn("end_at", response.data)
 
     def test_05_overlapping_reservation_is_refused(self):
         start_at, end_at = self._period()
@@ -360,7 +365,7 @@ class Tfe83ReservationRulesTests(ReservationTestDataMixin, TestCase):
                 "vehicle_id": self.vehicle_available.id,
                 "start_at": start_at.isoformat(),
                 "end_at": end_at.isoformat(),
-                "insurance_type": Reservation.InsuranceType.DUO,
+                "insurance_type": Reservation.InsuranceType.COMPLEMENTAIRE,
             },
             format="json",
         )

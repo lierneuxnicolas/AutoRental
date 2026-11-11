@@ -1,6 +1,7 @@
 from django.urls import path
 
 from inspections.views import DepartureInspectionCreateView, ReturnInspectionCreateView
+from reservations.views.payment_checks import ReservationPaymentChecksView
 from reservations.views import (
     ClientDashboardReservationsView,
     PriceSimulationView,
@@ -15,6 +16,7 @@ from reservations.views import (
     ReservationManagementCancellationView,
     ReservationManagementDetailView,
     ReservationManagementCompleteView,
+    ReservationManagementConfirmChargesView,
     ReservationManagementDepositReleaseView,
     ReservationManagementIssueView,
     ReservationManagementListView,
@@ -29,6 +31,7 @@ from reservations.views import (
 app_name = "reservations"
 
 urlpatterns = [
+    path("reservations/payment-checks/", ReservationPaymentChecksView.as_view(), name="reservation-payment-checks"),
     path("simulations/", PriceSimulationView.as_view(), name="price-simulation"),
     path("reservations/dashboard/", ClientDashboardReservationsView.as_view(), name="reservation-dashboard"),
     path("reservations/", ReservationClientListCreateView.as_view(), name="reservation-list-create"),
@@ -81,6 +84,11 @@ urlpatterns = [
         "management/reservations/<int:pk>/cancel-vehicle-unavailable/",
         ReservationVehicleUnavailableCancellationView.as_view(),
         name="management-reservation-cancel-vehicle-unavailable",
+    ),
+    path(
+        "management/reservations/<int:pk>/confirm-return-charges/",
+        ReservationManagementConfirmChargesView.as_view(),
+        name="management-reservation-confirm-return-charges",
     ),
     path(
         "management/reservations/<int:pk>/complete/",

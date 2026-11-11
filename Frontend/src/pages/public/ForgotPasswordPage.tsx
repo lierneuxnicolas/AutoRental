@@ -53,20 +53,9 @@ export default function ForgotPasswordPage() {
 
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-4 py-12">
-      <div className="w-full max-w-4xl overflow-hidden rounded-4xl border border-slate-200 bg-white shadow-[0_20px_60px_-20px_rgba(37,99,235,0.35)]">
-        <div className="grid gap-0 lg:grid-cols-[1fr_1fr]">
-          <div className="bg-[#0F172A] p-8 text-white sm:p-10 lg:p-12">
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-blue-200">GetaCar</p>
-            <h1 className="mt-4 text-3xl font-semibold sm:text-4xl">Mot de passe oublié</h1>
-            <p className="mt-4 max-w-md text-sm leading-7 text-slate-300 sm:text-base">
-              Saisissez l’adresse e-mail liée à votre compte. Si elle correspond à un compte actif, vous recevrez des instructions de réinitialisation.
-            </p>
-          </div>
-
-          <div className="p-8 sm:p-10 lg:p-12">
-            <div className="mb-6">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Sécurité</p>
-              <h2 className="mt-2 text-2xl font-semibold text-[#0F172A]">Réinitialiser mon mot de passe</h2>
+      <div className="w-full max-w-xl rounded-4xl border border-slate-200 bg-white p-6 shadow-[0_20px_60px_-20px_rgba(37,99,235,0.35)] sm:p-10">
+            <div className="mb-8">
+              <h1 className="text-center text-2xl font-semibold text-[#0F172A]">Réinitialiser mon mot de passe</h1>
             </div>
 
             {serverError ? <Alert variant="danger" title="Demande impossible" message={serverError} className="mb-6" /> : null}
@@ -82,7 +71,7 @@ export default function ForgotPasswordPage() {
                 {...register('email')}
               />
 
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
+              <Button type="submit" variant="violet" className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? (
                   <span className="flex items-center justify-center gap-2">
                     <LoadingSpinner size="sm" aria-label="Envoi en cours" />
@@ -94,13 +83,10 @@ export default function ForgotPasswordPage() {
               </Button>
             </form>
 
-            <div className="mt-6 text-sm text-slate-600">
-              <span>Vous vous souvenez de votre mot de passe ? </span>
+            <div className="mt-6 flex justify-center text-center text-sm text-slate-600">
               <a href="/login" className="font-medium text-[#2563EB] transition hover:text-[#1D4ED8]">
                 Se connecter
               </a>
-            </div>
-          </div>
         </div>
       </div>
     </div>

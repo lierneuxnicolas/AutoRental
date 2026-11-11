@@ -83,33 +83,21 @@ class VehicleAvailablePublicListView(VehiclePublicListView):
 	PaymentIntent creation, and inside the Stripe webhook (see
 	vehicles.services.availability.is_vehicle_available).
 
-	Minimum duration strategy: validate once against the lowest minimum rental
-	hours among active categories, then keep only categories compatible with the
-	requested duration.
 	"""
-
-	def _get_global_minimum_rental_hours(self):
-		return (
-			VehicleCategory.objects.filter(is_active=True)
-			.order_by("minimum_rental_hours")
-			.values_list("minimum_rental_hours", flat=True)
-			.first()
-		)
 
 	def get_queryset(self):
 		if getattr(self, "swagger_fake_view", False):
 			return Vehicle.objects.none()
 
 		base_queryset = super().get_queryset()
-		minimum_hours = self._get_global_minimum_rental_hours()
-		period = self._serialize_period_query(minimum_hours=minimum_hours)
+		period = self._serialize_period_query()
 
 		queryset = get_available_vehicles(
 			start=period["start"],
 			end=period["end"],
 			base_queryset=base_queryset,
 		)
-		return queryset.filter(category__minimum_rental_hours__lte=period["duration_hours"])
+		return queryset
 
 	@extend_schema(
 		tags=["Vehicles"],

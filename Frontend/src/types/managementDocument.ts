@@ -14,6 +14,7 @@ export interface ManagerClientDocumentList {
   document_type: DocumentType
   document_number: string
   expiration_date: string | null
+  driving_license_transmission: DrivingLicenseTransmission | null
   status: DocumentStatus
   is_active: boolean
   uploaded_at: string
@@ -32,6 +33,7 @@ export interface ManagerClientDocumentDetail {
   document_number: string
   file: string | null
   expiration_date: string | null
+  verified_date_of_birth: string | null
   driving_license_category: DrivingLicenseCategory | null
   driving_license_transmission: DrivingLicenseTransmission | null
   driving_license_transmission_declared: DrivingLicenseTransmission | null
@@ -51,7 +53,12 @@ export interface ManagerRejectDocumentRequest {
 }
 
 export interface ManagerValidateDocumentRequest {
+  first_name?: string
+  last_name?: string
+  document_number: string
+  expiration_date: string
   driving_license_transmission?: DrivingLicenseTransmission
+  verified_date_of_birth?: string
 }
 
 export interface PaginatedManagerClientDocumentListResponse {

@@ -129,7 +129,7 @@ class TfeMvpAccountsApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
         self._auth_as_client()
-        underage = (timezone.localdate().replace(year=timezone.localdate().year - 17)).isoformat()
+        underage = (timezone.localdate() + timedelta(days=1)).isoformat()
         response = self.client.patch(
             self.profile_url,
             {"date_of_birth": underage},

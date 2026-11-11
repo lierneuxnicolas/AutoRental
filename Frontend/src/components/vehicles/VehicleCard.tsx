@@ -1,5 +1,6 @@
 import { CarFront, Fuel, Gauge, Users } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { formatVehicleDailyRate } from '../../utils/vehiclePrice'
 import Card from '../ui/Card'
 
 export interface VehicleCardProps {
@@ -16,14 +17,6 @@ export interface VehicleCardProps {
   isAvailable?: boolean
   layout?: 'vertical' | 'horizontal'
   detailQueryString?: string
-}
-
-function formatPricePerDay(pricePerDay: string | number) {
-  if (typeof pricePerDay === 'number' && Number.isFinite(pricePerDay)) {
-    return `${pricePerDay} €`
-  }
-
-  return `${pricePerDay}`
 }
 
 export default function VehicleCard({
@@ -118,8 +111,8 @@ export default function VehicleCard({
 
           <div className={isHorizontal ? 'mt-6 flex flex-col gap-4 border-t border-slate-200 pt-4 sm:flex-row sm:items-end sm:justify-between' : 'mt-6 flex items-end justify-between gap-4 border-t border-slate-200 pt-4'}>
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Prix par jour</p>
-              <p className="mt-1 text-2xl font-semibold text-[#1F2937]">{formatPricePerDay(pricePerDay)}</p>
+              <p className="text-2xl font-semibold text-[#1F2937]">{formatVehicleDailyRate(pricePerDay)}</p>
+              <p className="mt-1 text-xs text-slate-500">TVA de 21 % comprise</p>
             </div>
             {isAvailable ? (
               <Link

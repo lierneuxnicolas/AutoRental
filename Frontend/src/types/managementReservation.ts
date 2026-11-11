@@ -92,12 +92,22 @@ export interface ReservationManagementDetail {
   deposit_amount: string
   needs_review: boolean
   invoice_id: number | null
+  invoice_pdf_available: boolean
   previous_reservation: ReservationManagementPreviousSummary | null
   vehicle_reference_inspection: ManagementInspection | null
   deposit_status: ManagementDepositStatus | null
   departure_inspection: ManagementInspection | null
   return_inspection: ManagementInspection | null
   interventions: ManagementInterventionResponse[]
+  return_charges_estimate: {
+    delay_seconds: number
+    delay_fee: string
+    fuel_fee: string | null
+  } | null
+  return_delay_fee: string | null
+  return_fuel_fee: string | null
+  return_charges_confirmed_at: string | null
+  return_charges_confirmed_by: number | null
   created_at: string
   confirmed_at: string | null
   cancelled_at: string | null

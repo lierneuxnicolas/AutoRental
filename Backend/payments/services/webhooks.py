@@ -1,26 +1,27 @@
 from __future__ import annotations
 
+import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import stripe
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from accounts.models import Role
-from accounts.services import validate_client_for_reservation
-from invoicing.services import InvoiceCreationNotAvailable, create_invoice_for_reservation
+from accounts.services import check_vehicle_compatibility_for_client, validate_client_for_reservation
 from notifications.services import create_notification
 from common.models import SystemLog
 from common.services import create_system_log
 from interventions.services.vehicle_access import activate_vehicle_access
-from payments.models import Deposit, Payment, StripeEvent
+from payments.models import Deposit, Payment, Refund, StripeEvent
 from reservations.models import Reservation
 from vehicles.models import Vehicle
-from vehicles.services import is_vehicle_available
+from vehicles.services import AvailabilityValidationError, is_vehicle_available
 
 
 SUPPORTED_STRIPE_EVENT_TYPES = {
@@ -28,7 +29,13 @@ SUPPORTED_STRIPE_EVENT_TYPES = {
     "payment_intent.succeeded",
     "payment_intent.payment_failed",
     "payment_intent.canceled",
+    "refund.created",
+    "refund.updated",
+    "refund.failed",
 }
+logger = logging.getLogger(__name__)
+
+CONFLICT_REFUND_REASON = "Vehicule indisponible apres paiement"
 
 SENSITIVE_PAYLOAD_KEYS = {
     "card_number",
@@ -40,10 +47,6 @@ SENSITIVE_PAYLOAD_KEYS = {
 
 
 class StripeWebhookProcessingError(ValueError):
-    pass
-
-
-class InvoiceIntegrationPending(StripeWebhookProcessingError):
     pass
 
 
@@ -361,28 +364,70 @@ def _handle_deposit_authorized(*, deposit: Deposit, reservation: Reservation, pa
     )
 
 
-def _assert_profile_still_valid(reservation: Reservation) -> None:
-    eligibility = validate_client_for_reservation(
-        client=reservation.client,
-        reservation_start_date=reservation.start_at.date(),
-        reservation_end_date=reservation.end_at.date(),
-    )
-    if eligibility.is_eligible:
-        return
-
-    raise StripeWebhookProcessingError(
-        "Client profile or documents are no longer valid for this reservation."
-    )
+def _is_profile_still_valid(reservation: Reservation) -> bool:
+    try:
+        eligibility = validate_client_for_reservation(
+            client=reservation.client,
+            reservation_start_date=timezone.localtime(reservation.start_at).date(),
+            reservation_end_date=timezone.localtime(reservation.end_at).date(),
+        )
+    except ValidationError:
+        logger.warning("Invalid profile data for reservation %s after payment", reservation.pk)
+        return False
+    return eligibility.is_eligible
 
 
 def _is_vehicle_available_for_reservation(reservation: Reservation) -> bool:
     reservation_queryset = Reservation.objects.exclude(pk=reservation.pk)
-    return is_vehicle_available(
-        vehicle=reservation.vehicle,
-        start=reservation.start_at,
-        end=reservation.end_at,
-        reservation_queryset=reservation_queryset,
-    )
+    try:
+        return is_vehicle_available(
+            vehicle=reservation.vehicle,
+            start=reservation.start_at,
+            end=reservation.end_at,
+            reservation_queryset=reservation_queryset,
+        )
+    except AvailabilityValidationError:
+        return False
+
+
+def _prepare_conflict_refund(*, payment: Payment, reservation: Reservation, reason=CONFLICT_REFUND_REASON):
+    """Record a refund for a payment received after the vehicle was taken; Stripe is called after commit."""
+    refund = Refund.objects.filter(payment=payment, reason=reason).first()
+    if refund is None:
+        refund = Refund.objects.create(
+            payment=payment,
+            reservation=reservation,
+            amount=payment.amount,
+            currency="EUR",
+            status=Refund.Status.DEMANDE,
+            reason=reason,
+        )
+    refund_id = refund.id
+    payment_intent_id = payment.stripe_payment_intent_id
+
+    def _run_refund() -> None:
+        refund_obj = Refund.objects.get(pk=refund_id)
+        if refund_obj.status in {Refund.Status.EN_COURS, Refund.Status.REUSSI} or not payment_intent_id:
+            return
+        try:
+            stripe.api_key = getattr(settings, "STRIPE_SECRET_KEY", "")
+            stripe_refund = stripe.Refund.create(
+                payment_intent=payment_intent_id,
+                amount=_amount_to_minor_units(refund_obj.amount),
+                metadata={"refund_id": str(refund_id), "purpose": "availability_conflict"},
+                idempotency_key=f"availability-conflict-refund:{refund_id}",
+            )
+        except stripe.error.StripeError:
+            logger.exception("Stripe refund failed for refund %s; manual follow-up required", refund_id)
+            return
+        refund_obj.stripe_refund_id = getattr(stripe_refund, "id", None)
+        stripe_status = getattr(stripe_refund, "status", None)
+        refund_obj.status = Refund.Status.REUSSI if stripe_status == "succeeded" else Refund.Status.EN_COURS
+        if refund_obj.status == Refund.Status.REUSSI:
+            refund_obj.succeeded_at = timezone.now()
+        refund_obj.save(update_fields=["stripe_refund_id", "status", "succeeded_at", "updated_at"])
+
+    return _run_refund
 
 
 def _handle_success(
@@ -397,15 +442,26 @@ def _handle_success(
         return
 
     _validate_amount_and_currency(payment=payment, payment_intent=payment_intent)
-    _assert_profile_still_valid(reservation)
-
-    if not _is_vehicle_available_for_reservation(reservation):
+    if payment.failure_code in {"AVAILABILITY_CONFLICT", "ELIGIBILITY_CONFLICT"}:
+        return
+    valid_profile = _is_profile_still_valid(reservation)
+    compatible = check_vehicle_compatibility_for_client(client=reservation.client, vehicle=reservation.vehicle).is_compatible
+    available = _is_vehicle_available_for_reservation(reservation)
+    payable_status = reservation.status in {
+        Reservation.Status.BROUILLON,
+        Reservation.Status.EN_ATTENTE_CAUTION,
+        Reservation.Status.EN_ATTENTE_PAIEMENT,
+        Reservation.Status.PAIEMENT_ECHOUE,
+    }
+    if not valid_profile or not compatible or not available or not payable_status:
+        failure_code = "AVAILABILITY_CONFLICT" if not available else "ELIGIBILITY_CONFLICT"
+        reason = CONFLICT_REFUND_REASON if not available else "Conditions de reservation non remplies apres paiement"
         payment.status = Payment.Status.ECHOUE
         payment.failed_at = timezone.now()
         payment.succeeded_at = None
         payment.cancelled_at = None
-        payment.failure_code = "AVAILABILITY_CONFLICT"
-        payment.failure_message = "Vehicule indisponible apres paiement. Remboursement a preparer."
+        payment.failure_code = failure_code
+        payment.failure_message = f"{reason}. Remboursement a preparer."
         payment.save(
             update_fields=[
                 "status",
@@ -418,8 +474,9 @@ def _handle_success(
             ]
         )
 
-        reservation.status = Reservation.Status.PAIEMENT_ECHOUE
-        reservation.save(update_fields=["status", "updated_at"])
+        if payable_status:
+            reservation.status = Reservation.Status.PAIEMENT_ECHOUE
+            reservation.save(update_fields=["status", "updated_at"])
 
         _safe_log_payment_result(
             action="PAYMENT_FAILED",
@@ -427,19 +484,20 @@ def _handle_success(
             payment=payment,
             reservation=reservation,
             user=reservation.client.user,
-            suffix="reason=AVAILABILITY_CONFLICT",
+            suffix=f"reason={failure_code}",
         )
 
         _notify_managers_once_on_commit(
             notification_type="PAYMENT_CONFLICT",
             title="Conflit apres paiement Stripe",
             message=(
-                f"La reservation {reservation.reference} a ete payee mais le vehicule n'est plus disponible. "
+                f"La reservation {reservation.reference} a ete payee mais les conditions ne sont plus remplies. "
                 "Remboursement a preparer manuellement."
             ),
             related_object_type="Reservation",
             related_object_id=reservation.id,
         )
+        post_commit_actions.append(_prepare_conflict_refund(payment=payment, reservation=reservation, reason=reason))
         return
 
     now = timezone.now()
@@ -485,12 +543,6 @@ def _handle_success(
         vehicle.status = Vehicle.Status.RESERVE
         vehicle.save(update_fields=["status", "updated_at"])
 
-    try:
-        invoice = create_invoice_for_reservation(reservation)
-    except InvoiceCreationNotAvailable as exc:
-        raise InvoiceIntegrationPending(str(exc)) from exc
-
-    invoice_id = getattr(invoice, "id", None) if invoice is not None else None
     client_user = reservation.client.user
     reservation_reference = reservation.reference
     payment_id = payment.id
@@ -515,16 +567,6 @@ def _handle_success(
             related_object_id=reservation_id,
         )
         _send_reservation_confirmation_email(reservation=reservation)
-        if invoice_id is not None:
-            _notify_once(
-                user=client_user,
-                notification_type="INVOICE_AVAILABLE",
-                title="Facture disponible",
-                message=f"La facture de votre reservation {reservation_reference} est disponible.",
-                related_object_type="invoice",
-                related_object_id=invoice_id,
-            )
-
     post_commit_actions.append(_run_success_notifications)
 
 
@@ -680,6 +722,73 @@ def _apply_deposit_event(*, event_type: str, payment_intent: dict[str, Any]) -> 
     _handle_deposit_authorized(deposit=deposit, reservation=reservation, payment_intent=payment_intent)
 
 
+def _apply_refund_event(*, event_object: dict[str, Any]) -> None:
+    refund_id = event_object.get("id")
+    if not isinstance(refund_id, str) or not refund_id:
+        raise StripeWebhookProcessingError("Missing Stripe refund id.")
+
+    metadata = event_object.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        raise StripeWebhookProcessingError("Invalid Stripe refund metadata.")
+
+    refund = Refund.objects.filter(stripe_refund_id=refund_id).first()
+    if refund is None and metadata.get("purpose") == "reservation_cancellation":
+        local_id = metadata.get("refund_id")
+        if not str(local_id or "").isdigit():
+            raise StripeWebhookProcessingError("Missing local cancellation refund id.")
+        refund = Refund.objects.filter(pk=int(local_id)).first()
+        if refund is None:
+            raise StripeWebhookProcessingError("Cancellation refund is not available yet.")
+    if refund is None:
+        return
+
+    if refund.reservation_id is not None:
+        Reservation.objects.select_for_update().get(pk=refund.reservation_id)
+    refund = Refund.objects.select_for_update().select_related("payment").get(pk=refund.pk)
+    if refund.stripe_refund_id and refund.stripe_refund_id != refund_id:
+        raise StripeWebhookProcessingError("Stripe refund id mismatch.")
+
+    secret_key = getattr(settings, "STRIPE_SECRET_KEY", "")
+    if not secret_key:
+        raise StripeWebhookProcessingError("Stripe is not configured for refund reconciliation.")
+    current = stripe.Refund.retrieve(refund_id, api_key=secret_key)
+    if (
+        current.get("id") != refund_id
+        or current.get("payment_intent") != refund.payment.stripe_payment_intent_id
+        or _parse_stripe_amount(current.get("amount")) != _amount_to_minor_units(refund.amount)
+        or _parse_stripe_currency(current.get("currency")) != refund.currency
+    ):
+        raise StripeWebhookProcessingError("Stripe refund does not match the recorded payment.")
+
+    statuses = {
+        "pending": Refund.Status.EN_COURS,
+        "requires_action": Refund.Status.EN_COURS,
+        "succeeded": Refund.Status.REUSSI,
+        "failed": Refund.Status.ECHOUE,
+        "canceled": Refund.Status.ANNULE,
+    }
+    new_status = statuses.get(current.get("status"))
+    if new_status is None:
+        raise StripeWebhookProcessingError("Unknown Stripe refund status.")
+    refund.stripe_refund_id = refund_id
+    refund.status = new_status
+    refund.succeeded_at = timezone.now() if new_status == Refund.Status.REUSSI and refund.succeeded_at is None else refund.succeeded_at
+    refund.failed_at = timezone.now() if new_status == Refund.Status.ECHOUE and refund.failed_at is None else refund.failed_at
+    refund.save(update_fields=["stripe_refund_id", "status", "succeeded_at", "failed_at", "updated_at"])
+    if new_status == Refund.Status.REUSSI and refund.reservation_id is not None and refund.reason == "Annulation de reservation":
+        from reservations.services.cancellation import finalize_confirmed_cancellation
+
+        finalize_confirmed_cancellation(reservation=Reservation.objects.get(pk=refund.reservation_id))
+    if new_status in {Refund.Status.ECHOUE, Refund.Status.ANNULE}:
+        _notify_managers_once_on_commit(
+            notification_type="REFUND_FAILED",
+            title="Remboursement à vérifier",
+            message=f"Le remboursement Stripe {refund_id} a échoué ou a été annulé.",
+            related_object_type="refund",
+            related_object_id=refund.id,
+        )
+
+
 def process_stripe_event(event: Any) -> StripeEvent:
     payload = _event_to_payload(event)
     stripe_event_id = payload.get("id")
@@ -718,7 +827,9 @@ def process_stripe_event(event: Any) -> StripeEvent:
                 event_object = ((payload.get("data") or {}).get("object") or {})
                 if not isinstance(event_object, dict):
                     raise StripeWebhookProcessingError("Invalid Stripe event object.")
-                if _get_payment_intent_purpose(event_object) == "deposit":
+                if event_type.startswith("refund."):
+                    _apply_refund_event(event_object=event_object)
+                elif _get_payment_intent_purpose(event_object) == "deposit":
                     _apply_deposit_event(
                         event_type=event_type,
                         payment_intent=event_object,

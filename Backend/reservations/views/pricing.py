@@ -16,12 +16,16 @@ from vehicles.services import (
     BOOKABLE_VEHICLE_STATUSES,
     get_blocking_reservation_filter,
     is_vehicle_available,
+    validate_daily_rental_period,
 )
 
 
 ErrorDetailResponseSerializer = inline_serializer(
     name="PriceSimulationErrorDetailResponse",
-    fields={"detail": drf_serializers.CharField()},
+    fields={
+        "detail": drf_serializers.CharField(),
+        "code": drf_serializers.CharField(required=False),
+    },
 )
 
 
@@ -130,6 +134,17 @@ class PriceSimulationView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        daily_rate_booking = (
+            reservation_context.is_daily_rate_booking
+            if reservation_context is not None
+            else True
+        )
+        if daily_rate_booking and reservation_context is None:
+            try:
+                validate_daily_rental_period(start=payload["start_at"], end=payload["end_at"])
+            except AvailabilityValidationError as exc:
+                return Response({"code": exc.code, "detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         vehicle = (
             Vehicle.objects.select_related("category", "brand")
             .filter(pk=payload["vehicle_id"], is_active=True)
@@ -139,7 +154,7 @@ class PriceSimulationView(APIView):
             vehicle_exists = Vehicle.objects.filter(pk=payload["vehicle_id"]).exists()
             if vehicle_exists:
                 return Response(
-                    {"detail": "Le vehicule demande est inactif."},
+                    {"code": "VEHICLE_NOT_ACTIVE", "detail": "Le vehicule demande est inactif."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             return Response(
@@ -149,7 +164,7 @@ class PriceSimulationView(APIView):
 
         if reservation_context is None and vehicle.status not in BOOKABLE_VEHICLE_STATUSES:
             return Response(
-                {"detail": "Le vehicule n'est pas reservable dans son statut actuel."},
+                {"code": "VEHICLE_NOT_BOOKABLE", "detail": "Le vehicule n'est pas reservable dans son statut actuel."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -188,11 +203,12 @@ class PriceSimulationView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except AvailabilityValidationError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"code": exc.code, "detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         if not is_available:
             return Response(
                 {
+                    "code": "VEHICLE_UNAVAILABLE",
                     "detail": (
                         "Le vehicule est indisponible sur la periode demandee. "
                         "Cette verification est indicative et sera refaite lors de la reservation et du paiement."
@@ -211,11 +227,14 @@ class PriceSimulationView(APIView):
                 start_at=payload["start_at"],
                 end_at=payload["end_at"],
                 insurance_type=effective_insurance_type or "STANDARD",
+                is_daily_rate_booking=daily_rate_booking,
             )
         except PricingError as exc:
             error = pricing_error_to_serializer_error(exc)
             message = error.detail.get("non_field_errors", ["Erreur de tarification."])[0]
-            return Response({"detail": str(message)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"code": exc.code, "detail": str(message)}, status=status.HTTP_400_BAD_REQUEST)
+        except AvailabilityValidationError as exc:
+            return Response({"code": exc.code, "detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         response_serializer = PriceSimulationResponseSerializer(pricing_result)
         return Response(response_serializer.data, status=status.HTTP_200_OK)

@@ -17,8 +17,8 @@ from invoicing.models import Invoice
 from accounts.tests.utils import create_user, ensure_roles
 from notifications.models import Notification
 from payments.services.deposits import DepositAuthorizationError, authorize_deposit
-from payments.models import Deposit, Payment, StripeEvent
-from payments.services.webhooks import InvoiceIntegrationPending, process_stripe_event
+from payments.models import Deposit, Payment, Refund, StripeEvent
+from payments.services.webhooks import StripeWebhookProcessingError, process_stripe_event
 from interventions.models import VehicleAccess
 from reservations.models import Reservation
 from vehicles.models import Brand, Parking, ParkingSpace, Vehicle, VehicleCategory
@@ -183,10 +183,13 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 				client=self.profile,
 				document_type=document_type,
 				document_number=f"DOC-{document_type}",
+				verified_date_of_birth=self.profile.date_of_birth if document_type == ClientDocument.DocumentType.CARTE_IDENTITE else None,
 				file="client_documents/test.pdf",
 				expiration_date=end_date + timedelta(days=30),
 				status=ClientDocument.Status.VALIDE,
 				is_active=True,
+				driving_license_category=ClientDocument.DrivingLicenseCategory.B if document_type == ClientDocument.DocumentType.PERMIS_CONDUIRE else None,
+				driving_license_transmission=ClientDocument.DrivingLicenseTransmission.MANUAL_AND_AUTOMATIC if document_type == ClientDocument.DocumentType.PERMIS_CONDUIRE else None,
 			)
 
 		self.brand = Brand.objects.create(name="Stripe Brand", is_active=True)
@@ -291,10 +294,69 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 			"data": {"object": payment_intent},
 		}
 
+	def test_refund_webhook_reconciles_current_stripe_status_and_is_idempotent(self):
+		refund = Refund.objects.create(
+			reservation=self.reservation, payment=self.payment, amount=Decimal("70.00"),
+			status=Refund.Status.EN_COURS, stripe_refund_id="re_webhook_1",
+		)
+		event = {"id": "evt_refund_1", "type": "refund.updated", "data": {"object": {"id": refund.stripe_refund_id}}}
+		stripe_refund = {
+			"id": refund.stripe_refund_id, "payment_intent": self.payment.stripe_payment_intent_id,
+			"amount": 7000, "currency": "eur", "status": "succeeded",
+		}
+		with self.settings(STRIPE_SECRET_KEY="sk_test_fake"):
+			with patch("payments.services.webhooks.stripe.Refund.retrieve", return_value=stripe_refund) as retrieve:
+				process_stripe_event(event)
+				process_stripe_event(event)
+				process_stripe_event({"id": "evt_refund_old", "type": "refund.updated", "data": {"object": {"id": refund.stripe_refund_id, "status": "pending"}}})
+		refund.refresh_from_db()
+		self.assertEqual(refund.status, Refund.Status.REUSSI)
+		self.assertIsNotNone(refund.succeeded_at)
+		self.assertEqual(retrieve.call_count, 2)
+
+	def test_refund_webhook_rejects_mismatched_amount(self):
+		refund = Refund.objects.create(
+			reservation=self.reservation, payment=self.payment, amount=Decimal("70.00"),
+			status=Refund.Status.EN_COURS, stripe_refund_id="re_webhook_2",
+		)
+		event = {"id": "evt_refund_2", "type": "refund.updated", "data": {"object": {"id": refund.stripe_refund_id}}}
+		stripe_refund = {
+			"id": refund.stripe_refund_id, "payment_intent": self.payment.stripe_payment_intent_id,
+			"amount": 6900, "currency": "eur", "status": "succeeded",
+		}
+		with self.settings(STRIPE_SECRET_KEY="sk_test_fake"):
+			with patch("payments.services.webhooks.stripe.Refund.retrieve", return_value=stripe_refund):
+				with self.assertRaises(StripeWebhookProcessingError):
+					process_stripe_event(event)
+		refund.refresh_from_db()
+		self.assertEqual(refund.status, Refund.Status.EN_COURS)
+		self.assertFalse(StripeEvent.objects.get(stripe_event_id="evt_refund_2").processed)
+
+	def test_refund_webhook_records_failure(self):
+		refund = Refund.objects.create(
+			reservation=self.reservation, payment=self.payment, amount=Decimal("70.00"),
+			status=Refund.Status.EN_COURS, stripe_refund_id="re_webhook_3",
+		)
+		event = {"id": "evt_refund_3", "type": "refund.failed", "data": {"object": {"id": refund.stripe_refund_id}}}
+		stripe_refund = {
+			"id": refund.stripe_refund_id, "payment_intent": self.payment.stripe_payment_intent_id,
+			"amount": 7000, "currency": "eur", "status": "failed",
+		}
+		with self.settings(STRIPE_SECRET_KEY="sk_test_fake"):
+			with patch("payments.services.webhooks.stripe.Refund.retrieve", return_value=stripe_refund):
+				process_stripe_event(event)
+		refund.refresh_from_db()
+		self.assertEqual(refund.status, Refund.Status.ECHOUE)
+		self.assertIsNotNone(refund.failed_at)
+		self.assertTrue(Notification.objects.filter(
+			user=self.manager_user, notification_type="REFUND_FAILED",
+			related_object_type="refund", related_object_id=refund.id,
+		).exists())
+
 	def test_payment_intent_succeeded_confirms_reservation_sets_vehicle_reserved_and_notifies_once(self):
 		event = self._build_event("evt_success", "payment_intent.succeeded")
 
-		with patch("payments.services.webhooks.create_invoice_for_reservation", return_value=type("InvoiceStub", (), {"id": 12345})()) as mocked_invoice, patch(
+		with patch("invoicing.services.create_invoice_for_reservation", return_value=type("InvoiceStub", (), {"id": 12345})()) as mocked_invoice, patch(
 			"payments.services.webhooks.send_mail"
 		) as mocked_send_mail:
 			process_stripe_event(event)
@@ -314,7 +376,10 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		self.assertEqual(access.client, self.client_user)
 		self.assertEqual(access.status, VehicleAccess.Status.ACTIVE)
 		self.assertEqual(access.lock_state, VehicleAccess.LockState.LOCKED)
-		self.assertEqual(access.valid_from, self.reservation.start_at - timedelta(minutes=15))
+		self.assertEqual(
+			access.valid_from,
+			self.reservation.start_at - timedelta(minutes=getattr(settings, "VEHICLE_UNLOCK_EARLY_TOLERANCE_MINUTES", 30)),
+		)
 		self.assertEqual(access.valid_until, self.reservation.end_at)
 		notifications = Notification.objects.filter(notification_type="PAYMENT_SUCCEEDED")
 		self.assertEqual(notifications.count(), 1)
@@ -329,7 +394,8 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		self.assertIn(f"id={self.payment.id}", log.message)
 		self.assertIn(self.reservation.reference, log.message)
 		self.assertIn(str(self.payment.amount), log.message)
-		mocked_invoice.assert_called_once_with(self.reservation)
+		mocked_invoice.assert_not_called()
+		self.assertFalse(Invoice.objects.filter(reservation=self.reservation).exists())
 		mocked_send_mail.assert_called_once()
 		kwargs = mocked_send_mail.call_args.kwargs
 		self.assertEqual(kwargs["subject"], "Votre réservation GetACar est confirmée")
@@ -346,32 +412,31 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		self.assertIn(str(self.reservation.deposit_amount), message)
 		self.assertIn("GetACar", message)
 
-	def test_payment_intent_succeeded_keeps_event_retryable_when_invoice_integration_is_blocked(self):
+	def test_payment_confirmation_does_not_depend_on_invoice_integration(self):
 		event = self._build_event("evt_invoice_blocked", "payment_intent.succeeded")
 
 		with patch(
-			"payments.services.webhooks.create_invoice_for_reservation",
-			side_effect=InvoiceIntegrationPending("Invoice model is not available yet."),
+			"invoicing.services.create_invoice_for_reservation",
+			side_effect=RuntimeError("Invoice model is not available yet."),
 		) as mocked_invoice, patch("payments.services.webhooks.send_mail") as mocked_send_mail:
-			with self.assertRaises(InvoiceIntegrationPending):
-				process_stripe_event(event)
+			process_stripe_event(event)
 
 		stripe_event = StripeEvent.objects.get(stripe_event_id="evt_invoice_blocked")
 		self.payment.refresh_from_db()
 		self.reservation.refresh_from_db()
 		self.vehicle.refresh_from_db()
 
-		self.assertFalse(stripe_event.processed)
-		self.assertIn("Invoice model is not available yet", stripe_event.processing_error)
-		self.assertEqual(self.payment.status, Payment.Status.EN_ATTENTE)
-		self.assertEqual(self.reservation.status, Reservation.Status.EN_ATTENTE_PAIEMENT)
-		self.assertEqual(self.vehicle.status, Vehicle.Status.DISPONIBLE)
-		self.assertFalse(Notification.objects.filter(notification_type="PAYMENT_SUCCEEDED").exists())
-		self.assertFalse(SystemLog.objects.filter(action="PAYMENT_SUCCESS").exists())
-		mocked_send_mail.assert_not_called()
-		mocked_invoice.assert_called_once()
+		self.assertTrue(stripe_event.processed)
+		self.assertEqual(self.payment.status, Payment.Status.REUSSI)
+		self.assertEqual(self.reservation.status, Reservation.Status.CONFIRMEE)
+		self.assertEqual(self.vehicle.status, Vehicle.Status.RESERVE)
+		self.assertTrue(Notification.objects.filter(notification_type="PAYMENT_SUCCEEDED").exists())
+		self.assertTrue(SystemLog.objects.filter(action="PAYMENT_SUCCESS").exists())
+		mocked_send_mail.assert_called_once()
+		mocked_invoice.assert_not_called()
+		self.assertFalse(Invoice.objects.filter(reservation=self.reservation).exists())
 
-	@patch("payments.services.webhooks.create_invoice_for_reservation", return_value=object())
+	@patch("invoicing.services.create_invoice_for_reservation", return_value=object())
 	def test_payment_intent_succeeded_marks_conflict_without_confirming_overlapping_reservations(self, mocked_invoice):
 		Reservation.objects.create(
 			client=self.profile,
@@ -386,7 +451,10 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 
 		event = self._build_event("evt_conflict", "payment_intent.succeeded")
 
-		process_stripe_event(event)
+		with patch("payments.services.webhooks.stripe.Refund.create") as create_refund:
+			create_refund.return_value.id = "re_conflict_test"
+			create_refund.return_value.status = "pending"
+			process_stripe_event(event)
 
 		stripe_event = StripeEvent.objects.get(stripe_event_id="evt_conflict")
 
@@ -462,7 +530,7 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		self.assertEqual(self.reservation.status, Reservation.Status.PAIEMENT_ECHOUE)
 		self.assertEqual(Notification.objects.filter(notification_type="PAYMENT_CANCELED").count(), 1)
 
-	@patch("payments.services.webhooks.create_invoice_for_reservation", return_value=object())
+	@patch("invoicing.services.create_invoice_for_reservation", return_value=object())
 	def test_payment_intent_succeeded_is_idempotent_when_payment_already_succeeded(self, mocked_invoice):
 		event = self._build_event("evt_success_again", "payment_intent.succeeded")
 
@@ -480,7 +548,7 @@ class StripeWebhookBusinessProcessingTests(TestCase):
 		self.assertEqual(self.vehicle.status, Vehicle.Status.RESERVE)
 		self.assertEqual(Notification.objects.filter(notification_type="PAYMENT_SUCCEEDED").count(), 1)
 		self.assertEqual(StripeEvent.objects.filter(processed=True, event_type="payment_intent.succeeded").count(), 2)
-		mocked_invoice.assert_called_once_with(self.reservation)
+		mocked_invoice.assert_not_called()
 
 	def test_payment_intent_payment_failed_replayed_event_does_not_duplicate_notification(self):
 		event = self._build_event(
@@ -551,10 +619,13 @@ class DepositAuthorizationNotificationTests(TestCase):
 				client=self.profile,
 				document_type=document_type,
 				document_number=f"DEP-{document_type}",
+				verified_date_of_birth=self.profile.date_of_birth if document_type == ClientDocument.DocumentType.CARTE_IDENTITE else None,
 				file="client_documents/test.pdf",
 				expiration_date=end_date,
 				status=ClientDocument.Status.VALIDE,
 				is_active=True,
+				driving_license_category=ClientDocument.DrivingLicenseCategory.B if document_type == ClientDocument.DocumentType.PERMIS_CONDUIRE else None,
+				driving_license_transmission=ClientDocument.DrivingLicenseTransmission.MANUAL_AND_AUTOMATIC if document_type == ClientDocument.DocumentType.PERMIS_CONDUIRE else None,
 			)
 
 		brand = Brand.objects.create(name="Deposit Brand", is_active=True)
@@ -708,18 +779,19 @@ class DepositAuthorizationNotificationTests(TestCase):
 		stored_event = StripeEvent.objects.get(stripe_event_id="evt_unknown_type")
 		self.assertTrue(stored_event.processed)
 
-	@patch("payments.services.webhooks.create_invoice_for_reservation", side_effect=InvoiceIntegrationPending("Invoice temporarily unavailable"))
+	@patch("payments.services.webhooks.activate_vehicle_access", side_effect=RuntimeError("access temporarily unavailable"))
 	def test_local_error_then_retry_succeeds(self, mocked_invoice):
 		event = self._build_event("evt_retry_flow", "payment_intent.succeeded")
 
-		with self.assertRaises(InvoiceIntegrationPending):
+		with self.assertRaisesMessage(RuntimeError, "access temporarily unavailable"):
 			process_stripe_event(event)
 
 		self.payment.refresh_from_db()
 		self.assertEqual(self.payment.status, Payment.Status.EN_ATTENTE)
 
 		mocked_invoice.side_effect = None
-		mocked_invoice.return_value = object()
+		from interventions.services.vehicle_access import activate_vehicle_access
+		mocked_invoice.side_effect = activate_vehicle_access
 		process_stripe_event(event)
 
 		self.payment.refresh_from_db()
@@ -777,10 +849,13 @@ class StripeWebhookEndpointTests(TestCase):
 				client=self.profile,
 				document_type=document_type,
 				document_number=f"END-{document_type}",
+				verified_date_of_birth=self.profile.date_of_birth if document_type == ClientDocument.DocumentType.CARTE_IDENTITE else None,
 				file="client_documents/test.pdf",
 				expiration_date=end_date,
 				status=ClientDocument.Status.VALIDE,
 				is_active=True,
+				driving_license_category=ClientDocument.DrivingLicenseCategory.B if document_type == ClientDocument.DocumentType.PERMIS_CONDUIRE else None,
+				driving_license_transmission=ClientDocument.DrivingLicenseTransmission.MANUAL_AND_AUTOMATIC if document_type == ClientDocument.DocumentType.PERMIS_CONDUIRE else None,
 			)
 		brand = Brand.objects.create(name="Endpoint Brand", is_active=True)
 		category = VehicleCategory.objects.create(
@@ -968,7 +1043,7 @@ class StripeWebhookEndpointTests(TestCase):
 		self.assertEqual(self.payment.status, Payment.Status.REUSSI)
 		self.assertEqual(self.reservation.status, Reservation.Status.CONFIRMEE)
 		self.assertIsNotNone(self.reservation.confirmed_at)
-		self.assertEqual(Invoice.objects.filter(reservation=self.reservation).count(), 1)
+		self.assertEqual(Invoice.objects.filter(reservation=self.reservation).count(), 0)
 		self.assertEqual(
 			Notification.objects.filter(
 				user=self.client_user,
@@ -1039,10 +1114,13 @@ class StripeWebhookInvoiceNotificationTests(TestCase):
 				client=self.profile,
 				document_type=document_type,
 				document_number=f"INV-{document_type}",
+				verified_date_of_birth=self.profile.date_of_birth if document_type == ClientDocument.DocumentType.CARTE_IDENTITE else None,
 				file="client_documents/test.pdf",
 				expiration_date=end_date + timedelta(days=30),
 				status=ClientDocument.Status.VALIDE,
 				is_active=True,
+				driving_license_category=ClientDocument.DrivingLicenseCategory.B if document_type == ClientDocument.DocumentType.PERMIS_CONDUIRE else None,
+				driving_license_transmission=ClientDocument.DrivingLicenseTransmission.MANUAL_AND_AUTOMATIC if document_type == ClientDocument.DocumentType.PERMIS_CONDUIRE else None,
 			)
 
 		self.brand = Brand.objects.create(name="Invoice Brand", is_active=True)
@@ -1119,8 +1197,8 @@ class StripeWebhookInvoiceNotificationTests(TestCase):
 			},
 		}
 
-	@patch("payments.services.webhooks.create_invoice_for_reservation", return_value=object())
-	def test_payment_intent_succeeded_creates_only_one_invoice_and_notification(self, mocked_invoice):
+	@patch("invoicing.services.create_invoice_for_reservation", return_value=object())
+	def test_payment_intent_succeeded_creates_no_invoice_or_invoice_notification(self, mocked_invoice):
 		mocked_invoice.return_value = type("InvoiceStub", (), {"id": 12345})()
 		event = self._build_event("evt_invoice_once", "payment_intent.succeeded")
 
@@ -1130,5 +1208,6 @@ class StripeWebhookInvoiceNotificationTests(TestCase):
 		self.assertEqual(StripeEvent.objects.filter(stripe_event_id="evt_invoice_once", processed=True).count(), 1)
 		self.assertEqual(Notification.objects.filter(notification_type="PAYMENT_SUCCEEDED").count(), 1)
 		self.assertEqual(Notification.objects.filter(notification_type="RESERVATION_CONFIRMED").count(), 1)
-		self.assertEqual(Notification.objects.filter(notification_type="INVOICE_AVAILABLE").count(), 1)
-		mocked_invoice.assert_called_once_with(self.reservation)
+		self.assertEqual(Notification.objects.filter(notification_type="INVOICE_AVAILABLE").count(), 0)
+		self.assertFalse(Invoice.objects.filter(reservation=self.reservation).exists())
+		mocked_invoice.assert_not_called()

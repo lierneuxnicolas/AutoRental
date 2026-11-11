@@ -13,6 +13,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import IntegrityError
 from django.test import RequestFactory, TestCase
+from unittest.mock import patch
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -28,6 +29,7 @@ from interventions.services.vehicle_access import (
 	VehicleAccessError,
 	VehicleAccessLifecycleError,
 	activate_vehicle_access,
+	get_unlock_availability,
 	lock_and_revoke_after_return,
 	lock_vehicle,
 	unlock_vehicle,
@@ -492,6 +494,78 @@ class VehicleAccessActivationTests(VehicleAccessTestDataMixin, TestCase):
 
 
 class VehicleAccessUnlockServiceTests(VehicleAccessTestDataMixin, TestCase):
+	def test_preview_and_unlock_share_configured_window(self):
+		now = timezone.now()
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=now + timedelta(minutes=25),
+			end_at=now + timedelta(hours=2),
+		)
+		reservation.vehicle.status = Vehicle.Status.RESERVE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+		with self.settings(VEHICLE_UNLOCK_EARLY_TOLERANCE_MINUTES=30), patch("interventions.services.vehicle_access.timezone.now", return_value=now):
+			preview = get_unlock_availability(reservation=reservation, requested_by=self.client_user_1)
+			self.assertTrue(preview["allowed"])
+			self.assertEqual(unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)["state"], VehicleAccess.LockState.UNLOCKED)
+
+	def test_preview_reports_window_and_operational_blockers(self):
+		now = timezone.now()
+		reservation = self._create_reservation(
+			status=Reservation.Status.CONFIRMEE,
+			start_at=now + timedelta(minutes=31),
+			end_at=now + timedelta(hours=2),
+		)
+		reservation.vehicle.status = Vehicle.Status.RESERVE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+		with self.settings(VEHICLE_UNLOCK_EARLY_TOLERANCE_MINUTES=30), patch("interventions.services.vehicle_access.timezone.now", return_value=now):
+			result = get_unlock_availability(reservation=reservation, requested_by=self.client_user_1)
+			self.assertEqual(result["code"], "ACCESS_NOT_STARTED")
+			self.assertIn("30 minutes", result["message"])
+			reservation.start_at = now
+			reservation.vehicle.status = Vehicle.Status.MAINTENANCE
+			result = get_unlock_availability(reservation=reservation, requested_by=self.client_user_1)
+			self.assertEqual(result["code"], "VEHICLE_UNAVAILABLE")
+			self.assertIn("gestionnaire", result["message"])
+
+	def test_confirmed_reservation_blocked_while_another_rental_is_in_progress(self):
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
+		reservation.vehicle.status = Vehicle.Status.RESERVE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+		self._create_reservation(status=Reservation.Status.EN_COURS, client=self.client_profile_2)
+		preview = get_unlock_availability(reservation=reservation, requested_by=self.client_user_1)
+		self.assertEqual(preview["code"], "VEHICLE_IN_USE")
+		with self.assertRaises(VehicleAccessError) as exc:
+			unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
+		self.assertEqual(exc.exception.code, "VEHICLE_IN_USE")
+
+	def test_returned_reservation_pending_financial_control_does_not_block(self):
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
+		reservation.vehicle.status = Vehicle.Status.RESERVE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+		previous = self._create_reservation(status=Reservation.Status.A_CONTROLER, client=self.client_profile_2)
+		Inspection.objects.create(reservation=previous, inspection_type=Inspection.Type.FINAL, status=Inspection.Status.TERMINE, completed_at=timezone.now())
+		self.assertTrue(get_unlock_availability(reservation=reservation, requested_by=self.client_user_1)["allowed"])
+
+	def test_return_without_completed_inspection_still_blocks(self):
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
+		reservation.vehicle.status = Vehicle.Status.RESERVE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+		self._create_reservation(status=Reservation.Status.A_CONTROLER, client=self.client_profile_2)
+		self.assertEqual(
+			get_unlock_availability(reservation=reservation, requested_by=self.client_user_1)["code"],
+			"VEHICLE_IN_USE",
+		)
+
+	def test_confirmed_reservation_cannot_unlock_vehicle_marked_rented(self):
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
+		self.assertEqual(
+			get_unlock_availability(reservation=reservation, requested_by=self.client_user_1)["code"],
+			"VEHICLE_IN_USE",
+		)
+		with self.assertRaises(VehicleAccessError) as exc:
+			unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
+		self.assertEqual(exc.exception.code, "VEHICLE_IN_USE")
+
 	def _prepare_active_access(self, *, reservation=None, user=None):
 		reservation = reservation or self._create_reservation(status=Reservation.Status.EN_COURS)
 		reservation.vehicle.status = Vehicle.Status.LOUE
@@ -585,6 +659,8 @@ class VehicleAccessUnlockServiceTests(VehicleAccessTestDataMixin, TestCase):
 		reservation, _access = self._prepare_active_access()
 		reservation.status = Reservation.Status.CONFIRMEE
 		reservation.save(update_fields=["status", "updated_at"])
+		reservation.vehicle.status = Vehicle.Status.RESERVE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
 
 		result = unlock_vehicle(reservation=reservation, requested_by=self.client_user_1)
 		self.assertEqual(result["state"], VehicleAccess.LockState.UNLOCKED)
@@ -967,6 +1043,19 @@ class VehicleAccessApiTests(VehicleAccessTestDataMixin, TestCase):
 			reverse("reservations:reservation-lock", kwargs={"pk": 1}),
 			"/api/v1/reservations/1/lock/",
 		)
+
+	def test_reservation_detail_exposes_server_unlock_reason_without_unlocking(self):
+		reservation = self._create_reservation(status=Reservation.Status.CONFIRMEE)
+		reservation.vehicle.status = Vehicle.Status.MAINTENANCE
+		reservation.vehicle.save(update_fields=["status", "updated_at"])
+		self.client_api.force_authenticate(self.client_user_1)
+		response = self.client_api.get(reverse("reservations:reservation-detail", kwargs={"pk": reservation.id}))
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response.data["unlock_availability"]["code"], "VEHICLE_UNAVAILABLE")
+		self.assertFalse(response.data["unlock_availability"]["allowed"])
+		self.assertFalse(VehicleAccess.objects.filter(reservation=reservation).exists())
+		unlock = self.client_api.post(reverse("reservations:reservation-unlock", kwargs={"pk": reservation.id}), {}, format="json")
+		self.assertEqual(unlock.data["code"], "VEHICLE_UNAVAILABLE")
 
 	def test_unlock_and_lock_return_200(self):
 		reservation = self._prepare_active_access()
@@ -2087,4 +2176,3 @@ class InterventionSecurityApiTests(VehicleAccessTestDataMixin, TestCase):
 
 		for response in responses:
 			self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-

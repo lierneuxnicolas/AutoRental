@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useLocation } from 'react-router-dom'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import axios from 'axios'
@@ -10,6 +10,7 @@ import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import { register as registerUser } from '../../services/authService'
 import type { RegisterRequest } from '../../types/auth'
+import { clearReservationResume, getReservationResume, saveReservationResume } from '../../utils/reservationResume'
 
 const registerSchema = z
   .object({
@@ -26,6 +27,7 @@ const registerSchema = z
 
 export default function RegisterPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [serverError, setServerError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
@@ -50,7 +52,13 @@ export default function RegisterPage() {
 
     try {
       await registerUser(values)
-      navigate('/verify-email', { state: { pendingVerification: true, email: values.email } })
+      const resume = getReservationResume(location.state)
+      if (resume) {
+        saveReservationResume(resume)
+      } else {
+        clearReservationResume()
+      }
+      navigate('/verify-email', { state: { pendingVerification: true, email: values.email, ...resume } })
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const data = error.response?.data as Record<string, unknown> | undefined
@@ -91,21 +99,9 @@ export default function RegisterPage() {
 
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-4 py-12">
-      <div className="w-full max-w-5xl overflow-hidden rounded-4xl border border-slate-200 bg-white shadow-[0_20px_60px_-20px_rgba(37,99,235,0.35)]">
-        <div className="grid gap-0 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="bg-[#0F172A] p-8 text-white sm:p-10 lg:p-12">
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-blue-200">GetaCar</p>
-            <h1 className="mt-4 text-3xl font-semibold sm:text-4xl">Créer votre compte</h1>
-            <p className="mt-4 max-w-md text-sm leading-7 text-slate-300 sm:text-base">
-              Rejoignez GetaCar pour réserver un véhicule, suivre vos contrats et profiter d’une expérience simplifiée.
-            </p>
-          </div>
-
-          <div className="p-8 sm:p-10 lg:p-12">
+      <div className="w-full max-w-xl rounded-4xl border border-slate-200 bg-white p-6 shadow-[0_20px_60px_-20px_rgba(37,99,235,0.35)] sm:p-10">
             <div className="mb-8">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Inscription</p>
-              <h2 className="mt-2 text-2xl font-semibold text-[#0F172A]">Démarrez votre aventure</h2>
-              <p className="mt-2 text-sm text-slate-600">Remplissez les informations ci-dessous pour créer votre compte.</p>
+              <h1 className="text-center text-2xl font-semibold text-[#0F172A]">Créer votre compte</h1>
             </div>
 
             {serverError ? <Alert variant="danger" title="Création du compte impossible" message={serverError} className="mb-6" /> : null}
@@ -156,7 +152,7 @@ export default function RegisterPage() {
                 {...register('password_confirm')}
               />
 
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
+              <Button type="submit" variant="violet" className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? (
                   <span className="flex items-center justify-center gap-2">
                     <LoadingSpinner size="sm" aria-label="Création du compte" />
@@ -168,13 +164,11 @@ export default function RegisterPage() {
               </Button>
             </form>
 
-            <div className="mt-6 text-sm text-slate-600">
-              <span>Vous avez déjà un compte ? </span>
-              <Link to="/login" className="font-medium text-[#2563EB] transition hover:text-[#1D4ED8]">
+            <div className="mt-6 flex flex-wrap justify-center gap-x-1 text-center text-sm text-slate-600">
+              <span>Vous avez déjà un compte ?</span>
+              <Link to="/login" state={location.state} className="font-medium text-[#2563EB] transition hover:text-[#1D4ED8]">
                 Se connecter
               </Link>
-            </div>
-          </div>
         </div>
       </div>
     </div>

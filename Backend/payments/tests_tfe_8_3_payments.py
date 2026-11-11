@@ -118,7 +118,7 @@ class Tfe83PaymentsAndCancellationTests(ReservationTestDataMixin, TestCase):
             event_type="payment_intent.succeeded",
         )
 
-        with patch("payments.services.webhooks.create_invoice_for_reservation", return_value=type("InvoiceStub", (), {"id": 12345})()), patch(
+        with patch("invoicing.services.create_invoice_for_reservation", return_value=type("InvoiceStub", (), {"id": 12345})()), patch(
             "payments.services.webhooks.send_mail"
         ):
             process_stripe_event(event)

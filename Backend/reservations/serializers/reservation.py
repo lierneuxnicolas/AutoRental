@@ -2,9 +2,12 @@ from rest_framework import serializers
 
 from inspections.models import Inspection
 from inspections.serializers import InspectionPhotoReadSerializer
+from inspections.serializers import InspectionDamageReadSerializer
+from interventions.models import VehicleAccess
+from interventions.services.vehicle_access import get_unlock_availability
 from reservations.models import Reservation
 from reservations.services.pricing import PricingError, calculate_price_simulation
-from vehicles.services import AvailabilityValidationError
+from vehicles.services import AvailabilityValidationError, validate_daily_rental_period
 
 
 ALLOWED_CREATE_FIELDS = {"vehicle_id", "start_at", "end_at", "insurance_type"}
@@ -43,24 +46,18 @@ class ReservationCreateRequestSerializer(serializers.Serializer):
     start_at = serializers.DateTimeField(required=True)
     end_at = serializers.DateTimeField(required=True)
     insurance_type = serializers.ChoiceField(
-        choices=["STANDARD", "DUO", "OMNIUM"],
+        choices=["STANDARD", "COMPLEMENTAIRE"],
         required=False,
         default="STANDARD",
     )
 
-    @staticmethod
-    def _validate_hour_precision(value):
-        if value.minute != 0:
-            raise serializers.ValidationError(
-                "Les heures de reservation doivent etre a l'heure pleine (minutes = 00)."
-            )
-        return value
-
-    def validate_start_at(self, value):
-        return self._validate_hour_precision(value)
-
-    def validate_end_at(self, value):
-        return self._validate_hour_precision(value)
+    def validate(self, attrs):
+        try:
+            validate_daily_rental_period(start=attrs["start_at"], end=attrs["end_at"])
+        except AvailabilityValidationError as exc:
+            field = "start_at" if exc.code in {"START_IN_PAST", "START_NOT_AT_FIXED_HOUR"} else "end_at"
+            raise serializers.ValidationError({field: [str(exc)]}) from exc
+        return attrs
 
     def to_internal_value(self, data):
         if hasattr(data, "keys"):
@@ -86,9 +83,20 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
     insurance_type = serializers.CharField(read_only=True)
     deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     total_amount = serializers.SerializerMethodField()
+    is_daily_rate_booking = serializers.BooleanField(read_only=True)
     invoice_id = serializers.SerializerMethodField()
+    invoice_pdf_available = serializers.SerializerMethodField()
     actual_pickup_at = serializers.SerializerMethodField()
     actual_return_at = serializers.SerializerMethodField()
+    unlock_availability = serializers.SerializerMethodField()
+
+    def get_unlock_availability(self, obj):
+        if obj.status != Reservation.Status.CONFIRMEE:
+            return None
+        request = self.context.get("request")
+        if request is None:
+            return None
+        return get_unlock_availability(reservation=obj, requested_by=request.user)
 
     def get_total_amount(self, obj):
         try:
@@ -97,6 +105,7 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
                 start_at=obj.start_at,
                 end_at=obj.end_at,
                 insurance_type=obj.insurance_type,
+                is_daily_rate_booking=obj.is_daily_rate_booking,
             )
         except (PricingError, AvailabilityValidationError):
             return obj.rental_amount
@@ -108,6 +117,13 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
             return obj.invoice.id
         except Reservation.invoice.RelatedObjectDoesNotExist:
             return None
+
+    def get_invoice_pdf_available(self, obj):
+        try:
+            pdf = obj.invoice.pdf_file
+        except Reservation.invoice.RelatedObjectDoesNotExist:
+            return False
+        return bool(pdf and obj.invoice.status in {"ISSUED", "PAID"} and pdf.storage.exists(pdf.name))
 
     def get_actual_pickup_at(self, obj):
         try:
@@ -133,23 +149,37 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
             "vehicle",
             "start_at",
             "end_at",
+            "is_daily_rate_booking",
             "status",
             "rental_amount",
             "insurance_type",
             "deposit_amount",
             "total_amount",
             "invoice_id",
+            "invoice_pdf_available",
             "actual_pickup_at",
             "actual_return_at",
+            "unlock_availability",
             "created_at",
             "confirmed_at",
             "cancelled_at",
             "cancellation_reason",
+            "cancellation_source",
         ]
 
 
 class ReservationInspectionDetailSerializer(serializers.ModelSerializer):
     photos = InspectionPhotoReadSerializer(many=True, read_only=True)
+    damages = InspectionDamageReadSerializer(many=True, read_only=True)
+    return_access_secured = serializers.SerializerMethodField()
+
+    def get_return_access_secured(self, obj):
+        try:
+            access = obj.reservation.vehicle_access
+        except Reservation.vehicle_access.RelatedObjectDoesNotExist:
+            return False
+        return (access.lock_state == VehicleAccess.LockState.LOCKED
+                and access.status == VehicleAccess.Status.REVOKED and not access.is_active)
 
     class Meta:
         model = Inspection
@@ -163,6 +193,8 @@ class ReservationInspectionDetailSerializer(serializers.ModelSerializer):
             "started_at",
             "demo_key_check_completed_at",
             "photos",
+            "damages",
+            "return_access_secured",
         ]
 
 
@@ -210,7 +242,7 @@ class ReservationClientDetailSerializer(ReservationListDetailSerializer):
 # ==============================================================================
 
 
-ALLOWED_CANCEL_FIELDS = {"reason"}
+ALLOWED_CANCEL_FIELDS = {"reason", "confirm_no_refund"}
 FORBIDDEN_CANCEL_FIELDS = {
     "id",
     "reference",
@@ -229,6 +261,7 @@ FORBIDDEN_CANCEL_FIELDS = {
 
 class ReservationCancelRequestSerializer(serializers.Serializer):
     reason = serializers.CharField(required=True, allow_blank=False)
+    confirm_no_refund = serializers.BooleanField(required=False, default=False)
 
     def validate_reason(self, value):
         """Valide le motif d'annulation."""
@@ -279,6 +312,7 @@ class ReservationCancellationFinancialsSerializer(serializers.Serializer):
 
 class ReservationCancellationPreviewSerializer(serializers.Serializer):
     can_cancel = serializers.BooleanField(read_only=True)
+    no_refund = serializers.BooleanField(read_only=True)
     amount_paid = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     cancellation_fee = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     refundable_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)

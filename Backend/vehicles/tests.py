@@ -449,7 +449,7 @@ class VehiclePublicCatalogTests(VehicleTestDataMixin, TestCase):
 		conditions = detail_response.data["conditions"]
 		self.assertEqual(conditions["included_km_per_day"], 1000)
 		self.assertEqual(str(conditions["extra_km_price"]), "0.20")
-		self.assertEqual(str(conditions["minimum_deposit"]), "300.00")
+		self.assertEqual(str(conditions["minimum_deposit"]), "500.00")
 		self.assertEqual(conditions["minimum_age"], 21)
 		self.assertEqual(conditions["required_license"], "Permis B")
 		self.assertEqual(

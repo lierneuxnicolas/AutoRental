@@ -30,6 +30,7 @@ from inspections.services.return_inspection import (
 	create_return_inspection,
 	save_return_vehicle_state,
 )
+from interventions.services.vehicle_access import VehicleAccessError
 from reservations.models import Reservation
 from vehicles.constants import MAX_VEHICLE_MILEAGE
 
@@ -400,6 +401,8 @@ class DepartureInspectionCompleteView(generics.GenericAPIView):
 			if exc.details:
 				detail["details"] = exc.details
 			return Response(detail, status=status.HTTP_400_BAD_REQUEST)
+		except VehicleAccessError as exc:
+			return Response({"code": exc.code, "message": exc.message}, status=exc.http_status)
 
 		return Response(InspectionSummarySerializer(completed_inspection).data, status=status.HTTP_200_OK)
 
