@@ -173,8 +173,8 @@ export default function ManagerInterventionsPage() {
   }
 
   return (
-    <section className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-      <h1 className="text-2xl font-bold text-[#0F172A]">Interventions</h1>
+    <section className="mx-auto max-w-7xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
+      <h1 className="text-3xl font-semibold text-[#0F172A]">Liste des interventions</h1>
 
       {assignSuccessMessage ? (
         <Alert variant="success" title="Intervention assignée" message={assignSuccessMessage} />
@@ -246,18 +246,14 @@ export default function ManagerInterventionsPage() {
                     <p className="font-medium text-[#1F2937]">Réservation</p>
                     <p className="mt-1">{intervention.reservation ? intervention.reservation.reference : 'Aucune réservation liée'}</p>
                   </div>
-                  {assignedTo ? (
-                    <div>
-                      <p className="font-medium text-[#1F2937]">Assigné à</p>
-                      <p className="mt-1">{assignedTo}</p>
-                    </div>
-                  ) : null}
-                  {createdBy ? (
-                    <div>
-                      <p className="font-medium text-[#1F2937]">Créé par</p>
-                      <p className="mt-1">{createdBy}</p>
-                    </div>
-                  ) : null}
+                  <div>
+                    <p className="font-medium text-[#1F2937]">Personne affectée</p>
+                    <p className="mt-1">{assignedTo ?? 'Non affectée'}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-[#1F2937]">Créé par</p>
+                    <p className="mt-1">{createdBy ?? '—'}</p>
+                  </div>
                   <div>
                     <p className="font-medium text-[#1F2937]">Créé le</p>
                     <p className="mt-1">{formatDateTime(intervention.created_at)}</p>

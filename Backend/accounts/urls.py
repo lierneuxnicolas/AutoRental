@@ -21,6 +21,9 @@ from accounts.views import (
     ManagementClientDocumentListView,
     ManagementClientDocumentRejectView,
     ManagementClientDocumentValidateView,
+    ManagerUserDetailView,
+    ManagerUserListView,
+    ManagerUserStatusUpdateView,
 )
 
 app_name = "accounts"
@@ -40,6 +43,13 @@ urlpatterns = [
     path("auth/me/", MeView.as_view(), name="auth-me"),
     path("admin/users/", AdminUserListView.as_view(), name="admin-users"),
     path("admin/users/<int:pk>/status/", AdminUserStatusUpdateView.as_view(), name="admin-users-status"),
+    path("management/users/", ManagerUserListView.as_view(), name="management-users"),
+    path("management/users/<int:pk>/", ManagerUserDetailView.as_view(), name="management-users-detail"),
+    path(
+        "management/users/<int:pk>/status/",
+        ManagerUserStatusUpdateView.as_view(),
+        name="management-users-status",
+    ),
     path("users/me/", ClientProfileMeView.as_view(), name="users-me"),
     path("users/me/documents/", ClientDocumentListCreateView.as_view(), name="users-me-documents"),
     path(

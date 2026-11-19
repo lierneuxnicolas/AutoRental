@@ -72,4 +72,5 @@ export interface ManagementDocumentListQueryParams {
   ordering?: string
   page?: number
   search?: string
+  user_id?: number
 }

@@ -55,6 +55,7 @@ import ManagerVehiclePhotosPage from '../pages/manager/ManagerVehiclePhotosPage'
 import ManagerReservationsPage from '../pages/manager/ManagerReservationsPage'
 import ManagerReservationDetailPage from '../pages/manager/ManagerReservationDetailPage'
 import ManagerInterventionsPage from '../pages/manager/ManagerInterventionsPage'
+import ManagerUsersPage from '../pages/manager/ManagerUsersPage'
 import ManagerInterventionReportsPage from '../pages/manager/ManagerInterventionReportsPage'
 import CleaningInterventionDetailPage from '../pages/cleaning/CleaningInterventionDetailPage'
 import CleaningInterventionsPage from '../pages/cleaning/CleaningInterventionsPage'
@@ -457,6 +458,10 @@ export default function AppRouter() {
             <Route
               path="interventions"
               element={<ManagerInterventionsPage />}
+            />
+            <Route
+              path="users"
+              element={<ManagerUsersPage />}
             />
             <Route
               path="interventions/reports"

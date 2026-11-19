@@ -37,6 +37,7 @@ const roleConfigs: Record<string, RoleConfig> = {
       { label: 'Gestion des véhicules', to: '/manager/vehicles' },
       { label: 'Gestion des réservations', to: '/manager/reservations' },
       { label: 'Liste des interventions', to: '/manager/interventions' },
+      { label: 'Utilisateurs', to: '/manager/users' },
     ],
   },
   ADMINISTRATEUR: {

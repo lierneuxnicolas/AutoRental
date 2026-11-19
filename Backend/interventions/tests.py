@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 import json
 import os
@@ -1356,16 +1356,16 @@ class InterventionManagementApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(intervention.decision_comment, "Anomalie à contrôler")
 
 	def _plan_payload(self, *, intervention_type=Intervention.Type.MECANIQUE, start_at=None, end_at=None, assigned_user_id=None):
-		start = (start_at or timezone.now() + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
-		end = end_at or start + timedelta(hours=3)
+		start_date = (start_at or timezone.now() + timedelta(days=2)).date()
+		end_date = (end_at or start_at or timezone.now() + timedelta(days=2)).date()
 		return {
 			"vehicle_id": self.vehicle_3.id,
 			"type": intervention_type,
 			"assigned_user_id": assigned_user_id or (
 				self.mechanic_user_1.id if intervention_type == Intervention.Type.MECANIQUE else self.cleaner_user_1.id
 			),
-			"planned_start_at": start.isoformat(),
-			"planned_end_at": end.isoformat(),
+			"planned_start_date": start_date.isoformat(),
+			"planned_end_date": end_date.isoformat(),
 			"description": "Intervention planifiée",
 		}
 
@@ -1381,6 +1381,45 @@ class InterventionManagementApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertIsNotNone(intervention.planned_start_at)
 		self.assertIsNotNone(intervention.planned_end_at)
 		self.assertEqual(self.vehicle_3.status, Vehicle.Status.DISPONIBLE)
+
+	def test_plan_allows_single_day_with_fixed_hours(self):
+		start = (timezone.localdate() + timedelta(days=2))
+		self.client_api.force_authenticate(self.manager_user)
+		response = self.client_api.post(
+			"/api/v1/management/interventions/plan/",
+			{
+				"vehicle_id": self.vehicle_3.id,
+				"type": Intervention.Type.MECANIQUE,
+				"assigned_user_id": self.mechanic_user_1.id,
+				"planned_start_date": start.isoformat(),
+				"planned_end_date": start.isoformat(),
+				"description": "Intervention sur une journée",
+			},
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		intervention = Intervention.objects.get(pk=response.data["id"])
+		self.assertEqual(timezone.localtime(intervention.planned_start_at).date(), start)
+		self.assertEqual(timezone.localtime(intervention.planned_start_at).strftime("%H:%M"), "10:00")
+		self.assertEqual(timezone.localtime(intervention.planned_end_at).date(), start)
+		self.assertEqual(timezone.localtime(intervention.planned_end_at).strftime("%H:%M"), "22:00")
+
+	def test_plan_rejects_manager_supplied_custom_hours(self):
+		start = timezone.localdate() + timedelta(days=2)
+		self.client_api.force_authenticate(self.manager_user)
+
+		response = self.client_api.post(
+			"/api/v1/management/interventions/plan/",
+			{
+				**self._plan_payload(start_at=timezone.make_aware(datetime.combine(start, datetime.min.time()))),
+				"planned_start_at": "2026-04-04T11:00:00+02:00",
+			},
+			format="json",
+		)
+
+		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertIn("non_field_errors", response.data)
 
 	def test_manager_is_notified_once_when_mechanical_intervention_overruns_reservation(self):
 		now = timezone.now()
@@ -1482,7 +1521,10 @@ class InterventionManagementApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(Intervention.objects.filter(vehicle=self.vehicle_3).count(), 1)
 
 	def test_plan_allows_reservation_ending_at_planned_start(self):
-		start = (timezone.now() + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
+		start = timezone.make_aware(
+			datetime.combine(timezone.localdate() + timedelta(days=2), datetime.min.time()).replace(hour=10),
+			timezone.get_current_timezone(),
+		)
 		self._create_reservation(
 			vehicle=self.vehicle_3,
 			status=Reservation.Status.CONFIRMEE,
@@ -1499,8 +1541,11 @@ class InterventionManagementApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
 	def test_plan_allows_reservation_starting_at_planned_end(self):
-		start = (timezone.now() + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
-		end = start + timedelta(hours=3)
+		start = timezone.make_aware(
+			datetime.combine(timezone.localdate() + timedelta(days=2), datetime.min.time()).replace(hour=10),
+			timezone.get_current_timezone(),
+		)
+		end = start.replace(hour=22)
 		self._create_reservation(
 			vehicle=self.vehicle_3,
 			status=Reservation.Status.CONFIRMEE,
@@ -1517,20 +1562,23 @@ class InterventionManagementApiTests(VehicleAccessTestDataMixin, TestCase):
 		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
 	def test_plan_rejects_invalid_period_and_missing_assignee(self):
-		start = timezone.now() + timedelta(days=2)
+		start = timezone.localdate() + timedelta(days=2)
 		self.client_api.force_authenticate(self.manager_user)
 
 		invalid_period = self.client_api.post(
 			"/api/v1/management/interventions/plan/",
-			self._plan_payload(start_at=start, end_at=start - timedelta(hours=1)),
+			{
+				**self._plan_payload(start_at=timezone.make_aware(datetime.combine(start, datetime.min.time()))),
+				"planned_end_date": (start - timedelta(days=1)).isoformat(),
+			},
 			format="json",
 		)
-		payload = self._plan_payload(start_at=start, end_at=start + timedelta(hours=1))
+		payload = self._plan_payload(start_at=timezone.make_aware(datetime.combine(start, datetime.min.time())))
 		payload.pop("assigned_user_id")
 		missing_assignee = self.client_api.post("/api/v1/management/interventions/plan/", payload, format="json")
 
 		self.assertEqual(invalid_period.status_code, status.HTTP_400_BAD_REQUEST)
-		self.assertIn("planned_end_at", invalid_period.data)
+		self.assertIn("planned_end_date", invalid_period.data)
 		self.assertEqual(missing_assignee.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertIn("assigned_user_id", missing_assignee.data)
 

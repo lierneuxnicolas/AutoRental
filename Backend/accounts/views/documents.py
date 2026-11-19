@@ -213,6 +213,14 @@ class ManagementClientDocumentListView(generics.ListAPIView):
         status_param = self.request.query_params.get("status")
         is_active_param = self.request.query_params.get("is_active")
         search = self.request.query_params.get("search")
+        user_id = self.request.query_params.get("user_id")
+
+        if user_id is not None:
+            try:
+                user_id = int(user_id)
+            except ValueError as error:
+                raise ValidationError({"user_id": "Veuillez fournir un identifiant utilisateur valide."}) from error
+            queryset = queryset.filter(client__user_id=user_id)
 
         if document_type:
             queryset = queryset.filter(document_type=document_type)

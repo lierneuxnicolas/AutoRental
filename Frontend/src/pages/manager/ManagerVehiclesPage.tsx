@@ -495,7 +495,7 @@ function VehicleMobileCard({ vehicle, operationalState, onPlanIntervention, onTo
             <img
               src={mainPhotoUrl}
               alt={`${vehicle.brand} ${vehicle.model_name}`}
-              className="h-20 w-28 rounded-2xl border border-[#E5E7EB] object-cover"
+              className="h-20 w-28 shrink-0 rounded-2xl border border-[#E5E7EB] bg-white object-contain"
               loading="lazy"
             />
           ) : (
@@ -505,7 +505,7 @@ function VehicleMobileCard({ vehicle, operationalState, onPlanIntervention, onTo
           )}
 
           <div className="min-w-0 flex-1">
-            <p className="text-base font-semibold text-[#0F172A]">
+            <p className="break-words text-base font-semibold text-[#0F172A]">
               {vehicle.brand} {vehicle.model_name}
             </p>
             <p className="text-sm text-slate-500">{vehicle.category}</p>
@@ -549,7 +549,7 @@ function VehicleDesktopRow({ vehicle, operationalState, onPlanIntervention, onTo
           <img
             src={mainPhotoUrl}
             alt={`${vehicle.brand} ${vehicle.model_name}`}
-            className="h-14 w-20 rounded-xl border border-[#E5E7EB] object-cover"
+            className="h-14 w-20 rounded-xl border border-[#E5E7EB] bg-white object-contain"
             loading="lazy"
           />
         ) : (
@@ -558,24 +558,24 @@ function VehicleDesktopRow({ vehicle, operationalState, onPlanIntervention, onTo
           </div>
         )}
       </td>
-      <td className="px-4 py-3 text-sm text-[#1F2937]">
-        <p className="whitespace-nowrap font-medium">{vehicle.brand} {vehicle.model_name}</p>
-        <p className="text-slate-500">{vehicle.category}</p>
+      <td className="max-w-48 px-4 py-3 text-sm text-[#1F2937]">
+        <p className="break-words font-medium">{vehicle.brand} {vehicle.model_name}</p>
+        <p className="break-words text-slate-500">{vehicle.category}</p>
       </td>
-      <td className="px-4 py-3 text-sm text-[#1F2937]">{registrationNumber ?? '—'}</td>
+      <td className="max-w-36 break-words px-4 py-3 text-sm text-[#1F2937]">{registrationNumber ?? '—'}</td>
       <td className="px-4 py-3">
         <OperationalStateDisplay state={operationalState} compact />
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-sm text-[#1F2937]">
+      <td className="max-w-48 break-words px-4 py-3 text-sm text-[#1F2937]">
         {getParkingLabel(vehicle)}
       </td>
       <td className="px-4 py-3">
-        <div className="flex flex-nowrap gap-2">
-          <Link to={`${basePath}/vehicles/${vehicle.id}/edit`}>
+        <div className="flex flex-wrap gap-2">
+          <Link className="shrink-0" to={`${basePath}/vehicles/${vehicle.id}/edit`}>
             <Button variant="secondary" size="sm">Modifier</Button>
           </Link>
-          <Button variant="secondary" size="sm" disabled={!planningEnabled} onClick={() => onPlanIntervention(vehicle)}>Planifier une intervention</Button>
-          <Button variant={vehicle.is_active ? 'danger' : 'success'} className={vehicle.is_active ? 'min-w-[10.5rem] whitespace-nowrap border border-[#EF4444] bg-[#FCA5A5] text-[#111111] hover:bg-[#F87171]' : 'min-w-[10.5rem] whitespace-nowrap border border-[#22C55E] bg-[#86EFAC] text-[#111111] hover:bg-[#4ADE80]'} size="sm" onClick={() => onToggleActive(vehicle)}>{vehicle.is_active ? 'Retirer du service' : 'Réactiver'}</Button>
+          <Button variant="secondary" className="h-auto min-h-9 max-w-52 whitespace-normal py-2 text-center leading-4" size="sm" disabled={!planningEnabled} onClick={() => onPlanIntervention(vehicle)}>Planifier une intervention</Button>
+          <Button variant={vehicle.is_active ? 'danger' : 'success'} className={vehicle.is_active ? 'h-auto min-h-9 min-w-[8.5rem] max-w-36 whitespace-normal border border-[#EF4444] bg-[#FCA5A5] py-2 text-center leading-4 text-[#111111] hover:bg-[#F87171]' : 'h-auto min-h-9 min-w-[8.5rem] max-w-36 whitespace-normal border border-[#22C55E] bg-[#86EFAC] py-2 text-center leading-4 text-[#111111] hover:bg-[#4ADE80]'} size="sm" onClick={() => onToggleActive(vehicle)}>{vehicle.is_active ? 'Retirer du service' : 'Réactiver'}</Button>
         </div>
       </td>
     </tr>
@@ -758,8 +758,8 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
 
   const handleSubmitStatus = async (payload: VehicleManagementStatusUpdateRequest & {
     assigned_user_id?: number
-    planned_start_at?: string
-    planned_end_at?: string
+    planned_start_date?: string
+    planned_end_date?: string
   }) => {
     if (!selectedVehicle) {
       return
@@ -771,7 +771,7 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
         ? 'NETTOYAGE'
         : null
 
-    if (interventionType && (!payload.assigned_user_id || !payload.planned_start_at || !payload.planned_end_at || !payload.reason)) {
+    if (interventionType && (!payload.assigned_user_id || !payload.planned_start_date || !payload.planned_end_date || !payload.reason)) {
       setStatusApiError('L’intervenant, la période prévue et le motif sont obligatoires.')
       return
     }
@@ -782,15 +782,16 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
 
     try {
       let assignedInterventionReference: string | null = null
-      let updatedStatus = payload.status
+      let updatedStatus: VehicleManagementStatus = payload.status
+        ?? (interventionType === 'NETTOYAGE' ? 'NETTOYAGE' : 'MAINTENANCE')
 
-      if (interventionType && payload.assigned_user_id && payload.planned_start_at && payload.planned_end_at) {
+      if (interventionType && payload.assigned_user_id && payload.planned_start_date && payload.planned_end_date) {
         const intervention = await planInterventionMutation.mutateAsync({
           vehicle_id: selectedVehicle.id,
           type: interventionType,
           assigned_user_id: payload.assigned_user_id,
-          planned_start_at: payload.planned_start_at,
-          planned_end_at: payload.planned_end_at,
+          planned_start_date: payload.planned_start_date,
+          planned_end_date: payload.planned_end_date,
           description: payload.reason ?? '',
         })
         assignedInterventionReference = intervention.reference
@@ -831,7 +832,7 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
           const conflict = data.intervention as { planned_start_at?: string; planned_end_at?: string; reference?: string }
           setStatusApiError(
             `${data.detail ?? 'Créneau indisponible'}${conflict.reference ? ` (${conflict.reference})` : ''}`
-              + (conflict.planned_start_at && conflict.planned_end_at ? ` ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflict.planned_start_at))} → ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflict.planned_end_at))}` : ''),
+              + (typeof conflict.planned_start_at === 'string' && typeof conflict.planned_end_at === 'string' ? ` ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflict.planned_start_at))} → ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflict.planned_end_at))}` : ''),
           )
           return
         }
@@ -1088,7 +1089,7 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
 
       {!vehiclesQuery.isLoading && !vehiclesQuery.isError && vehicles.length > 0 ? (
         <>
-          <div className="flex flex-col gap-4 lg:hidden">
+          <div className="flex flex-col gap-4 xl:hidden">
             {vehicles.map((vehicle) => {
               const pendingValidation = getPendingValidation(vehicle, interventions)
               const operationalState = getOperationalState(vehicle, interventions, reservations, pendingValidation)
@@ -1109,8 +1110,8 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
             })}
           </div>
 
-          <div className="hidden overflow-hidden rounded-3xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)] lg:block">
-            <table className="w-full border-collapse text-left">
+          <div className="hidden overflow-x-auto rounded-3xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)] xl:block">
+            <table className="w-full min-w-[1120px] border-collapse text-left">
               <thead className="border-b border-[#E5E7EB] bg-[#F8FAFC]">
                 <tr>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Photo</th>
@@ -1118,7 +1119,7 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Immatriculation</th>
                   <th className="min-w-[8.5rem] whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">État actuel</th>
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Parking / place</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</th>
+                  <th className="w-[30rem] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody>

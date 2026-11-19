@@ -17,6 +17,7 @@ export interface InterventionVehicleSummary {
   brand: string
   model_name: string
   color: string
+  status: string
   parking_name?: string | null
   parking_space_number?: string | null
 }
@@ -57,8 +58,8 @@ export interface ManagementInterventionPlanRequest {
   vehicle_id: number
   type: InterventionType
   assigned_user_id: number
-  planned_start_at: string
-  planned_end_at: string
+  planned_start_date: string
+  planned_end_date: string
   description: string
 }
 

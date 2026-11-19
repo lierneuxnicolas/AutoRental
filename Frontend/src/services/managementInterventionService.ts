@@ -60,7 +60,7 @@ export async function planManagementIntervention(
 
 export async function decideManagementIntervention(
   id: number,
-  payload: { decision: InterventionDecision; comment?: string; assigned_user_id?: number; planned_start_at?: string; planned_end_at?: string; description?: string },
+  payload: { decision: InterventionDecision; comment?: string; assigned_user_id?: number; planned_start_date?: string; planned_end_date?: string; description?: string },
 ): Promise<ManagementInterventionResponse> {
   const { data } = await api.post<ManagementInterventionResponse>(`/management/interventions/${id}/decision/`, payload)
   return data

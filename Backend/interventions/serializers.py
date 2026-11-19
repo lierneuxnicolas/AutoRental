@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, time
+
+from django.utils import timezone
 
 from rest_framework import serializers
 
@@ -41,22 +44,67 @@ class InterventionDecisionSerializer(serializers.Serializer):
     decision = serializers.ChoiceField(choices=Intervention.Decision.choices)
     comment = serializers.CharField(required=False, allow_blank=True, default="")
     assigned_user_id = serializers.IntegerField(required=False, min_value=1)
-    planned_start_at = serializers.DateTimeField(required=False)
-    planned_end_at = serializers.DateTimeField(required=False)
+    planned_start_date = serializers.DateField(required=False)
+    planned_end_date = serializers.DateField(required=False)
     description = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        planning_decisions = {
+            Intervention.Decision.PLAN_MAINTENANCE,
+            Intervention.Decision.PLAN_CLEANING,
+        }
+        if attrs["decision"] not in planning_decisions:
+            return attrs
+        if "planned_start_at" in self.initial_data or "planned_end_at" in self.initial_data:
+            raise serializers.ValidationError(
+                "Les horaires ne sont pas modifiables ; veuillez fournir uniquement les dates."
+            )
+        start_date = attrs.pop("planned_start_date", None)
+        end_date = attrs.pop("planned_end_date", None)
+        if start_date is None or end_date is None:
+            raise serializers.ValidationError({"planned_end_date": "Les dates prévues sont obligatoires."})
+        if end_date < start_date:
+            raise serializers.ValidationError(
+                {"planned_end_date": "La date de fin prévue ne peut pas être antérieure à la date de début."}
+            )
+        current_timezone = timezone.get_current_timezone()
+        attrs["planned_start_at"] = timezone.make_aware(
+            datetime.combine(start_date, time(10, 0)),
+            current_timezone,
+        )
+        attrs["planned_end_at"] = timezone.make_aware(
+            datetime.combine(end_date, time(22, 0)),
+            current_timezone,
+        )
+        return attrs
 
 
 class InterventionManagementPlanSerializer(serializers.Serializer):
     vehicle_id = serializers.IntegerField(min_value=1)
     type = serializers.ChoiceField(choices=Intervention.Type.choices, source="intervention_type")
     assigned_user_id = serializers.IntegerField(min_value=1)
-    planned_start_at = serializers.DateTimeField()
-    planned_end_at = serializers.DateTimeField()
+    planned_start_date = serializers.DateField()
+    planned_end_date = serializers.DateField()
     description = serializers.CharField(allow_blank=False, trim_whitespace=True)
 
     def validate(self, attrs):
-        if attrs["planned_start_at"].minute not in {0, 30}:
-            raise serializers.ValidationError({"planned_start_at": "Veuillez choisir un horaire par tranche de 30 minutes."})
+        if "planned_start_at" in self.initial_data or "planned_end_at" in self.initial_data:
+            raise serializers.ValidationError(
+                "Les horaires ne sont pas modifiables ; veuillez fournir uniquement les dates."
+            )
+        start_date = attrs.pop("planned_start_date")
+        end_date = attrs.pop("planned_end_date")
+        if end_date < start_date:
+            raise serializers.ValidationError({"planned_end_date": "La date de fin prévue ne peut pas être antérieure à la date de début."})
+        current_timezone = timezone.get_current_timezone()
+        attrs["planned_start_at"] = timezone.make_aware(
+            datetime.combine(start_date, time(10, 0)),
+            current_timezone,
+        )
+        attrs["planned_end_at"] = timezone.make_aware(
+            datetime.combine(end_date, time(22, 0)),
+            current_timezone,
+        )
         if attrs["planned_end_at"] <= attrs["planned_start_at"]:
             raise serializers.ValidationError({"planned_end_at": "La fin prévue doit être postérieure au début prévu."})
         return attrs
@@ -84,6 +132,7 @@ class InterventionVehicleSummarySerializer(serializers.Serializer):
     brand = serializers.CharField(source="brand.name", read_only=True)
     model_name = serializers.CharField(read_only=True)
     color = serializers.CharField(read_only=True)
+    status = serializers.CharField(read_only=True)
     parking_name = serializers.CharField(source="parking_space.parking.name", read_only=True)
     parking_space_number = serializers.CharField(source="parking_space.number", read_only=True)
 

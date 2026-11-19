@@ -9,6 +9,7 @@ from .auth import (
 	VerifyEmailView,
 )
 from .admin_users import AdminUserListView, AdminUserStatusUpdateView
+from .manager_users import ManagerUserDetailView, ManagerUserListView, ManagerUserStatusUpdateView
 from .documents import (
 	ClientDocumentDetailView,
 	ClientDocumentFileView,
@@ -32,6 +33,9 @@ __all__ = [
 	"PasswordResetConfirmView",
 	"AdminUserListView",
 	"AdminUserStatusUpdateView",
+	"ManagerUserListView",
+	"ManagerUserDetailView",
+	"ManagerUserStatusUpdateView",
 	"ClientDocumentListCreateView",
 	"ClientDocumentDetailView",
 	"ClientDocumentFileView",

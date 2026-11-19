@@ -7,58 +7,15 @@ import EmptyState from '../../components/feedback/EmptyState'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
-import Input from '../../components/ui/Input'
 import StatusBadge from '../../components/ui/StatusBadge'
 import { getInvoiceDownload } from '../../services/invoiceService'
 import { cancelManagementReservation, getManagementReservations } from '../../services/managementReservationService'
-import type {
-  ManagementReservationListQueryParams,
-  ReservationManagementDetail,
-} from '../../types/managementReservation'
+import type { ManagementReservationListQueryParams, ReservationManagementDetail } from '../../types/managementReservation'
 import { resolveMediaUrl } from '../../utils/media'
 import { getReservationStatusUi } from '../../utils/reservationStatus'
 
 interface ManagerReservationsPageProps {
   basePath?: string
-}
-
-type ReservationFilter =
-  | ''
-  | 'CONFIRMEE'
-  | 'REAFFECTATION_REQUIRED'
-  | 'EN_COURS'
-  | 'A_CONTROLER'
-  | 'TERMINEE'
-  | 'NON_UTILISEE'
-  | 'ANNULEE_CLIENT'
-  | 'ANNULEE_GESTIONNAIRE'
-
-const statusFilters: Array<{ value: ReservationFilter; label: string }> = [
-  { value: '', label: 'Tous les statuts' },
-  { value: 'CONFIRMEE', label: 'Confirmée' },
-  { value: 'REAFFECTATION_REQUIRED', label: 'À réaffecter' },
-  { value: 'EN_COURS', label: 'En cours' },
-  { value: 'A_CONTROLER', label: 'À contrôler' },
-  { value: 'TERMINEE', label: 'Terminée' },
-  { value: 'NON_UTILISEE', label: 'Non utilisée' },
-  { value: 'ANNULEE_CLIENT', label: 'Annulée par le client' },
-  { value: 'ANNULEE_GESTIONNAIRE', label: 'Annulée par le gestionnaire' },
-]
-
-interface ReservationFilters {
-  search: string
-  status: ReservationFilter
-  startDate: string
-  endDate: string
-  vehicleSearch: string
-}
-
-const emptyFilters: ReservationFilters = {
-  search: '',
-  status: '',
-  startDate: '',
-  endDate: '',
-  vehicleSearch: '',
 }
 
 const actionButtonClassName = 'shrink-0 whitespace-nowrap px-2.5! text-[13px]!'
@@ -128,8 +85,6 @@ function Period({ reservation }: { reservation: ReservationManagementDetail }) {
 
 export default function ManagerReservationsPage({ basePath = '/manager' }: ManagerReservationsPageProps) {
   const queryClient = useQueryClient()
-  const [draftFilters, setDraftFilters] = useState<ReservationFilters>(emptyFilters)
-  const [appliedFilters, setAppliedFilters] = useState<ReservationFilters>(emptyFilters)
   const [page, setPage] = useState(1)
   const [downloadingInvoiceForId, setDownloadingInvoiceForId] = useState<number | null>(null)
   const [invoiceDownloadError, setInvoiceDownloadError] = useState<string | null>(null)
@@ -138,16 +93,8 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
 
   const queryParams = useMemo<ManagementReservationListQueryParams>(() => ({
     page,
-    search: appliedFilters.search.trim() || undefined,
-    status: appliedFilters.status.startsWith('ANNULEE_') ? 'ANNULEE' : appliedFilters.status || undefined,
-    cancellation_source: appliedFilters.status === 'ANNULEE_CLIENT'
-      ? 'CLIENT'
-      : appliedFilters.status === 'ANNULEE_GESTIONNAIRE' ? 'GESTIONNAIRE' : undefined,
-    start_at_from: appliedFilters.startDate ? `${appliedFilters.startDate}T00:00:00` : undefined,
-    end_at_to: appliedFilters.endDate ? `${appliedFilters.endDate}T23:59:59` : undefined,
-    vehicle_search: appliedFilters.vehicleSearch.trim() || undefined,
     ordering: '-created_at',
-  }), [appliedFilters, page])
+  }), [page])
 
   const reservationsQuery = useQuery({
     queryKey: ['manager-reservations', queryParams],
@@ -171,24 +118,6 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
   )
 
   const totalPages = Math.max(1, Math.ceil((reservationsQuery.data?.count ?? 0) / 20))
-  const hasAppliedFilters = Object.values(appliedFilters).some((value) => Boolean(value.trim()))
-
-  const updateDraftFilter = <Key extends keyof ReservationFilters>(key: Key, value: ReservationFilters[Key]) => {
-    setDraftFilters((current) => ({ ...current, [key]: value }))
-  }
-
-  const handleFilterSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setPage(1)
-    setAppliedFilters(draftFilters)
-  }
-
-  const handleReset = () => {
-    setDraftFilters(emptyFilters)
-    setAppliedFilters(emptyFilters)
-    setPage(1)
-  }
-
   const handleInvoiceDownload = async (reservation: ReservationManagementDetail) => {
     if (!reservation.invoice_id || downloadingInvoiceForId !== null) return
 
@@ -212,54 +141,10 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
   }
 
   return (
-    <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+    <section className="mx-auto max-w-7xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
       <div>
         <h1 className="text-3xl font-semibold text-[#0F172A]">Gestion des réservations</h1>
       </div>
-
-      <Card className="rounded-2xl [&>div]:px-4 [&>div]:py-3 sm:[&>div]:px-5">
-        <form onSubmit={handleFilterSubmit} className="space-y-2.5">
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_240px]">
-            <Input
-              type="search"
-              label="Recherche"
-              placeholder="Référence, client, véhicule ou immatriculation"
-              value={draftFilters.search}
-              onChange={(event) => updateDraftFilter('search', event.target.value)}
-              className="h-10 rounded-xl px-3 py-2 text-sm"
-            />
-            <div className="space-y-1.5">
-              <label htmlFor="reservation-status-filter" className="block text-sm font-medium text-[#1F2937]">Statut</label>
-              <select
-                id="reservation-status-filter"
-                value={draftFilters.status}
-                onChange={(event) => updateDraftFilter('status', event.target.value as ReservationFilter)}
-                className="block h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3 text-sm text-[#1F2937] shadow-sm outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-              >
-                {statusFilters.map((filter) => <option key={filter.value || 'all'} value={filter.value}>{filter.label}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <Input type="date" label="Date début" className="h-10 rounded-xl px-3 py-2 text-sm" value={draftFilters.startDate} onChange={(event) => updateDraftFilter('startDate', event.target.value)} />
-            <Input type="date" label="Date fin" className="h-10 rounded-xl px-3 py-2 text-sm" value={draftFilters.endDate} onChange={(event) => updateDraftFilter('endDate', event.target.value)} />
-            <Input
-              type="search"
-              label="Véhicule / immatriculation"
-              placeholder="Renault Rafale ou GAC-RAF-001"
-              value={draftFilters.vehicleSearch}
-              onChange={(event) => updateDraftFilter('vehicleSearch', event.target.value)}
-              className="h-10 rounded-xl px-3 py-2 text-sm"
-            />
-          </div>
-
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="secondary" size="sm" onClick={handleReset}>Réinitialiser</Button>
-            <Button type="submit" size="sm">Rechercher</Button>
-          </div>
-        </form>
-      </Card>
 
       {reservationsQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
@@ -279,17 +164,17 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
         <Alert variant="danger" title="Téléchargement impossible" message={invoiceDownloadError} />
       ) : null}
 
-      {!reservationsQuery.isLoading && !reservationsQuery.isError && reservations.length === 0 ? (
-        <EmptyState
-          title={hasAppliedFilters ? 'Aucune réservation correspondante' : 'Aucune réservation'}
-          description={hasAppliedFilters ? 'Aucune réservation ne correspond aux filtres appliqués.' : 'Il n’y a actuellement aucune réservation à afficher.'}
-        />
-      ) : null}
-
-      {!reservationsQuery.isLoading && !reservationsQuery.isError && reservations.length > 0 ? (
+      {!reservationsQuery.isLoading && !reservationsQuery.isError ? (
         <p className="text-sm text-slate-600">
           {reservationsQuery.data?.count ?? 0} résultat{(reservationsQuery.data?.count ?? 0) > 1 ? 's' : ''}
         </p>
+      ) : null}
+
+      {!reservationsQuery.isLoading && !reservationsQuery.isError && reservations.length === 0 ? (
+        <EmptyState
+          title="Aucune réservation"
+          description="Il n’y a actuellement aucune réservation à afficher."
+        />
       ) : null}
 
       {!reservationsQuery.isLoading

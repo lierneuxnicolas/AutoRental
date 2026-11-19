@@ -27,8 +27,8 @@ export interface VehicleStatusFormProps {
   isLoadingAssignees?: boolean
   onSubmit: (payload: VehicleManagementStatusUpdateRequest & {
     assigned_user_id?: number
-    planned_start_at?: string
-    planned_end_at?: string
+    planned_start_date?: string
+    planned_end_date?: string
   }) => Promise<void> | void
   onCancel: () => void
   isSubmitting?: boolean
@@ -45,12 +45,6 @@ function getPersonLabel(person: InterventionAssignableUser): string {
   const fullName = `${person.first_name} ${person.last_name}`.trim()
   return fullName.length > 0 ? fullName : person.email
 }
-
-const halfHourOptions = Array.from({ length: 48 }, (_, index) => {
-  const hour = String(Math.floor(index / 2)).padStart(2, '0')
-  const minute = index % 2 === 0 ? '00' : '30'
-  return { value: `${hour}:${minute}`, label: `${hour}:${minute}` }
-})
 
 const blockingInterventionStatuses = new Set([
   'A_ATTRIBUER',
@@ -80,9 +74,7 @@ export default function VehicleStatusForm({
   const [reason, setReason] = useState('')
   const [assignedUserId, setAssignedUserId] = useState('')
   const [plannedDate, setPlannedDate] = useState('')
-  const [plannedTime, setPlannedTime] = useState('')
   const [plannedEndDate, setPlannedEndDate] = useState('')
-  const [plannedEndTime, setPlannedEndTime] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
   const [agendaReferenceTime] = useState(() => Date.now())
 
@@ -103,8 +95,8 @@ export default function VehicleStatusForm({
     { value: '', label: isLoadingAssignees ? 'Chargement...' : 'Sélectionner une personne' },
     ...filteredAssignees.map((assignee) => ({ value: String(assignee.id), label: getPersonLabel(assignee) })),
   ]
-  const plannedStartAt = plannedDate && plannedTime ? `${plannedDate}T${plannedTime}` : ''
-  const plannedEndAt = plannedEndDate && plannedEndTime ? `${plannedEndDate}T${plannedEndTime}` : ''
+  const plannedStartAt = plannedDate ? new Date(`${plannedDate}T10:00:00`) : null
+  const plannedEndAt = plannedEndDate ? new Date(`${plannedEndDate}T22:00:00`) : null
   const selectedVehicleId = vehicleId === undefined ? null : Number(vehicleId)
   const agendaItems = useMemo(() => {
     if (selectedVehicleId === null) {
@@ -145,12 +137,11 @@ export default function VehicleStatusForm({
     return [...reservationItems, ...interventionItems]
       .sort((left, right) => new Date(left.startAt).getTime() - new Date(right.startAt).getTime())
   }, [agendaReferenceTime, interventions, reservations, selectedVehicleId])
-  const conflictingReservation = plannedStartAt && plannedEndAt
-    ? agendaItems.find((item) => item.kind === 'reservation' && new Date(item.startAt) < new Date(plannedEndAt) && new Date(item.endAt) > new Date(plannedStartAt))?.reservation
+  const agendaConflict = plannedStartAt && plannedEndAt
+    ? agendaItems.find((item) => new Date(item.startAt) < plannedEndAt && new Date(item.endAt) > plannedStartAt)
     : undefined
-  const conflictingIntervention = !conflictingReservation && plannedStartAt && plannedEndAt
-    ? agendaItems.find((item) => item.kind === 'intervention' && new Date(item.startAt) < new Date(plannedEndAt) && new Date(item.endAt) > new Date(plannedStartAt))?.intervention
-    : undefined
+  const conflictingReservation = agendaConflict?.kind === 'reservation' ? agendaConflict.reservation : undefined
+  const conflictingIntervention = agendaConflict?.kind === 'intervention' ? agendaConflict.intervention : undefined
   const hasImmediateConflict = Boolean(conflictingReservation || conflictingIntervention)
   const conflictStart = conflictingReservation?.start_at ?? conflictingIntervention?.planned_start_at
   const conflictEnd = conflictingReservation?.end_at ?? conflictingIntervention?.planned_end_at
@@ -168,8 +159,8 @@ export default function VehicleStatusForm({
         setLocalError('Le début prévu et la fin prévue sont obligatoires.')
         return
       }
-      if (!plannedEndAt || new Date(plannedEndAt).getTime() <= new Date(plannedStartAt).getTime()) {
-        setLocalError('La fin prévue doit être après le début prévu.')
+      if (plannedEndDate < plannedDate) {
+        setLocalError('La date de fin prévue ne peut pas être antérieure à la date de début.')
         return
       }
       if (hasImmediateConflict) {
@@ -188,13 +179,13 @@ export default function VehicleStatusForm({
       status,
       reason: reason.trim() || undefined,
       assigned_user_id: assignedUserId ? Number(assignedUserId) : undefined,
-      planned_start_at: plannedStartAt ? new Date(plannedStartAt).toISOString() : undefined,
-      planned_end_at: plannedEndAt ? new Date(plannedEndAt).toISOString() : undefined,
+      planned_start_date: plannedDate || undefined,
+      planned_end_date: plannedEndDate || undefined,
     })
   }
 
   return (
-    <Card className="border-[#DBEAFE] bg-[#F8FAFC]" header={<h2 className="text-base font-semibold text-[#1F2937]">Changer le statut</h2>}>
+    <Card className="border-[#DBEAFE] bg-[#F8FAFC]" header={<h2 className="text-base font-semibold text-[#1F2937]">Planifier une intervention</h2>}>
       <div className="space-y-3">
         <div className="text-sm">
           <div>
@@ -217,9 +208,7 @@ export default function VehicleStatusForm({
                     setStatus(event.target.value as VehicleManagementStatus)
                     setAssignedUserId('')
                     setPlannedDate('')
-                    setPlannedTime('')
                     setPlannedEndDate('')
-                    setPlannedEndTime('')
                     setLocalError(null)
                   }}
                   disabled={isSubmitting}
@@ -234,9 +223,7 @@ export default function VehicleStatusForm({
                   setStatus(event.target.value as VehicleManagementStatus)
                   setAssignedUserId('')
                   setPlannedDate('')
-                  setPlannedTime('')
                   setPlannedEndDate('')
-                  setPlannedEndTime('')
                   setLocalError(null)
                 }}
                 disabled={isSubmitting}
@@ -258,7 +245,7 @@ export default function VehicleStatusForm({
             <div className="space-y-3">
               <div className="space-y-2">
                 <p className="block text-sm font-medium text-[#1F2937]">Début prévu</p>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                   <Input
                     type="date"
                     aria-label="Date de début prévue"
@@ -266,18 +253,12 @@ export default function VehicleStatusForm({
                     onChange={(event) => setPlannedDate(event.target.value)}
                     disabled={isSubmitting}
                   />
-                  <Select
-                    aria-label="Heure de début prévue"
-                    options={[{ value: '', label: 'Heure' }, ...halfHourOptions]}
-                    value={plannedTime}
-                    onChange={(event) => setPlannedTime(event.target.value)}
-                    disabled={isSubmitting}
-                  />
+                  <p className="pb-3 text-sm font-medium text-slate-600">Heure fixe : 10 h 00</p>
                 </div>
               </div>
               <div className="space-y-2">
                 <p className="block text-sm font-medium text-[#1F2937]">Fin prévue</p>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                   <Input
                     type="date"
                     aria-label="Date de fin prévue"
@@ -285,13 +266,7 @@ export default function VehicleStatusForm({
                     onChange={(event) => setPlannedEndDate(event.target.value)}
                     disabled={isSubmitting}
                   />
-                  <Select
-                    aria-label="Heure de fin prévue"
-                    options={[{ value: '', label: 'Heure' }, ...halfHourOptions]}
-                    value={plannedEndTime}
-                    onChange={(event) => setPlannedEndTime(event.target.value)}
-                    disabled={isSubmitting}
-                  />
+                  <p className="pb-3 text-sm font-medium text-slate-600">Heure fixe : 22 h 00</p>
                 </div>
               </div>
             </div>
@@ -314,7 +289,7 @@ export default function VehicleStatusForm({
             </div>
           ) : null}
 
-          {plannedEndAt && !hasImmediateConflict ? <p className="text-sm font-medium text-emerald-700">Créneau disponible · fin prévue : {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(plannedEndAt))}</p> : null}
+          {plannedEndAt && !hasImmediateConflict && plannedEndDate >= plannedDate ? <p className="text-sm font-medium text-emerald-700">Créneau disponible · fin prévue : {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(plannedEndAt)}</p> : null}
           {hasImmediateConflict ? (
             <Alert
               variant="warning"
@@ -362,8 +337,8 @@ export default function VehicleStatusForm({
             <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>
               Annuler
             </Button>
-            <Button type="submit" disabled={isSubmitting || hasImmediateConflict}>
-              {isSubmitting ? 'Mise a jour...' : 'Enregistrer le statut'}
+            <Button type="submit" className="min-w-[13rem] whitespace-nowrap" disabled={isSubmitting || hasImmediateConflict}>
+              {isSubmitting ? 'Planification...' : 'Planifier une intervention'}
             </Button>
           </div> : null}
         </form>
