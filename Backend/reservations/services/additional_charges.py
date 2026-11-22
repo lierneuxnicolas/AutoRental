@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 
+from payments.models import Deposit
 from reservations.models import Reservation, ReservationAdditionalCharge
 
 
@@ -35,6 +36,14 @@ def save_provisional_additional_charges(*, reservation: Reservation, requested_b
 			_raise_additional_charges_error(
 				"INVALID_STATUS",
 				"La reservation doit etre en attente de controle pour enregistrer des frais provisoires.",
+				http_status=409,
+			)
+
+		deposit = locked.deposits.order_by("-authorized_at", "-created_at", "-id").first()
+		if deposit and deposit.status in {Deposit.Status.LIBEREE, Deposit.Status.CAPTUREE}:
+			_raise_additional_charges_error(
+				"DEPOSIT_ALREADY_SETTLED",
+				"La caution a déjà été régularisée. Aucune nouvelle retenue n'est possible.",
 				http_status=409,
 			)
 

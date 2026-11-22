@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import ClientDocument, ClientProfile
-from accounts.permissions import IsClient, IsManager
+from accounts.permissions import IsClient, IsManager, IsManagerOrAdministrator
 from accounts.serializers.documents import (
     ClientDocumentCreateSerializer,
     ClientDocumentReadSerializer,
@@ -191,7 +191,7 @@ class ClientDocumentFileView(_DocumentFileResponseMixin, APIView):
 
 
 class ManagementClientDocumentFileView(_DocumentFileResponseMixin, APIView):
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
 
     def get(self, request, pk):
         document = get_object_or_404(ClientDocument.objects.all(), pk=pk)
@@ -199,7 +199,7 @@ class ManagementClientDocumentFileView(_DocumentFileResponseMixin, APIView):
 
 
 class ManagementClientDocumentListView(generics.ListAPIView):
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
     serializer_class = ManagerClientDocumentListSerializer
 
     def get_queryset(self):
@@ -260,7 +260,7 @@ class ManagementClientDocumentListView(generics.ListAPIView):
 
 
 class ManagementClientDocumentDetailView(generics.RetrieveAPIView):
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
     serializer_class = ManagerClientDocumentDetailSerializer
 
     def get_queryset(self):

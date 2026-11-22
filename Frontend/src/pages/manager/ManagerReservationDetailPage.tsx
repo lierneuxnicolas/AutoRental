@@ -1,32 +1,34 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
-import { ArrowLeft, CarFront, Camera, UserRound } from 'lucide-react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import Alert from '../../components/feedback/Alert'
-import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
-import StatusBadge from '../../components/ui/StatusBadge'
 import ReservationReassignmentPanel from '../../components/reservations/ReservationReassignmentPanel'
 import { getInvoiceDownload } from '../../services/invoiceService'
 import {
   getManagementReservationById,
+  getManagementReturnClosureReadiness,
   settleManagementReservationDeposit,
   updateManagementAdditionalCharges,
   validateManagementReservationReturn,
 } from '../../services/managementReservationService'
 import type {
+  ManagementAdditionalChargesUpdateRequest,
+  ManagementReturnClosureReadiness,
+  ManagementDepositStatus,
   ManagementInspection,
   ReservationAdditionalChargeType,
   ManagementReservationStatus,
   ReservationCancellationSource,
   ReservationDepositSettlementResponse,
   ReservationManagementClientSummary,
+  ReservationManagementDetail,
   ReservationManagementVehicleSummary,
 } from '../../types/managementReservation'
 import type { InspectionPhoto, PhotoType } from '../../types/inspection'
 import { resolveMediaUrl } from '../../utils/media'
+import { canEditManagerReturnCharges, closeManagerReturn, isDepositSettled, ReturnClosureError } from '../../utils/managerReturnClosure'
 
 interface ManagerReservationDetailPageProps {
   basePath?: string
@@ -134,11 +136,24 @@ function toErrorState(error: unknown): { title: string; message: string } {
   }
 }
 
+const panelClass = 'min-w-0 rounded-md border border-gray-200 bg-white p-3'
+const secondaryClass = 'inline-flex items-center rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-100 disabled:opacity-50'
+const inputClass = 'w-full rounded border border-gray-300 px-2 py-1 text-sm focus-visible:outline-2 focus-visible:outline-gray-600 disabled:bg-gray-100'
+
+function Notice({ title, message }: { title: string; message: string }) {
+  return (
+    <div role="alert" className={panelClass}>
+      <p className="font-semibold">{title}</p>
+      <p>{message}</p>
+    </div>
+  )
+}
+
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
-      <p className="mt-1 break-words text-sm text-[#1F2937]">{value}</p>
+      <p className="text-xs font-medium text-gray-600">{label}</p>
+      <p className="break-words text-sm">{value}</p>
     </div>
   )
 }
@@ -180,6 +195,7 @@ interface ReservationSummaryCardProps {
   vehicle: ReservationManagementVehicleSummary
   client: ReservationManagementClientSummary
   rentalAmount: string
+  hasPaidRental: boolean
   depositAmount: string
   startAt: string
   endAt: string
@@ -191,6 +207,7 @@ function ReservationSummaryCard({
   vehicle,
   client,
   rentalAmount,
+  hasPaidRental,
   depositAmount,
   startAt,
   endAt,
@@ -201,69 +218,40 @@ function ReservationSummaryCard({
   const vehicleName = displayValue(`${vehicle.brand} ${vehicle.model_name}`.trim())
 
   return (
-    <Card
-      className="rounded-2xl"
-      header={(
-        <div className="flex items-center gap-2.5">
-          <UserRound className="h-5 w-5 text-[#0F766E]" aria-hidden="true" />
-          <h2 className="text-lg font-semibold text-[#0F172A]">Réservation actuelle</h2>
-        </div>
-      )}
-    >
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-        <div className="flex min-w-0 items-center gap-4">
-          <div className="h-24 w-32 shrink-0 overflow-hidden rounded-lg border border-[#E2E8F0] bg-[#F8FAFC]">
-            {photoUrl ? (
-              <img src={photoUrl} alt={vehicleName} className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full items-center justify-center text-slate-400">
-                <CarFront className="h-7 w-7" aria-hidden="true" />
-                <span className="sr-only">Photo indisponible</span>
-              </div>
-            )}
+    <section className={panelClass}>
+      <h2 className="mb-2 font-semibold">Réservation actuelle</h2>
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,3fr)]">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded border border-gray-200 text-center text-xs text-gray-600">
+            {photoUrl ? <img src={photoUrl} alt={vehicleName} className="h-full w-full object-cover" /> : 'Photo indisponible'}
           </div>
+          <div className="min-w-0 break-words text-sm">
+            <p className="font-semibold">{vehicleName}</p>
+            <p>{displayValue(vehicle.category)}</p>
+            <p>{displayValue(vehicle.registration_plate)}</p>
+          </div>
+        </div>
+        <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3">
           <div className="min-w-0">
-            <p className="break-words text-sm font-semibold text-[#0F172A]">{vehicleName}</p>
-            <p className="mt-1 break-words text-sm text-slate-500">{displayValue(vehicle.category)}</p>
-            <p className="mt-1 break-words text-sm text-[#1F2937]">{displayValue(vehicle.registration_plate)}</p>
+            <Field label="Client" value={formatClientName(client)} />
+            <p className="break-all text-sm">{displayValue(client.email)}</p>
           </div>
-        </div>
-
-        <div className="grid min-w-0 gap-x-6 gap-y-5 border-t border-[#E5E7EB] pt-5 sm:grid-cols-2 lg:grid-cols-3 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-          <Field label="Client" value={formatClientName(client)} />
-          <Field label="E-mail" value={displayValue(client.email)} />
-          <Field label="Parking / Place" value={getParkingLabel(vehicle)} />
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Période réservée</p>
-            <p className="mt-1 text-sm text-[#1F2937]">Du {formatDateTime(startAt)}</p>
-            <p className="text-sm text-[#1F2937]">Au {formatDateTime(endAt)}</p>
+          <Field label="Parking / emplacement" value={getParkingLabel(vehicle)} />
+          <Field label={hasPaidRental ? 'Location payée' : 'Montant de la location'} value={formatCurrency(rentalAmount)} />
+          <div className="text-sm">
+            <p className="text-xs font-medium text-gray-600">Période réservée</p>
+            <p>Du {formatDateTime(startAt)}</p>
+            <p>Au {formatDateTime(endAt)}</p>
           </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Période réelle</p>
-            <p className="mt-1 text-sm text-[#1F2937]">Départ : {formatDateTime(departureInspection?.completed_at ?? null)}</p>
-            <p className="text-sm text-[#1F2937]">Retour : {formatDateTime(returnInspection?.completed_at ?? null)}</p>
+          <div className="text-sm">
+            <p className="text-xs font-medium text-gray-600">Période réelle</p>
+            <p>Départ : {formatDateTime(departureInspection?.completed_at ?? null)}</p>
+            <p>Retour : {formatDateTime(returnInspection?.completed_at ?? null)}</p>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Montant location" value={formatCurrency(rentalAmount)} />
-            <Field label="Caution" value={formatCurrency(depositAmount)} />
-          </div>
+          <Field label="Caution" value={formatCurrency(depositAmount)} />
         </div>
       </div>
-    </Card>
-  )
-}
-
-function SectionHeader({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle?: string }) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#E0F2FE] text-[#0F766E]">
-        {icon}
-      </div>
-      <div>
-        <h2 className="text-xl font-semibold text-[#0F172A]">{title}</h2>
-        {subtitle ? <p className="text-sm text-slate-500">{subtitle}</p> : null}
-      </div>
-    </div>
+    </section>
   )
 }
 
@@ -320,68 +308,67 @@ function InspectionPhotoThumbnail({ photo, label, inspectionTitle, onPreview }: 
       {src ? (
         <button
           type="button"
-          className="block aspect-square w-full overflow-hidden rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0F766E]"
+          className="block aspect-square w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-600"
           aria-label={`Agrandir : ${inspectionTitle} — ${label}`}
           onClick={() => onPreview({ src, label: `${inspectionTitle} — ${label}` })}
         >
           <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
         </button>
       ) : (
-        <div className="flex aspect-square items-center justify-center rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-1 text-center text-xs leading-tight text-slate-500">
+        <div className="flex aspect-square items-center justify-center rounded-lg border border-gray-200 bg-gray-50 px-1 text-center text-xs leading-tight text-gray-500">
           Non disponible
         </div>
       )}
-      <p className="mt-1 min-h-8 text-center text-xs font-medium leading-4 text-slate-600">{label}</p>
+      <p className="mt-1 text-center text-xs font-medium leading-4 text-gray-600">{label}</p>
     </div>
   )
 }
 
-function getSeverityBadge(severity: ManagementInspection['damages'][number]['severity']): { label: string; variant: 'warning' | 'danger' } {
+function getSeverityLabel(severity: ManagementInspection['damages'][number]['severity']): string {
   switch (severity) {
     case 'GRAVE':
-      return { label: 'Dangereux', variant: 'danger' }
+      return 'Dangereux'
     case 'ACCEPTABLE':
-      return { label: 'Acceptable', variant: 'warning' }
+      return 'Acceptable'
     case 'CRITIQUE':
-      return { label: 'Critique', variant: 'danger' }
+      return 'Critique'
     case 'MAJEUR':
-      return { label: 'Majeur', variant: 'danger' }
+      return 'Majeur'
     case 'MODERE':
-      return { label: 'Modéré', variant: 'warning' }
+      return 'Modéré'
     case 'MINEUR':
-      return { label: 'Mineur', variant: 'warning' }
+      return 'Mineur'
   }
 }
 
 interface InspectionCardProps {
   title: string
   inspection: ManagementInspection | null
-  headerClassName: string
   onPreview: (photo: PhotoPreview) => void
 }
 
-function InspectionCard({ title, inspection, headerClassName, onPreview }: InspectionCardProps) {
+function InspectionCard({ title, inspection, onPreview }: InspectionCardProps) {
   const inspectionDate = inspection?.completed_at ?? inspection?.started_at ?? null
   const damages = inspection?.damages ?? []
 
   return (
-    <article className="min-w-0 overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-      <header className={`border-b px-4 py-3 ${headerClassName}`}>
-        <h3 className="text-base font-semibold leading-5 text-[#0F172A]">{title}</h3>
-        <p className="mt-1 text-sm text-slate-600">{inspectionDate ? formatDateTime(inspectionDate) : 'Non disponible'}</p>
+    <article className="min-w-0 overflow-hidden rounded border border-gray-200 bg-white @container">
+      <header className="border-b border-gray-200 px-2 py-1.5">
+        <h3 className="text-base font-semibold leading-5 text-black">{title}</h3>
+        <p className="mt-1 text-sm text-gray-600">{inspectionDate ? formatDateTime(inspectionDate) : 'Non disponible'}</p>
       </header>
       {inspection ? (
-        <div className="space-y-5 p-4">
-          <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+        <div className="space-y-2 p-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <Field label="Kilométrage" value={formatNullableNumber(inspection?.mileage, ' km')} />
             <Field label="Carburant / énergie" value={formatNullableNumber(inspection?.energy_level_percent, ' %')} />
-            <div className="col-span-2">
+            <div className="col-span-2 sm:col-span-1">
               <Field label="Propreté / état général" value={formatGeneralCondition(inspection?.general_condition)} />
             </div>
           </div>
-          <div className="border-t border-[#E5E7EB] pt-4">
-            <h4 className="text-sm font-semibold text-[#0F172A]">Photos</h4>
-            <div className="mt-3 grid grid-cols-4 gap-2">
+          <div className="border-t border-gray-200 pt-2">
+            <h4 className="text-sm font-semibold text-black">Photos</h4>
+            <div className="mt-1 grid grid-cols-4 gap-1.5 @min-[34rem]:grid-cols-8">
               {RETURN_COMPARISON_SLOTS.map((slot) => (
                 <InspectionPhotoThumbnail
                   key={`${slot.photoType}-${slot.position ?? 0}`}
@@ -394,24 +381,24 @@ function InspectionCard({ title, inspection, headerClassName, onPreview }: Inspe
             </div>
           </div>
 
-          <div className="border-t border-[#E5E7EB] pt-4">
-            <h4 className="text-sm font-semibold text-[#0F172A]">Dommages déclarés</h4>
+          <div className="border-t border-gray-200 pt-2">
+            <h4 className="text-sm font-semibold text-black">Dommages déclarés</h4>
             {damages.length === 0 ? (
-              <p className="mt-3 text-sm text-slate-500">Aucun dommage déclaré</p>
+              <p className="mt-1 text-sm text-gray-600">Aucun dommage déclaré</p>
             ) : (
-              <div className="mt-3 space-y-3">
+              <div className="mt-1 space-y-1">
                 {damages.map((damage) => {
-                  const severity = getSeverityBadge(damage.severity)
+                  const severity = getSeverityLabel(damage.severity)
                   const evidencePhoto = inspection.photos.find((photo) => damage.photo_ids.includes(photo.id)) ?? null
                   const evidencePhotoUrl = resolveMediaUrl(evidencePhoto?.file)
 
                   return (
-                    <div key={damage.id} className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                    <div key={damage.id} className="rounded border border-gray-200 p-2">
                       <div className="flex items-start gap-3">
                         {evidencePhotoUrl ? (
                           <button
                             type="button"
-                            className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[#E2E8F0] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0F766E]"
+                            className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-gray-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-600"
                             aria-label={`Agrandir la preuve du dommage : ${damage.description}`}
                             onClick={() => onPreview({ src: evidencePhotoUrl, label: `Preuve du dommage : ${damage.description}` })}
                           >
@@ -419,10 +406,8 @@ function InspectionCard({ title, inspection, headerClassName, onPreview }: Inspe
                           </button>
                         ) : null}
                         <div className="min-w-0 flex-1">
-                          <p className="break-words text-sm leading-5 text-[#1F2937]">{displayValue(damage.description)}</p>
-                          <div className="mt-2">
-                            <StatusBadge label={severity.label} variant={severity.variant} />
-                          </div>
+                          <p className="break-words text-sm leading-5 text-black">{displayValue(damage.description)}</p>
+                          <p className="text-xs text-gray-600">{severity}</p>
                         </div>
                       </div>
                     </div>
@@ -431,12 +416,9 @@ function InspectionCard({ title, inspection, headerClassName, onPreview }: Inspe
               </div>
             )}
           </div>
-          <p className="border-t border-[#E5E7EB] pt-4 text-sm text-[#1F2937]">
-            <span className="font-semibold">Par :</span> {inspection.completed_by_name?.trim() || 'Non disponible'}
-          </p>
         </div>
       ) : (
-        <p className="p-4 text-sm text-slate-500">Inspection non disponible</p>
+        <p className="p-4 text-sm text-gray-500">Inspection non disponible</p>
       )}
     </article>
   )
@@ -461,11 +443,11 @@ function PhotoPreviewDialog({ photo, onClose }: { photo: PhotoPreview; onClose: 
         onClose()
       }}
       aria-label={`Aperçu : ${photo.label}`}
-      className="m-auto max-h-[90vh] w-[calc(100%-2rem)] max-w-5xl overflow-auto rounded-2xl bg-white p-4 shadow-2xl backdrop:bg-slate-950/70"
+      className="m-auto max-h-[90vh] w-[calc(100%-2rem)] max-w-5xl overflow-auto rounded-2xl bg-white p-4 shadow-2xl backdrop:bg-black/70"
     >
       <div className="flex items-center justify-between gap-4">
-        <h3 className="min-w-0 break-words text-base font-semibold text-[#0F172A]">{photo.label}</h3>
-        <Button variant="secondary" size="sm" onClick={onClose}>Fermer</Button>
+        <h3 className="min-w-0 break-words text-base font-semibold text-black">{photo.label}</h3>
+        <button type="button" className={secondaryClass} onClick={onClose}>Fermer</button>
       </div>
       <img src={photo.src} alt={photo.label} className="mx-auto mt-4 max-h-[70vh] max-w-full object-contain" />
     </dialog>
@@ -485,18 +467,18 @@ function InspectionDifferences({ departure, returned }: {
   const condition = departure?.general_condition && returned?.general_condition
     ? `${formatGeneralCondition(departure.general_condition)} → ${formatGeneralCondition(returned.general_condition)}`
     : 'Comparaison indisponible'
-  const damageComparison = !departure || !returned
+  const damageComparison = departure?.status !== 'TERMINE' || returned?.status !== 'TERMINE'
     ? 'Comparaison indisponible'
     : returned.damages.length === 0
       ? 'Aucun dommage déclaré au retour'
-      : `${returned.damages.length} dommage${returned.damages.length > 1 ? 's déclarés' : ' déclaré'} au retour — comparaison manuelle nécessaire`
+      : 'Comparaison indisponible'
 
   return (
-    <div className="rounded-2xl border border-[#BFDBFE] bg-[#EFF6FF] p-4">
-      <h3 className="text-base font-semibold text-[#0F172A]">Différences départ / retour</h3>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Field label="Kilomètres parcourus" value={mileageDifference === null ? 'Indisponible' : mileageDifference < 0 ? `${mileageDifference} km — écart à vérifier` : `${mileageDifference} km`} />
-        <Field label="Différence de carburant / énergie" value={energyDifference === null ? 'Indisponible' : `${energyDifference > 0 ? '+' : ''}${energyDifference} points de %`} />
+    <div className="border-t border-gray-200 pt-2">
+      <h3 className="text-base font-semibold text-black">Différences départ / retour</h3>
+      <div className="mt-1 grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <Field label="Kilomètres parcourus" value={mileageDifference === null ? 'Comparaison indisponible' : mileageDifference < 0 ? `${mileageDifference} km — écart à vérifier` : `${mileageDifference} km`} />
+        <Field label="Différence de carburant / énergie" value={energyDifference === null ? 'Comparaison indisponible' : `${energyDifference > 0 ? '+' : ''}${energyDifference} points de %`} />
         <Field label="État général" value={condition} />
         <Field label="Nouveaux dégâts éventuels" value={damageComparison} />
       </div>
@@ -504,45 +486,21 @@ function InspectionDifferences({ departure, returned }: {
   )
 }
 
-function VehicleInspectionControl({ departure, returned, previousDeparture, previousReturn, reference }: {
+function VehicleInspectionControl({ departure, returned }: {
   departure: ManagementInspection | null
   returned: ManagementInspection | null
-  previousDeparture: ManagementInspection | null
-  previousReturn: ManagementInspection | null
-  reference: ManagementInspection | null
 }) {
   const [preview, setPreview] = useState<PhotoPreview | null>(null)
-  const history = [
-    { title: 'Départ avant-dernier client', inspection: previousDeparture },
-    { title: 'Retour avant-dernier client', inspection: previousReturn },
-    { title: 'Inspection de référence du véhicule', inspection: reference },
-  ].filter((item) => item.inspection !== null)
 
   return (
-    <section>
-      <SectionHeader icon={<Camera className="h-5 w-5" />} title="Contrôle du véhicule" />
-      <div className="mt-3 space-y-4">
+    <section className={panelClass}>
+      <h2 className="mb-2 font-semibold">Contrôle du véhicule</h2>
+      <div className="grid gap-2 md:grid-cols-2">
+        <InspectionCard title="État au départ (Check-in)" inspection={departure} onPreview={setPreview} />
+        <InspectionCard title="État au retour (Check-out)" inspection={returned} onPreview={setPreview} />
+      </div>
+      <div className="mt-2">
         <InspectionDifferences departure={departure} returned={returned} />
-        <div className="grid items-start gap-4 md:grid-cols-2">
-          <InspectionCard title="État au départ (Check-in)" inspection={departure} headerClassName="border-[#BFDBFE] bg-[#EFF6FF]" onPreview={setPreview} />
-          <InspectionCard title="État au retour (Check-out)" inspection={returned} headerClassName="border-[#BFDBFE] bg-[#EFF6FF]" onPreview={setPreview} />
-        </div>
-        <details className="rounded-2xl border border-[#E2E8F0] bg-white">
-          <summary className="cursor-pointer px-4 py-4 text-base font-semibold text-[#0F172A]">
-            Historique des inspections précédentes
-          </summary>
-          <div className="border-t border-[#E2E8F0] p-4">
-            {history.length === 0 ? (
-              <p className="text-sm text-slate-500">Aucun historique disponible</p>
-            ) : (
-              <div className="grid items-start gap-4 md:grid-cols-2">
-                {history.map((item) => (
-                  <InspectionCard key={item.title} title={item.title} inspection={item.inspection} headerClassName="border-[#BBF7D0] bg-[#F0FDF4]" onPreview={setPreview} />
-                ))}
-              </div>
-            )}
-          </div>
-        </details>
       </div>
       {preview ? <PhotoPreviewDialog photo={preview} onClose={() => setPreview(null)} /> : null}
     </section>
@@ -584,7 +542,7 @@ function buildDefaultAdditionalChargesFormState(reservation: {
   }
 
   for (const charge of reservation.additional_charges) {
-    if (charge.status !== 'PROVISOIRE') continue
+    if (charge.status === 'ANNULEE') continue
     initial[charge.charge_type] = {
       amount: formatChargeInput(charge.amount),
       justification: charge.justification ?? '',
@@ -601,38 +559,135 @@ function buildDefaultAdditionalChargesFormState(reservation: {
   return initial
 }
 
+const DEPOSIT_STATUS_LABELS: Record<ManagementDepositStatus, string> = {
+  CREE: 'Créée',
+  EN_ATTENTE: 'En attente',
+  AUTORISEE: 'Autorisée',
+  A_VERIFIER: 'À vérifier',
+  CAPTUREE: 'Capturée',
+  LIBEREE: 'Libérée',
+  ECHOUEE: 'Échouée',
+  ANNULEE: 'Annulée',
+  EXPIREE: 'Expirée',
+}
+
+function getChargeError({ amount: input, justification }: AdditionalChargeFormState[ReservationAdditionalChargeType]) {
+  const amount = parseChargeAmount(input)
+  if (amount === null || amount > 99_999_999.99) return 'Montant invalide (deux décimales maximum).'
+  if (amount > 0 && !justification.trim()) return 'Justification obligatoire pour un montant supérieur à 0 €.'
+  return undefined
+}
+
+function buildChargesPayload(formState: AdditionalChargeFormState): ManagementAdditionalChargesUpdateRequest {
+  return {
+    charges: CHARGE_TYPE_ROWS.map(({ type }) => ({
+      charge_type: type,
+      amount: formatChargeInput(formState[type].amount),
+      justification: formState[type].justification.trim(),
+    })),
+  }
+}
+
+function ReturnClosureConfirmation({
+  depositStatus,
+  total,
+  retained,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  depositStatus: ManagementReturnClosureReadiness['deposit_status']
+  total: string
+  retained: string
+  pending: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    dialog?.showModal()
+    return () => dialog?.close()
+  }, [])
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="closure-confirmation"
+      className="m-auto w-[calc(100%-2rem)] max-w-xs rounded-md border border-gray-300 bg-white p-4 text-black backdrop:bg-black/30"
+      onCancel={(event) => {
+        event.preventDefault()
+        if (!pending) onCancel()
+      }}
+    >
+      <h3 id="closure-confirmation" className="mb-3 font-semibold">Confirmer la clôture</h3>
+      <div className="space-y-2">
+        <Field label="Total des frais" value={formatCurrency(total)} />
+        <Field label={isDepositSettled(depositStatus) ? 'Retenue effectuée' : 'Retenue à effectuer'} value={formatCurrency(retained)} />
+        <Field label="Statut de la caution" value={DEPOSIT_STATUS_LABELS[depositStatus]} />
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" className={secondaryClass} disabled={pending} onClick={onCancel}>Annuler</button>
+        <button type="button" className={secondaryClass} disabled={pending} onClick={onConfirm}>
+          {pending ? 'Clôture en cours…' : 'Confirmer'}
+        </button>
+      </div>
+    </dialog>
+  )
+}
+
 function AdditionalChargesSection({
   reservation,
-  departureInspection,
-  returnInspection,
   onSaved,
   isSaving,
   onSave,
   saveError,
+  showSaveAction,
+  settlementResult,
 }: {
-  reservation: {
-    deposit_amount: string
-    status: string
-    return_charges_estimate: { delay_seconds: number; fuel_fee: string | null } | null
-    return_delay_fee: string | null
-    return_fuel_fee: string | null
-    return_charges_confirmed_at: string | null
-    return_charges_confirmed_by: number | null
-    additional_charges: Array<{ charge_type: ReservationAdditionalChargeType; amount: string; justification: string; status: string }>
-  }
-  departureInspection: ManagementInspection | null
-  returnInspection: ManagementInspection | null
+  reservation: ReservationManagementDetail
   onSaved: number
   isSaving: boolean
   onSave: (payload: AdditionalChargeFormState) => void
   saveError: string | null
+  showSaveAction: boolean
+  settlementResult: ReservationDepositSettlementResponse | null
 }) {
+  const queryClient = useQueryClient()
+  const [confirmation, setConfirmation] = useState<{
+    readiness: ManagementReturnClosureReadiness
+    payload: ManagementAdditionalChargesUpdateRequest
+  } | null>(null)
+  const closureInFlight = useRef(false)
+  const readinessQuery = useQuery({
+    queryKey: ['manager-return-closure', reservation.id],
+    queryFn: () => getManagementReturnClosureReadiness(reservation.id),
+    enabled: !showSaveAction && reservation.status === 'A_CONTROLER',
+    retry: false,
+  })
+  const closureMutation = useMutation({
+    mutationFn: ({ readiness, payload }: NonNullable<typeof confirmation>) => closeManagerReturn(readiness, payload, {
+      read: () => getManagementReturnClosureReadiness(reservation.id),
+      save: (charges) => updateManagementAdditionalCharges(reservation.id, charges),
+      settle: (charges) => settleManagementReservationDeposit(reservation.id, charges),
+      complete: () => validateManagementReservationReturn(reservation.id),
+    }),
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['manager-return-closure', reservation.id] }),
+        queryClient.invalidateQueries({ queryKey: ['manager-reservation-detail', reservation.id] }),
+        queryClient.invalidateQueries({ queryKey: ['manager-reservations'] }),
+      ])
+    },
+  })
   const [formState, setFormState] = useState<AdditionalChargeFormState>(() => buildDefaultAdditionalChargesFormState(reservation))
   const [errors, setErrors] = useState<Partial<Record<ReservationAdditionalChargeType, string>>>({})
-  const [lastSynced, setLastSynced] = useState({ reservation, onSaved })
+  const savedFormState = JSON.stringify(buildDefaultAdditionalChargesFormState(reservation))
+  const [lastSynced, setLastSynced] = useState({ savedFormState, onSaved })
 
-  if (lastSynced.reservation !== reservation || lastSynced.onSaved !== onSaved) {
-    setLastSynced({ reservation, onSaved })
+  if (lastSynced.savedFormState !== savedFormState || lastSynced.onSaved !== onSaved) {
+    setLastSynced({ savedFormState, onSaved })
     setFormState(buildDefaultAdditionalChargesFormState(reservation))
     setErrors({})
   }
@@ -643,36 +698,41 @@ function AdditionalChargesSection({
   }, { RETARD: 0, CARBURANT: 0, KILOMETRAGE: 0, DEGATS: 0 })
 
   const totalAdditionalCharges = amounts.RETARD + amounts.CARBURANT + amounts.KILOMETRAGE + amounts.DEGATS
-  const depositAmount = Number(reservation.deposit_amount) || 0
-  const retainedOnDeposit = Math.min(totalAdditionalCharges, depositAmount)
+  const readiness = readinessQuery.isError ? undefined : readinessQuery.data
+  const depositAmount = Number(readiness?.deposit_amount ?? reservation.deposit_amount) || 0
+  const maximumRetention = Number(readiness?.maximum_charge ?? reservation.deposit_amount) || 0
+  const retainedOnDeposit = Math.min(totalAdditionalCharges, maximumRetention)
   const depositToRelease = Math.max(depositAmount - retainedOnDeposit, 0)
-  const overDeposit = Math.max(totalAdditionalCharges - depositAmount, 0)
+  const overDeposit = Math.max(totalAdditionalCharges - maximumRetention, 0)
 
-  const helpDelayMinutes = reservation.return_charges_estimate ? Math.ceil(reservation.return_charges_estimate.delay_seconds / 60) : null
-  const distance = departureInspection?.mileage !== null
-    && departureInspection?.mileage !== undefined
-    && returnInspection?.mileage !== null
-    && returnInspection?.mileage !== undefined
-    ? returnInspection.mileage - departureInspection.mileage
-    : null
-  const fuelDelta = departureInspection?.energy_level_percent !== null
-    && departureInspection?.energy_level_percent !== undefined
-    && returnInspection?.energy_level_percent !== null
-    && returnInspection?.energy_level_percent !== undefined
-    ? returnInspection.energy_level_percent - departureInspection.energy_level_percent
-    : null
+  const depositStatus = readiness?.deposit_status ?? settlementResult?.deposit_status ?? reservation.deposit_status
+  const isSettled = depositStatus === 'CAPTUREE' || depositStatus === 'LIBEREE'
+  const hasActiveDeposit = depositStatus === 'AUTORISEE' || depositStatus === 'A_VERIFIER'
+  const estimatedRetention = depositStatus === 'LIBEREE' ? '0.00' : hasActiveDeposit ? retainedOnDeposit.toFixed(2) : null
+  const estimatedRelease = hasActiveDeposit ? depositToRelease.toFixed(2) : null
+  const legacyReadOnly = reservation.status !== 'A_CONTROLER' || isSettled
+    || reservation.additional_charges.some((charge) => charge.status === 'VALIDEE')
+    || (reservation.return_charges_confirmed_at !== null
+      && !reservation.additional_charges.some((charge) => charge.status === 'PROVISOIRE'))
+  const isReadOnly = isSaving || closureMutation.isPending || confirmation !== null
+    || (showSaveAction ? legacyReadOnly : !canEditManagerReturnCharges(reservation, readiness))
+
+  const updateCharge = (type: ReservationAdditionalChargeType, field: 'amount' | 'justification', value: string) => {
+    setFormState((current) => ({ ...current, [type]: { ...current[type], [field]: value } }))
+    setErrors((current) => current[type]
+      ? { ...current, [type]: getChargeError({ ...formState[type], [field]: value }) }
+      : current)
+  }
+
+  const updateError = (type: ReservationAdditionalChargeType) => {
+    setErrors((current) => ({ ...current, [type]: getChargeError(formState[type]) }))
+  }
 
   const handleSave = () => {
     const nextErrors: Partial<Record<ReservationAdditionalChargeType, string>> = {}
     for (const row of CHARGE_TYPE_ROWS) {
-      const amount = parseChargeAmount(formState[row.type].amount)
-      if (amount === null) {
-        nextErrors[row.type] = 'Montant invalide (deux décimales maximum).'
-        continue
-      }
-      if (amount > 0 && !formState[row.type].justification.trim()) {
-        nextErrors[row.type] = 'Justification obligatoire pour un montant supérieur à 0 €.'
-      }
+      const error = getChargeError(formState[row.type])
+      if (error) nextErrors[row.type] = error
     }
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) {
@@ -681,69 +741,136 @@ function AdditionalChargesSection({
     onSave(formState)
   }
 
-  return (
-    <Card
-      className="rounded-2xl"
-      header={<h2 className="text-xl font-semibold text-[#0F172A]">Frais supplémentaires</h2>}
-    >
-      <div className="space-y-4">
-        <div className="grid gap-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-700 md:grid-cols-3">
-          <p>Retard constaté : {helpDelayMinutes === null ? 'Indisponible' : `${helpDelayMinutes} min`}</p>
-          <p>Kilométrage : {distance === null ? 'Indisponible' : `${distance > 0 ? '+' : ''}${distance} km`}</p>
-          <p>Carburant / énergie : {fuelDelta === null ? 'Indisponible' : `${fuelDelta > 0 ? '+' : ''}${fuelDelta} points de %`}</p>
-        </div>
+  const exceedsDeposit = readiness && !isDepositSettled(readiness.deposit_status)
+    && Math.round(totalAdditionalCharges * 100) > Math.round(maximumRetention * 100)
+  const formInvalid = CHARGE_TYPE_ROWS.some(({ type }) => getChargeError(formState[type]))
+  const closureDisabled = !readiness || readinessQuery.isFetching || exceedsDeposit
+    || (!isSettled && (formInvalid || isReadOnly)) || closureMutation.isPending
+  const closureError = closureMutation.error
+  const closureErrorMessage = closureError instanceof ReturnClosureError && axios.isAxiosError(closureError.cause)
+    && typeof closureError.cause.response?.data?.message === 'string'
+    ? `${closureError.message} ${closureError.cause.response.data.message}`
+    : closureError?.message
+  const confirmedTotal = confirmation?.payload.charges.reduce((total, charge) => total + Number(charge.amount), 0) ?? 0
 
-        <div className="space-y-3">
-          {CHARGE_TYPE_ROWS.map((row) => (
-            <div key={row.type} className="rounded-xl border border-[#E2E8F0] p-4">
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
-                <div>
-                  <p className="text-sm font-semibold text-[#0F172A]">{row.label}</p>
-                  <label className="mt-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Justification</label>
+  const confirmClosure = async () => {
+    if (!confirmation || closureInFlight.current) return
+    closureInFlight.current = true
+    try {
+      await closureMutation.mutateAsync(confirmation)
+    } catch {
+      // The mutation exposes the failed step, and refreshes server state before retry.
+    } finally {
+      setConfirmation(null)
+      closureInFlight.current = false
+    }
+  }
+
+  return (
+    <section className={panelClass}>
+      <h2 className="mb-2 font-semibold">Frais supplémentaires</h2>
+      {!showSaveAction && depositStatus === 'LIBEREE' ? (
+        <p className="mb-2 text-sm">La caution est déjà libérée. Toute nouvelle retenue sur cette caution est impossible.</p>
+      ) : null}
+      {!showSaveAction && depositStatus === 'CAPTUREE' ? (
+        <p className="mb-2 text-sm">La retenue sur la caution a déjà été effectuée. Les frais validés sont en lecture seule.</p>
+      ) : null}
+      {reservation.return_charges_estimate ? <p className="mb-2 text-sm text-gray-600">Retard constaté : {Math.ceil(reservation.return_charges_estimate.delay_seconds / 60)} min</p> : null}
+      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_15rem]">
+        <table className="w-full table-fixed text-left text-sm">
+          <thead className="border-b border-gray-200">
+            <tr>
+              <th scope="col" className="w-[32%] pb-1 pr-2 font-medium">Type</th>
+              <th scope="col" className="pb-1 pr-2 font-medium">Justification</th>
+              <th scope="col" className="w-[4.75rem] pb-1 text-right font-medium sm:w-24">Montant (€)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {CHARGE_TYPE_ROWS.map(({ type, label }) => (
+              <tr key={type} className="border-b border-gray-200 align-top">
+                <th scope="row" className="break-words py-2 pr-2 font-medium">{label}</th>
+                <td className="py-1.5 pr-2">
                   <textarea
-                    value={formState[row.type].justification}
-                    onChange={(event) => setFormState((prev) => ({ ...prev, [row.type]: { ...prev[row.type], justification: event.target.value } }))}
-                    className="mt-1 min-h-20 w-full rounded-lg border border-[#CBD5E1] px-3 py-2 text-sm text-[#1F2937] focus:border-[#0F766E] focus:outline-none"
-                    placeholder="Décrire le constat"
+                    rows={1}
+                    value={formState[type].justification}
+                    onChange={(event) => updateCharge(type, 'justification', event.target.value)}
+                    onBlur={() => updateError(type)}
+                    required={amounts[type] > 0}
+                    disabled={isReadOnly}
+                    aria-label={'Justification : ' + label}
+                    aria-describedby={errors[type] ? 'charge-error-' + type : undefined}
+                    className={inputClass}
                   />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Montant (€)</label>
+                  {errors[type] ? <p id={'charge-error-' + type} className="text-xs font-medium">{errors[type]}</p> : null}
+                </td>
+                <td className="py-1.5">
                   <input
                     type="text"
                     inputMode="decimal"
-                    value={formState[row.type].amount}
-                    onChange={(event) => setFormState((prev) => ({ ...prev, [row.type]: { ...prev[row.type], amount: event.target.value } }))}
-                    className="mt-1 w-full rounded-lg border border-[#CBD5E1] px-3 py-2 text-right text-sm font-semibold text-[#1F2937] focus:border-[#0F766E] focus:outline-none"
-                    aria-label={`Montant ${row.label}`}
+                    value={formState[type].amount}
+                    onChange={(event) => updateCharge(type, 'amount', event.target.value)}
+                    onBlur={() => updateError(type)}
+                    disabled={isReadOnly}
+                    aria-label={'Montant en euros : ' + label}
+                    aria-describedby={errors[type] ? 'charge-error-' + type : undefined}
+                    className={inputClass + ' text-right'}
                   />
-                </div>
-              </div>
-              {errors[row.type] ? <p className="mt-2 text-sm text-red-600">{errors[row.type]}</p> : null}
-            </div>
-          ))}
-        </div>
-
-        <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 text-sm md:grid-cols-2">
-          <Field label="Total des frais supplémentaires" value={formatCurrency(totalAdditionalCharges.toFixed(2))} />
-          <Field label="Montant maximal à retenir sur la caution" value={formatCurrency(retainedOnDeposit.toFixed(2))} />
-          <Field label="Solde de caution à libérer" value={formatCurrency(depositToRelease.toFixed(2))} />
-          <Field label="Dépassement éventuel de la caution" value={formatCurrency(overDeposit.toFixed(2))} />
-        </div>
-
-        {reservation.return_charges_confirmed_at ? (
-          <p className="text-sm text-slate-600">
-            Dernière mise à jour le {new Date(reservation.return_charges_confirmed_at).toLocaleString('fr-BE')}
-            {reservation.return_charges_confirmed_by ? ` par le gestionnaire n°${reservation.return_charges_confirmed_by}.` : '.'}
-          </p>
-        ) : null}
-        {saveError ? <Alert variant="danger" title="Enregistrement impossible" message={saveError} /> : null}
-
-        <Button onClick={handleSave} disabled={isSaving || reservation.status !== 'A_CONTROLER'}>
-          {isSaving ? 'Enregistrement en cours...' : 'Enregistrer les frais supplémentaires'}
-        </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <aside aria-label="Récapitulatif des frais" className="grid grid-cols-2 gap-2 rounded border border-gray-200 bg-gray-50 p-2 lg:grid-cols-1">
+          <Field label="Total des frais supplémentaires" value={formatCurrency(settlementResult?.charges_total ?? totalAdditionalCharges.toFixed(2))} />
+          <Field label={hasActiveDeposit ? 'Retenue sur caution estimée' : 'Retenue sur caution'} value={formatCurrency(readiness?.captured_amount ?? settlementResult?.captured_amount ?? estimatedRetention)} />
+          <Field label={isSettled ? 'Solde de caution libéré' : 'Solde de caution à libérer'} value={formatCurrency(readiness?.released_amount ?? settlementResult?.released_amount ?? estimatedRelease)} />
+          <Field label="Dépassement éventuel" value={formatCurrency(settlementResult?.over_deposit_amount ?? overDeposit.toFixed(2))} />
+          <Field label="Statut de la caution Stripe" value={depositStatus ? DEPOSIT_STATUS_LABELS[depositStatus] : 'Indisponible'} />
+        </aside>
       </div>
-    </Card>
+      {saveError ? <Notice title="Enregistrement impossible" message={saveError} /> : null}
+      {showSaveAction ? (
+        <button type="button" className={'mt-2 ' + secondaryClass} onClick={handleSave} disabled={isReadOnly}>
+          {isSaving ? 'Enregistrement en cours...' : 'Enregistrer les frais supplémentaires'}
+        </button>
+      ) : null}
+      {!showSaveAction && reservation.status === 'A_CONTROLER' ? (
+        <div className="mt-3 space-y-2">
+          {closureErrorMessage ? <Notice title="Clôture interrompue" message={closureErrorMessage} /> : null}
+          {readinessQuery.isError ? (
+            <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
+              <p>{toErrorState(readinessQuery.error).message}</p>
+              <button type="button" className={secondaryClass} onClick={() => void readinessQuery.refetch()}>Revérifier</button>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {exceedsDeposit ? <p className="text-sm">La caution ne couvre pas les frais saisis.</p> : null}
+            {!isReadOnly && formInvalid ? <p className="text-sm">Vérifiez les montants et justifiez chaque frais positif.</p> : null}
+            {readinessQuery.isFetching ? <p role="status" className="text-sm">Vérification de la clôture…</p> : null}
+            <button
+              type="button"
+              disabled={closureDisabled || confirmation !== null}
+              className="rounded bg-violet-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => {
+                if (readiness && !closureDisabled) setConfirmation({ readiness, payload: buildChargesPayload(formState) })
+              }}
+            >
+              Valider et clôturer
+            </button>
+          </div>
+          {confirmation ? (
+            <ReturnClosureConfirmation
+              depositStatus={confirmation.readiness.deposit_status}
+              total={confirmedTotal.toFixed(2)}
+              retained={confirmation.readiness.captured_amount ?? confirmedTotal.toFixed(2)}
+              pending={closureMutation.isPending}
+              onCancel={() => setConfirmation(null)}
+              onConfirm={() => void confirmClosure()}
+            />
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   )
 }
 
@@ -818,26 +945,22 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
     onSuccess: refreshReservation,
   })
 
-  const controlReservation = useMemo(
-    () => (detailQuery.data?.status === 'A_CONTROLER' ? detailQuery.data : detailQuery.data),
-    [detailQuery.data],
-  )
+  const controlReservation = detailQuery.data
+  const showLegacyActions = basePath === '/admin'
 
   if (!isValidReservationId) {
     return (
       <section className="mx-auto max-w-7xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
-        <Link to={`${basePath}/reservations`} className="inline-flex">
-          <Button variant="secondary">Retour aux reservations</Button>
-        </Link>
+        <Notice title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+        <Link to={`${basePath}/reservations`} className={secondaryClass}>Retour aux réservations</Link>
       </section>
     )
   }
 
   if (detailQuery.isLoading) {
     return (
-      <section className="mx-auto flex min-h-[60vh] max-w-7xl items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
-        <LoadingSpinner size="lg" aria-label="Chargement du retour a verifier" />
+      <section className="mx-auto max-w-7xl bg-white px-4 py-3 text-sm text-black">
+        <p role="status">Chargement de la réservation…</p>
       </section>
     )
   }
@@ -846,12 +969,10 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
     const errorState = toErrorState(detailQuery.error)
     return (
       <section className="mx-auto max-w-7xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title={errorState.title} message={errorState.message} />
+        <Notice title={errorState.title} message={errorState.message} />
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => void detailQuery.refetch()}>Reessayer</Button>
-          <Link to={`${basePath}/reservations`}>
-            <Button variant="secondary">Retour aux reservations</Button>
-          </Link>
+          <button type="button" className={secondaryClass} onClick={() => void detailQuery.refetch()}>Réessayer</button>
+          <Link to={`${basePath}/reservations`} className={secondaryClass}>Retour aux réservations</Link>
         </div>
       </section>
     )
@@ -865,7 +986,6 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
   const reservationStatusLabel = getReservationStatusLabel(reservation.status, reservation.cancellation_source)
   const departureInspection = reservation.departure_inspection
   const returnInspection = reservation.return_inspection
-  const isDepositDecisionPending = reservation.deposit_status === 'AUTORISEE' || reservation.deposit_status === 'A_VERIFIER'
 
   const handleInvoiceDownload = async () => {
     if (!reservation.invoice_id || isInvoiceDownloading) return
@@ -890,43 +1010,37 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
   }
 
   return (
-    <section className="mx-auto w-full max-w-[1250px] space-y-5 px-3 py-6 sm:px-4 lg:px-5">
+    <section className="mx-auto w-full max-w-[1440px] space-y-3 bg-white px-3 py-3 text-black sm:px-4">
       {toastMessage ? (
-        <div role="status" className="fixed right-4 top-20 z-50 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-medium text-white shadow-lg">
+        <div role="status" className="rounded border border-gray-200 bg-white px-3 py-2 text-sm">
           {toastMessage}
         </div>
       ) : null}
-      <header className="flex flex-col gap-3 pb-1 md:flex-row md:items-center md:justify-between">
-        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
-          <Link to={`${basePath}/reservations`} className="shrink-0 self-start sm:self-auto">
-            <Button variant="secondary" size="sm">
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-              Retour à la liste
-            </Button>
-          </Link>
-          <h1 className="text-3xl font-bold text-[#0F172A]">Détail de la réservation</h1>
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to={basePath + '/reservations'} className={secondaryClass}>Retour à la liste</Link>
+          <h1 className="text-lg font-semibold sm:text-xl">Détail de la réservation</h1>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2 md:justify-end">
-          <Button
-            variant="secondary"
-            size="sm"
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span>{reservationStatusLabel}</span>
+          <button
+            type="button"
+            className={secondaryClass}
             disabled={!reservation.invoice_id || !reservation.invoice_pdf_available || isInvoiceDownloading}
-            title={reservation.invoice_pdf_available ? undefined : 'Aucune facture disponible'}
             onClick={() => void handleInvoiceDownload()}
           >
             {isInvoiceDownloading ? 'Téléchargement...' : reservation.invoice_pdf_available ? 'Télécharger la facture' : 'Facture indisponible'}
-          </Button>
-          <StatusBadge variant={reservation.status === 'NON_UTILISEE' ? 'neutral' : 'success'} label={reservationStatusLabel} />
-          {isDepositDecisionPending ? <StatusBadge variant="info" label="Caution à décider" /> : null}
+          </button>
         </div>
       </header>
 
-      {invoiceDownloadError ? <Alert variant="danger" title="Téléchargement impossible" message={invoiceDownloadError} /> : null}
+      {invoiceDownloadError ? <Notice title="Téléchargement impossible" message={invoiceDownloadError} /> : null}
 
       <ReservationSummaryCard
         vehicle={reservation.vehicle}
         client={reservation.client_summary}
         rentalAmount={reservation.rental_amount}
+        hasPaidRental={reservation.status === 'A_CONTROLER' || reservation.status === 'TERMINEE'}
         depositAmount={reservation.deposit_amount}
         startAt={reservation.start_at}
         endAt={reservation.end_at}
@@ -934,50 +1048,41 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
         returnInspection={returnInspection}
       />
 
-      <VehicleInspectionControl
-        departure={departureInspection}
-        returned={returnInspection}
-        previousDeparture={reservation.previous_reservation?.departure_inspection ?? null}
-        previousReturn={reservation.previous_reservation?.return_inspection ?? null}
-        reference={reservation.vehicle_reference_inspection}
-      />
+      <VehicleInspectionControl departure={departureInspection} returned={returnInspection} />
 
-      <section className="space-y-4">
+      <section className="space-y-2">
         <AdditionalChargesSection
+          key={reservation.id}
           reservation={reservation}
-          departureInspection={departureInspection}
-          returnInspection={returnInspection}
+          showSaveAction={showLegacyActions}
+          settlementResult={settlementResult}
           onSaved={chargesRefreshToken}
           isSaving={additionalChargesMutation.isPending}
           saveError={saveChargesError}
           onSave={(formState) => {
             setSaveChargesError(null)
-            additionalChargesMutation.mutate({
-              charges: CHARGE_TYPE_ROWS.map((row) => ({
-                charge_type: row.type,
-                amount: formatChargeInput(formState[row.type].amount),
-                justification: formState[row.type].justification.trim(),
-              })),
-            })
+            additionalChargesMutation.mutate(buildChargesPayload(formState))
           }}
         />
-        {reservation.status === 'A_CONTROLER' && reservation.return_charges_confirmed_at && Number(reservation.return_delay_fee) + Number(reservation.return_fuel_fee) === 0 ? (
+        {showLegacyActions && reservation.status === 'A_CONTROLER' && reservation.return_charges_confirmed_at && Number(reservation.return_delay_fee) + Number(reservation.return_fuel_fee) === 0 ? (
           <Button className="mt-3" disabled={completeMutation.isPending} onClick={() => completeMutation.mutate()}>
             Clôturer la location
           </Button>
         ) : null}
-        {completeMutation.isError ? <Alert variant="danger" title="Clôture impossible" message={toErrorState(completeMutation.error).message} /> : null}
+        {showLegacyActions && reservation.status === 'A_CONTROLER' && completeMutation.isError ? (
+          <Notice title="Clôture impossible" message={toErrorState(completeMutation.error).message} />
+        ) : null}
         {reservation.status === 'TERMINEE' && !reservation.invoice_pdf_available ? (
           <div className="mt-4">
-            <Button disabled={completeMutation.isPending} onClick={() => completeMutation.mutate()}>
+            <button type="button" className={secondaryClass} disabled={completeMutation.isPending} onClick={() => completeMutation.mutate()}>
               Réessayer la génération de la facture
-            </Button>
-            {completeMutation.isError ? <Alert variant="danger" title="Génération impossible" message={toErrorState(completeMutation.error).message} /> : null}
+            </button>
+            {completeMutation.isError ? <Notice title="Génération impossible" message={toErrorState(completeMutation.error).message} /> : null}
           </div>
         ) : null}
       </section>
 
-      {reservation.status === 'A_CONTROLER' || settlementResult !== null ? (
+      {showLegacyActions && (reservation.status === 'A_CONTROLER' || settlementResult !== null) ? (
         <ReservationClosureSection
           reservation={reservation}
           isSettling={depositSettlementMutation.isPending}
@@ -989,6 +1094,7 @@ export default function ManagerReservationDetailPage({ basePath = '/manager' }: 
           onConfirm={() => depositSettlementMutation.mutate()}
         />
       ) : null}
+
     </section>
   )
 }
@@ -1072,9 +1178,9 @@ function ReservationClosureSection({
         : settlementResult?.deposit_status ?? ''
 
   return (
-    <Card header={<h2 className="text-xl font-semibold text-[#0F172A]">Clôture de la réservation</h2>}>
+    <Card header={<h2 className="text-xl font-semibold text-black">Clôture de la réservation</h2>}>
       <div className="space-y-4">
-        <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 text-sm md:grid-cols-2">
+        <div className="grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm md:grid-cols-2">
           <Field label="Montant de location initial" value={formatCurrency(reservation.rental_amount)} />
           <Field label="Caution préautorisée" value={formatCurrency(reservation.deposit_amount)} />
           <Field label="Total des frais supplémentaires" value={formatCurrency(chargesTotal.toFixed(2))} />
@@ -1085,9 +1191,7 @@ function ReservationClosureSection({
 
         {settlementResult ? (
           <div className="space-y-3">
-            <Alert
-              variant="success"
-              title="Caution régularisée — résultat confirmé par Stripe"
+            <Notice title="Caution régularisée — résultat confirmé par Stripe"
               message={settledStatusLabel}
             />
             <div className="grid gap-3 rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] p-4 text-sm md:grid-cols-2">
@@ -1097,15 +1201,13 @@ function ReservationClosureSection({
               <Field label="Dépassement de caution" value={formatCurrency(settlementResult.over_deposit_amount)} />
             </div>
             {settlementResult.stripe_payment_intent_id ? (
-              <p className="text-xs text-slate-500">Transaction Stripe : {settlementResult.stripe_payment_intent_id}</p>
+              <p className="text-xs text-gray-500">Transaction Stripe : {settlementResult.stripe_payment_intent_id}</p>
             ) : null}
           </div>
         ) : null}
 
         {settleError ? (
-          <Alert
-            variant="danger"
-            title="Clôture impossible"
+          <Notice title="Clôture impossible"
             message={`${settleError} La caution n\u2019a pas été traitée et la réservation n\u2019est pas clôturée.`}
           />
         ) : null}
@@ -1135,7 +1237,7 @@ function ReservationClosureSection({
             <Button disabled={!canSettle} onClick={onRequestConfirm}>
               {isSettling ? 'Traitement en cours...' : 'Valider et clôturer'}
             </Button>
-            {disabledReason ? <p className="text-sm text-slate-500">{disabledReason}</p> : null}
+            {disabledReason ? <p className="text-sm text-gray-500">{disabledReason}</p> : null}
           </div>
         ) : null}
       </div>

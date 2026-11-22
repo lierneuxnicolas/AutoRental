@@ -47,6 +47,7 @@ import ClientInvoicesPage from '../pages/client/ClientInvoicesPage'
 import ClientInvoiceDetailPage from '../pages/client/ClientInvoiceDetailPage'
 import ClientNotificationsPage from '../pages/client/ClientNotificationsPage'
 import ManagerDocumentsPage from '../pages/manager/ManagerDocumentsPage'
+import ManagerDashboardPage from '../pages/manager/ManagerDashboardPage'
 import ManagerDocumentDetailPage from '../pages/manager/ManagerDocumentDetailPage'
 import ManagerVehiclesPage from '../pages/manager/ManagerVehiclesPage'
 import ManagerVehicleCreatePage from '../pages/manager/ManagerVehicleCreatePage'
@@ -420,17 +421,8 @@ export default function AppRouter() {
         </Route>
 
         <Route element={<ProtectedRoute allowedRoles={['GESTIONNAIRE_COMPTABLE', 'ADMINISTRATEUR']} />}>
-          <Route path="/manager" element={<PublicLayout />}>
-            <Route
-              index
-              element={
-                <PrivateAreaPage
-                  title="Tableau de bord"
-                  roleLabel="gestionnaire"
-                  sections={['Gestion des véhicules', 'Réservations', 'Documents à valider', 'Paiements']}
-                />
-              }
-            />
+          <Route path="/manager" element={<PublicLayout manager />}>
+            <Route index element={<ManagerDashboardPage />} />
             <Route
               path="vehicles"
               element={<ManagerVehiclesPage />}

@@ -15,8 +15,9 @@ from invoicing.models import Invoice
 from invoicing.services import create_invoice_for_reservation
 from invoicing.services.pdf_generator import build_invoice_financial_details
 from payments.models import Deposit, Payment
-from reservations.models import Reservation
+from reservations.models import Reservation, ReservationAdditionalCharge
 from reservations.serializers.reservation import ReservationListDetailSerializer
+from reservations.services.completion import ReservationCompletionError
 from reservations.tests import ReservationTestDataMixin
 
 
@@ -46,6 +47,9 @@ class FinancialCompletionTests(ReservationTestDataMixin, TestCase):
         )
         self.confirm_url = reverse("reservations:management-reservation-confirm-return-charges", kwargs={"pk": self.reservation.id})
         self.complete_url = reverse("reservations:management-reservation-complete", kwargs={"pk": self.reservation.id})
+        self.detail_url = reverse("reservations:management-reservation-detail", kwargs={"pk": self.reservation.id})
+        self.charges_url = reverse("reservations:management-reservation-additional-charges", kwargs={"pk": self.reservation.id})
+        self.settle_url = reverse("reservations:management-reservation-settle-deposit", kwargs={"pk": self.reservation.id})
         self.api.force_authenticate(self.manager_user)
 
     def _confirm(self):
@@ -61,6 +65,176 @@ class FinancialCompletionTests(ReservationTestDataMixin, TestCase):
             reservation=self.reservation, mode=Deposit.Mode.SIMULATED,
             amount=Decimal("500.00"), currency="EUR", status=Deposit.Status.A_VERIFIER,
         )
+
+    def _save_charges(self, *, delay="0.00", damages="0.00"):
+        amounts = {"RETARD": delay, "DEGATS": damages}
+        charges = [
+            {"charge_type": charge_type, "amount": amounts.get(charge_type, "0.00"), "justification": "Constat de retour"}
+            for charge_type in ReservationAdditionalCharge.ChargeType.values
+        ]
+        response = self.api.post(self.charges_url, {"charges": charges}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        return charges
+
+    @override_settings(STRIPE_SECRET_KEY="sk_test_example")
+    @patch("payments.services.deposits.stripe.PaymentIntent.capture")
+    @patch("payments.services.deposits.stripe.PaymentIntent.retrieve")
+    def test_guarded_closure_rechecks_amounts_and_stripe_capacity(self, retrieve, capture):
+        self.assertEqual(self.api.get(self.complete_url).data["code"], "DEPOSIT_STATUS_INVALID")
+        self._paid_and_deposit()
+        deposit = self.reservation.deposits.get()
+        self.reservation.deposits.update(mode=Deposit.Mode.STRIPE_TEST, stripe_payment_intent_id="pi_guarded")
+        readiness = self.api.get(self.complete_url)
+        self.assertEqual(readiness.status_code, 200, readiness.data)
+        self.assertTrue(self.api.get(self.detail_url).data["return_charges_editable"])
+        self.assertEqual(readiness.data["deposit_id"], deposit.pk)
+        self.assertEqual(readiness.data["deposit_status"], Deposit.Status.A_VERIFIER)
+        stale_charges = self._save_charges(damages="15.00")
+        charges = self._save_charges(damages="25.00")
+        deposit_confirmation = {"deposit_id": deposit.pk, "deposit_amount": str(deposit.amount)}
+        response = self.api.post(self.settle_url, {**deposit_confirmation, "charges": stale_charges}, format="json")
+        self.assertEqual(response.data["code"], "CLOSURE_DATA_CHANGED")
+        retrieve.assert_not_called()
+
+        confirmation = {**deposit_confirmation, "charges": charges}
+        self.assertEqual(
+            self.api.post(self.settle_url, {**confirmation, "deposit_amount": "400.00"}, format="json").data["code"],
+            "CLOSURE_DATA_CHANGED",
+        )
+        pending = Payment.objects.create(reservation=self.reservation, amount=Decimal("1.00"), status=Payment.Status.TRAITEMENT)
+        self.assertEqual(self.api.get(self.complete_url).data["code"], "PAYMENT_PENDING")
+        self.assertTrue(self.api.get(self.detail_url).data["return_charges_editable"])
+        self.assertEqual(self.api.post(self.settle_url, confirmation, format="json").data["code"], "PAYMENT_PENDING")
+        retrieve.assert_not_called()
+        pending.delete()
+
+        retrieve.return_value = SimpleNamespace(status="requires_capture", amount_capturable=2000)
+        self.assertEqual(
+            self.api.post(self.settle_url, confirmation, format="json").data["code"], "INSUFFICIENT_CAPTURABLE_AMOUNT",
+        )
+        capture.assert_not_called()
+        retrieve.return_value = SimpleNamespace(status="requires_capture", amount_capturable=50000)
+        capture.return_value = SimpleNamespace(status="succeeded")
+        self.assertEqual(self.api.post(self.settle_url, confirmation, format="json").status_code, 200)
+        self.assertEqual(self.api.get(self.complete_url).data["captured_amount"], "25.00")
+        self.assertFalse(self.api.get(self.detail_url).data["return_charges_editable"])
+        self.assertEqual(self.api.post(self.settle_url, confirmation, format="json").data["code"], "DEPOSIT_ALREADY_SETTLED")
+        closed = self.api.post(self.complete_url, {}, format="json")
+        self.assertEqual(closed.status_code, 200, closed.data)
+        self.assertEqual(closed.data["reservation"]["status"], Reservation.Status.TERMINEE)
+        self.assertTrue(closed.data["reservation"]["invoice_pdf_available"])
+        self.assertCountEqual(
+            self.reservation.additional_charges.values_list("charge_type", "amount", "justification", "status"),
+            [
+                (charge["charge_type"], Decimal(charge["amount"]), charge["justification"], ReservationAdditionalCharge.Status.VALIDEE)
+                for charge in charges
+            ],
+        )
+        capture.assert_called_once()
+
+    @override_settings(STRIPE_SECRET_KEY="sk_test_example")
+    @patch("payments.services.deposits.stripe.PaymentIntent.cancel")
+    @patch("payments.services.deposits.stripe.PaymentIntent.capture")
+    @patch("payments.services.deposits.stripe.PaymentIntent.retrieve")
+    def test_captured_deposit_survives_invoice_failure_and_complete_resumes(self, retrieve, capture, cancel):
+        self._paid_and_deposit()
+        self.reservation.deposits.update(mode=Deposit.Mode.STRIPE_TEST, stripe_payment_intent_id="pi_deposit_test")
+        self._save_charges(delay="10.00", damages="15.00")
+        retrieve.return_value = SimpleNamespace(status="requires_capture", amount_capturable=50000)
+        capture.return_value = SimpleNamespace(status="succeeded")
+
+        with patch("invoicing.services.pdf_generator.ensure_invoice_pdf", side_effect=OSError("PDF unavailable")):
+            with self.assertLogs("payments.services.deposits", level="ERROR"):
+                settled = self.api.post(self.settle_url, {}, format="json")
+            self.assertEqual(settled.status_code, 200, settled.data)
+            with self.assertLogs("reservations.services.completion", level="ERROR"):
+                failed = self.api.post(self.complete_url, {}, format="json")
+            self.assertEqual(failed.status_code, 503)
+            self.assertEqual(failed.data["code"], "INVOICE_PDF_FAILED")
+
+        self.reservation.refresh_from_db()
+        self.assertEqual(self.reservation.status, Reservation.Status.A_CONTROLER)
+        deposit = self.reservation.deposits.get()
+        self.assertEqual(deposit.status, Deposit.Status.CAPTUREE)
+        self.assertEqual(deposit.captured_amount, Decimal("25.00"))
+        complementary = Invoice.objects.get(reservation=self.reservation, invoice_type=Invoice.InvoiceType.COMPLEMENTAIRE)
+        self.assertFalse(complementary.pdf_file)
+
+        with patch("reservations.services.completion._resolve_vehicle_status_after_return_validation", side_effect=ReservationCompletionError(
+            code="CLOSURE_FAILED", message="Clôture temporairement indisponible.", http_status=503,
+        )):
+            failed = self.api.post(self.complete_url, {}, format="json")
+        self.assertEqual(failed.data["code"], "CLOSURE_FAILED")
+        self.reservation.refresh_from_db()
+        self.assertEqual(self.reservation.status, Reservation.Status.A_CONTROLER)
+        deposit.refresh_from_db()
+        self.assertEqual(deposit.status, Deposit.Status.CAPTUREE)
+
+        response = self.api.post(self.complete_url, {}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self.api.post(self.complete_url, {}, format="json").status_code, 200)
+        self.reservation.refresh_from_db()
+        self.assertEqual(self.reservation.status, Reservation.Status.TERMINEE)
+        complementary.refresh_from_db()
+        self.assertEqual(complementary.total_amount, Decimal("25.00"))
+        invoices = Invoice.objects.filter(reservation=self.reservation)
+        self.assertCountEqual(invoices.values_list("invoice_type", flat=True), [Invoice.InvoiceType.LOCATION, Invoice.InvoiceType.COMPLEMENTAIRE])
+        for invoice in invoices:
+            self.assertTrue(invoice.pdf_file.storage.exists(invoice.pdf_file.name))
+        retrieve.assert_called_once_with("pi_deposit_test")
+        capture.assert_called_once()
+        self.assertEqual(capture.call_args.kwargs["amount_to_capture"], 2500)
+        self.assertTrue(capture.call_args.kwargs["idempotency_key"])
+        cancel.assert_not_called()
+
+    @patch("payments.services.deposits.release_authorized_deposit")
+    def test_released_deposit_with_validated_zero_charges_is_not_released_again(self, release):
+        self._paid_and_deposit()
+        self._save_charges()
+        self.assertEqual(self.api.post(self.settle_url, {}, format="json").status_code, 200)
+        self.assertEqual(self.api.post(self.complete_url, {}, format="json").status_code, 200)
+        self.reservation.refresh_from_db()
+        self.assertEqual(self.reservation.status, Reservation.Status.TERMINEE)
+        self.assertEqual(Invoice.objects.get(reservation=self.reservation).invoice_type, Invoice.InvoiceType.LOCATION)
+        release.assert_not_called()
+
+    def test_provisional_charges_prevent_completion(self):
+        self._paid_and_deposit()
+        self._save_charges(damages="15.00")
+        response = self.api.post(self.complete_url, {}, format="json")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["code"], "CHARGES_NOT_VALIDATED")
+        self.assertFalse(Invoice.objects.filter(reservation=self.reservation).exists())
+
+    def test_released_deposit_does_not_cover_validated_positive_charges(self):
+        self._paid_and_deposit()
+        self._save_charges(damages="15.00")
+        self.reservation.additional_charges.update(status=ReservationAdditionalCharge.Status.VALIDEE)
+        self.reservation.deposits.update(status=Deposit.Status.LIBEREE)
+        response = self.api.post(self.complete_url, {}, format="json")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["code"], "SUPPLEMENTARY_PAYMENT_REQUIRED")
+        self.reservation.refresh_from_db()
+        self.assertEqual(self.reservation.status, Reservation.Status.A_CONTROLER)
+
+    def test_capture_with_unknown_amount_or_unpaid_balance_prevents_completion(self):
+        self._paid_and_deposit()
+        self._save_charges(damages="501.00")
+        self.assertEqual(self.api.post(self.settle_url, {}, format="json").status_code, 200)
+        deposit = self.reservation.deposits.get()
+        self.assertEqual(deposit.captured_amount, self.reservation.deposit_amount)
+        for captured_amount, error_code in [
+            (deposit.captured_amount, "SUPPLEMENTARY_PAYMENT_REQUIRED"),
+            (None, "DEPOSIT_CAPTURE_UNCONFIRMED"),
+        ]:
+            with self.subTest(captured_amount=captured_amount):
+                self.reservation.deposits.update(captured_amount=captured_amount)
+                response = self.api.post(self.complete_url, {}, format="json")
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.data["code"], error_code)
+                self.reservation.refresh_from_db()
+                self.assertEqual(self.reservation.status, Reservation.Status.A_CONTROLER)
+                self.assertFalse(Invoice.objects.filter(reservation=self.reservation, invoice_type=Invoice.InvoiceType.LOCATION).exists())
 
     def test_zero_charges_confirm_once_and_permissions(self):
         self.api.force_authenticate(self.client_user_1)

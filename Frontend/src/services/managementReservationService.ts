@@ -6,6 +6,8 @@ import type {
   ManagementAdditionalChargesUpdateRequest,
   ManagementReservationValidationRequest,
   ManagementReservationValidationResponse,
+  ManagementReturnClosureReadiness,
+  ManagementSettlementConfirmation,
   PaginatedManagementReservationListResponse,
   ReservationDepositReleaseResponse,
   ReservationDepositSettlementResponse,
@@ -92,6 +94,11 @@ export async function validateManagementReservationReturn(
   return data
 }
 
+export async function getManagementReturnClosureReadiness(id: number): Promise<ManagementReturnClosureReadiness> {
+  const { data } = await api.get<ManagementReturnClosureReadiness>(`/management/reservations/${id}/complete/`)
+  return data
+}
+
 export async function confirmManagementReturnCharges(id: number | string): Promise<ReservationManagementDetail> {
   const { data } = await api.post<ReservationManagementDetail>(`/management/reservations/${id}/confirm-return-charges/`)
   return data
@@ -152,9 +159,11 @@ export async function releaseManagementReservationDeposit(
 
 export async function settleManagementReservationDeposit(
   id: number | string,
+  confirmation?: ManagementSettlementConfirmation,
 ): Promise<ReservationDepositSettlementResponse> {
   const { data } = await api.post<ReservationDepositSettlementResponse>(
     `/management/reservations/${id}/settle-deposit/`,
+    confirmation,
   )
   return data
 }

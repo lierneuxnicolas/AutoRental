@@ -230,7 +230,7 @@ export default function ManagerDocumentsPage() {
             ))}
           </div>
 
-          <div className="hidden overflow-hidden rounded-3xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)] lg:block">
+          <div className="hidden overflow-x-auto rounded-3xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)] lg:block">
             <table className="w-full border-collapse text-left">
               <thead className="border-b border-[#E5E7EB] bg-[#F5F5F5]">
                 <tr>

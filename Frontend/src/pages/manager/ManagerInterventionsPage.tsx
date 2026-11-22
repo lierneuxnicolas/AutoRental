@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import Alert from '../../components/feedback/Alert'
@@ -213,116 +213,119 @@ export default function ManagerInterventionsPage() {
             const createdBy = getPersonLabel(intervention.created_by)
 
             return (
-              <Card
-                key={intervention.id}
-                header={
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Fragment key={intervention.id}>
+                <Card
+                  header={
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Référence</p>
+                        <p className="text-base font-semibold text-[#0F172A]">{intervention.reference}</p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge variant={status.variant} label={status.label} />
+                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
+                          {intervention.intervention_type}
+                        </span>
+                      </div>
+                    </div>
+                  }
+                >
+                  <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 xl:grid-cols-3">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Référence</p>
-                      <p className="text-base font-semibold text-[#0F172A]">{intervention.reference}</p>
+                      <p className="font-medium text-[#1F2937]">Description</p>
+                      <p className="mt-1 whitespace-pre-line">{intervention.description || 'Aucune description fournie.'}</p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge variant={status.variant} label={status.label} />
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
-                        {intervention.intervention_type}
-                      </span>
+                    <div>
+                      <p className="font-medium text-[#1F2937]">Véhicule</p>
+                      <p className="mt-1">
+                        {intervention.vehicle.brand} {intervention.vehicle.model_name}
+                      </p>
+                      <p className="text-slate-500">{intervention.vehicle.registration_number}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-[#1F2937]">Réservation</p>
+                      <p className="mt-1">{intervention.reservation ? intervention.reservation.reference : 'Aucune réservation liée'}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-[#1F2937]">Personne affectée</p>
+                      <p className="mt-1">{assignedTo ?? 'Non affectée'}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-[#1F2937]">Créé par</p>
+                      <p className="mt-1">{createdBy ?? '—'}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-[#1F2937]">Créé le</p>
+                      <p className="mt-1">{formatDateTime(intervention.created_at)}</p>
                     </div>
                   </div>
-                }
-              >
-                <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 xl:grid-cols-3">
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Description</p>
-                    <p className="mt-1 whitespace-pre-line">{intervention.description || 'Aucune description fournie.'}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Véhicule</p>
-                    <p className="mt-1">
-                      {intervention.vehicle.brand} {intervention.vehicle.model_name}
-                    </p>
-                    <p className="text-slate-500">{intervention.vehicle.registration_number}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Réservation</p>
-                    <p className="mt-1">{intervention.reservation ? intervention.reservation.reference : 'Aucune réservation liée'}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Personne affectée</p>
-                    <p className="mt-1">{assignedTo ?? 'Non affectée'}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Créé par</p>
-                    <p className="mt-1">{createdBy ?? '—'}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-[#1F2937]">Créé le</p>
-                    <p className="mt-1">{formatDateTime(intervention.created_at)}</p>
-                  </div>
-                </div>
 
-                <div className="mt-5 flex flex-wrap justify-end gap-3">
-                  {intervention.status === 'A_ATTRIBUER' ? (
-                    <>
-                      {assignFormOpenForId === intervention.id ? (
-                        <form className="flex w-full flex-col gap-3 rounded-2xl border border-[#E5E7EB] bg-[#F9FAFB] p-4 md:flex-row md:items-end" onSubmit={(event) => handleAssignSubmit(event, intervention.id)}>
-                          <div className="flex-1">
-                            <label className="mb-2 block text-sm font-medium text-[#1F2937]" htmlFor={`assign-user-${intervention.id}`}>
-                              assigned_user_id
-                            </label>
-                            <Input
-                              id={`assign-user-${intervention.id}`}
-                              type="number"
-                              min="1"
-                              required
-                              value={assignUserId}
-                              onChange={(event) => setAssignUserId(event.target.value)}
-                              placeholder="ID utilisateur autorisé"
-                            />
-                            <p className="mt-2 text-sm text-slate-500">
-                              Saisissez l’ID d’un utilisateur autorisé. Aucune liste d’utilisateurs n’est disponible dans cette vue.
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button type="button" variant="secondary" size="sm" onClick={() => setAssignFormOpenForId(null)}>
-                              Annuler
-                            </Button>
-                            <Button type="submit" variant="primary" size="sm" disabled={assignMutation.isPending}>
-                              {assignMutation.isPending ? 'Assignation...' : 'Confirmer'}
-                            </Button>
-                          </div>
-                        </form>
-                      ) : (
-                        <Button variant="primary" size="sm" onClick={() => {
-                          setAssignFormOpenForId(intervention.id)
-                          setAssignUserId('')
-                          setAssignError(null)
-                        }}>
-                          Assigner
-                        </Button>
-                      )}
-                    </>
-                  ) : null}
-                  {intervention.status === 'TERMINEE' ? (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setReportOpenForId((current) => current === intervention.id ? null : intervention.id)}
-                    >
-                      Voir le rapport
-                    </Button>
-                  ) : null}
-                </div>
+                  <div className="mt-5 flex flex-wrap justify-end gap-3">
+                    {intervention.status === 'A_ATTRIBUER' ? (
+                      <>
+                        {assignFormOpenForId === intervention.id ? (
+                          <form className="flex w-full flex-col gap-3 rounded-2xl border border-[#E5E7EB] bg-[#F9FAFB] p-4 md:flex-row md:items-end" onSubmit={(event) => handleAssignSubmit(event, intervention.id)}>
+                            <div className="flex-1">
+                              <label className="mb-2 block text-sm font-medium text-[#1F2937]" htmlFor={`assign-user-${intervention.id}`}>
+                                assigned_user_id
+                              </label>
+                              <Input
+                                id={`assign-user-${intervention.id}`}
+                                type="number"
+                                min="1"
+                                required
+                                value={assignUserId}
+                                onChange={(event) => setAssignUserId(event.target.value)}
+                                placeholder="ID utilisateur autorisé"
+                              />
+                              <p className="mt-2 text-sm text-slate-500">
+                                Saisissez l’ID d’un utilisateur autorisé. Aucune liste d’utilisateurs n’est disponible dans cette vue.
+                              </p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button type="button" variant="secondary" size="sm" onClick={() => setAssignFormOpenForId(null)}>
+                                Annuler
+                              </Button>
+                              <Button type="submit" variant="primary" size="sm" disabled={assignMutation.isPending}>
+                                {assignMutation.isPending ? 'Assignation...' : 'Confirmer'}
+                              </Button>
+                            </div>
+                          </form>
+                        ) : (
+                          <Button variant="primary" size="sm" onClick={() => {
+                            setAssignFormOpenForId(intervention.id)
+                            setAssignUserId('')
+                            setAssignError(null)
+                          }}>
+                            Assigner
+                          </Button>
+                        )}
+                      </>
+                    ) : null}
+                    {intervention.status === 'TERMINEE' ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        aria-expanded={reportOpenForId === intervention.id}
+                        aria-controls={reportOpenForId === intervention.id ? 'intervention-report-' + intervention.id : undefined}
+                        onClick={() => setReportOpenForId((current) => current === intervention.id ? null : intervention.id)}
+                      >
+                        Voir le rapport
+                      </Button>
+                    ) : null}
+                  </div>
 
+                </Card>
                 {reportOpenForId === intervention.id ? (
-                  <div className="mt-5 border-t border-[#E5E7EB] pt-5">
+                  <div id={'intervention-report-' + intervention.id}>
                     {intervention.final_report ? (
-                      <PersonnelInterventionReport intervention={intervention} />
+                      <PersonnelInterventionReport intervention={intervention} heading="h2" />
                     ) : (
                       <p className="text-sm text-slate-600">Aucun rapport final disponible.</p>
                     )}
                   </div>
                 ) : null}
-              </Card>
+              </Fragment>
             )
           })}
         </div>

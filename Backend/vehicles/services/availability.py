@@ -246,6 +246,18 @@ def get_available_vehicles(*, start, end, base_queryset=None, reservation_querys
     """
 
     period = validate_availability_period(start=start, end=end)
+    return _available_vehicles_for_period(
+        start=period["start"], end=period["end"],
+        base_queryset=base_queryset, reservation_queryset=reservation_queryset,
+    )
+
+
+def get_currently_available_vehicles(*, at):
+    # Include reservations and interventions starting at this instant.
+    return _available_vehicles_for_period(start=at, end=at + timedelta(microseconds=1))
+
+
+def _available_vehicles_for_period(*, start, end, base_queryset=None, reservation_queryset=None):
     reservation_queryset = _get_reservation_queryset(reservation_queryset=reservation_queryset)
 
     queryset = base_queryset if base_queryset is not None else Vehicle.objects.all()
@@ -258,8 +270,8 @@ def get_available_vehicles(*, start, end, base_queryset=None, reservation_querys
 
     conflicting_reservations = reservation_queryset.filter(
         _build_conflict_filter(
-            start=period["start"],
-            end=period["end"],
+            start=start,
+            end=end,
             reservation_queryset=reservation_queryset,
         ),
         vehicle_id=OuterRef("pk"),
@@ -272,8 +284,8 @@ def get_available_vehicles(*, start, end, base_queryset=None, reservation_querys
             intervention_model.Status.ATTRIBUEE,
             intervention_model.Status.EN_COURS,
         ),
-        planned_start_at__lt=period["end"],
-        planned_end_at__gt=period["start"],
+        planned_start_at__lt=end,
+        planned_end_at__gt=start,
     )
 
     return queryset.annotate(

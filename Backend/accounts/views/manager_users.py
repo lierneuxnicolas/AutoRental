@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import Role, User
-from accounts.permissions import IsManager
+from accounts.permissions import IsManager, IsManagerOrAdministrator
 from accounts.serializers.manager_users import (
     ManagerUserDetailSerializer,
     ManagerUserListSerializer,
@@ -16,7 +16,7 @@ from common.services import create_system_log
 
 
 class ManagerUserListView(generics.ListAPIView):
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
     serializer_class = ManagerUserListSerializer
     ordering_fields = ["date_joined", "email"]
     ordering = ["-date_joined"]

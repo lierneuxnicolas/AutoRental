@@ -53,9 +53,14 @@ from reservations.serializers.management import (
     ReservationReviewDecisionResponseSerializer,
     ReservationDepositReleaseResponseSerializer,
     ReservationManagementAdditionalChargesUpdateRequestSerializer,
+    ReservationManagementSettlementConfirmationSerializer,
 )
 from reservations.services import ReservationCompletionError, complete_reservation, report_return_issue
-from reservations.services.completion import confirm_return_charges
+from reservations.services.completion import (
+    assert_return_settlement_matches_confirmation,
+    confirm_return_charges,
+    get_return_closure_readiness,
+)
 from reservations.services.additional_charges import (
     ReservationAdditionalChargesError,
     get_positive_provisional_additional_charges_total,
@@ -443,7 +448,7 @@ class ReservationManagementDetailView(generics.RetrieveAPIView):
             ),
             Prefetch(
                 "deposits",
-                queryset=Deposit.objects.order_by("-created_at", "-id"),
+                queryset=Deposit.objects.order_by("-authorized_at", "-created_at", "-id"),
                 to_attr="prefetched_deposits",
             ),
             Prefetch(
@@ -734,6 +739,12 @@ class ReservationManagementCompleteView(generics.GenericAPIView):
             "vehicle__category",
         )
 
+    def get(self, request, *args, **kwargs):
+        try:
+            return Response(get_return_closure_readiness(reservation=self.get_object()))
+        except ReservationCompletionError as exc:
+            return Response({"code": exc.code, "message": exc.message}, status=exc.http_status)
+
     @extend_schema(
         tags=["Reservation Management"],
         request=ReservationManagementCompleteRequestSerializer,
@@ -983,9 +994,22 @@ class ReservationManagementDepositSettleView(generics.GenericAPIView):
     )
     def post(self, request, *args, **kwargs):
         reservation = self.get_object()
+        check_confirmation = None
+        if "charges" in request.data or "deposit_id" in request.data:
+            serializer = ReservationManagementSettlementConfirmationSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            def check_confirmation(locked_reservation, deposit):
+                assert_return_settlement_matches_confirmation(
+                    reservation=locked_reservation, deposit=deposit, **serializer.validated_data,
+                )
 
         try:
-            result = settle_reservation_deposit(reservation=reservation, requested_by=request.user)
+            result = settle_reservation_deposit(
+                reservation=reservation, requested_by=request.user, check_confirmation=check_confirmation,
+            )
+        except ReservationCompletionError as exc:
+            return Response({"code": exc.code, "message": exc.message}, status=exc.http_status)
         except DepositSettlementOperationError as exc:
             payload = {"code": exc.code, "message": exc.message}
             if exc.details:

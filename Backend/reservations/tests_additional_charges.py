@@ -144,6 +144,26 @@ class ReservationAdditionalChargesManagementTests(ReservationTestDataMixin, Test
 		self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
 		self.assertEqual(response.data["code"], "CHARGES_READ_ONLY")
 
+	def test_settled_deposit_blocks_new_fees_even_without_preexisting_charges(self):
+		self.api.force_authenticate(self.manager_user)
+		deposit = Deposit.objects.create(
+			reservation=self.reservation,
+			mode=Deposit.Mode.SIMULATED,
+			amount=Decimal("500.00"),
+			currency="EUR",
+			status=Deposit.Status.LIBEREE,
+		)
+		payload = self._payload(damages="15.00", reasons={"DEGATS": "Rayure"})
+		for deposit_status in (Deposit.Status.LIBEREE, Deposit.Status.CAPTUREE):
+			with self.subTest(deposit_status=deposit_status):
+				deposit.status = deposit_status
+				deposit.save(update_fields=["status"])
+				response = self.api.post(self.additional_charges_url, payload, format="json")
+				self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+				self.assertEqual(response.data["code"], "DEPOSIT_ALREADY_SETTLED")
+				self.assertFalse(self.reservation.additional_charges.exists())
+				self.assertFalse(self.api.get(self.detail_url).data["return_charges_editable"])
+
 	def test_updating_before_closure_reuses_same_provisional_rows(self):
 		self.api.force_authenticate(self.manager_user)
 		first = self.api.post(

@@ -303,6 +303,17 @@ export default function MechanicInterventionDetailPage() {
       : !intervention.work_data
         ? 'work'
         : 'checkout'
+  if (activeStep === 'done') {
+    return (
+      <div className="mx-auto max-w-6xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
+        <div className="flex justify-end">
+          <Link to="/mechanic/interventions"><Button variant="secondary">Retour à mes interventions</Button></Link>
+        </div>
+        <PersonnelInterventionReport intervention={intervention} heading="h1" />
+      </div>
+    )
+  }
+
   const stepItems = [
     { id: 'checkin', label: 'Check-in', done: Boolean(intervention.check_in) || intervention.status === 'TERMINEE' },
     { id: 'work', label: 'Intervention', done: Boolean(intervention.work_data) || intervention.status === 'TERMINEE' },
@@ -317,15 +328,11 @@ export default function MechanicInterventionDetailPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        {activeStep === 'done' ? (
-          <div><h1 className="text-2xl font-semibold text-[#1F2937]">Rapport d’intervention</h1></div>
-        ) : (
         <div>
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-semibold text-[#1F2937]">
               {formatVehicleName(intervention.vehicle.brand, intervention.vehicle.model_name)}
             </h1>
-            {activeStep === 'done' ? <StatusBadge label={statusBadge.label} variant={statusBadge.variant} /> : null}
           </div>
           <p className="mt-1 text-sm font-medium text-slate-700">{intervention.vehicle.registration_number}</p>
           <p className="text-sm text-slate-600">
@@ -337,7 +344,6 @@ export default function MechanicInterventionDetailPage() {
             </p>
           ) : null}
         </div>
-        )}
         <div className="flex flex-col gap-2 sm:flex-row">
           {activeStep === 'work' && intervention.check_in && (intervention.status === 'EN_COURS' || intervention.status === 'EN_PAUSE') ? (
             <Button
@@ -357,15 +363,15 @@ export default function MechanicInterventionDetailPage() {
 
       <Card className="border-slate-200">
         <div className="space-y-6">
-          {activeStep !== 'done' ? <StatusBadge label={statusBadge.label} variant={statusBadge.variant} /> : null}
+          <StatusBadge label={statusBadge.label} variant={statusBadge.variant} />
 
-          {activeStep !== 'done' ? <InterventionWorkflowProgress activeStep={activeStep} steps={stepItems} /> : null}
+          <InterventionWorkflowProgress activeStep={activeStep} steps={stepItems} />
 
-          {activeStep !== 'done' && checkInError ? <Alert variant="danger" title="Check-in impossible" message={checkInError} className="mt-5" /> : null}
-          {activeStep !== 'done' && completeError ? <Alert variant="danger" title="Clôture impossible" message={completeError} className="mt-5" /> : null}
-          {activeStep !== 'checkout' && activeStep !== 'done' && completeSuccessMessage ? <Alert variant="success" title="Succès" message={completeSuccessMessage} className="mt-5" /> : null}
-          {activeStep !== 'done' && workError ? <Alert variant="danger" title="Enregistrement impossible" message={workError} className="mt-5" /> : null}
-          {activeStep !== 'done' && statusActionError ? <Alert variant="danger" title="Mise à jour impossible" message={statusActionError} className="mt-5" /> : null}
+          {checkInError ? <Alert variant="danger" title="Check-in impossible" message={checkInError} className="mt-5" /> : null}
+          {completeError ? <Alert variant="danger" title="Clôture impossible" message={completeError} className="mt-5" /> : null}
+          {activeStep !== 'checkout' && completeSuccessMessage ? <Alert variant="success" title="Succès" message={completeSuccessMessage} className="mt-5" /> : null}
+          {workError ? <Alert variant="danger" title="Enregistrement impossible" message={workError} className="mt-5" /> : null}
+          {statusActionError ? <Alert variant="danger" title="Mise à jour impossible" message={statusActionError} className="mt-5" /> : null}
 
           {activeStep === 'checkin' ? (
             <div>
@@ -433,9 +439,6 @@ export default function MechanicInterventionDetailPage() {
             )
           ) : null}
 
-          {activeStep === 'done' ? (
-            <PersonnelInterventionReport intervention={intervention} />
-          ) : null}
         </div>
       </Card>
     </div>

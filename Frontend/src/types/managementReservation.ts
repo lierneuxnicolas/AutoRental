@@ -109,6 +109,7 @@ export interface ReservationManagementDetail {
   previous_reservation: ReservationManagementPreviousSummary | null
   vehicle_reference_inspection: ManagementInspection | null
   deposit_status: ManagementDepositStatus | null
+  return_charges_editable: boolean
   departure_inspection: ManagementInspection | null
   return_inspection: ManagementInspection | null
   interventions: ManagementInterventionResponse[]
@@ -172,6 +173,15 @@ export interface ManagementReservationValidationRequest {
 export interface ManagementReservationValidationResponse {
   message: string
   reservation: ReservationManagementDetail
+}
+
+export interface ManagementReturnClosureReadiness {
+  deposit_id: number
+  deposit_status: ManagementDepositStatus
+  deposit_amount: string
+  maximum_charge: string
+  captured_amount: string | null
+  released_amount: string | null
 }
 
 export interface ReservationReplacementVehicle {
@@ -251,4 +261,9 @@ export interface ManagementAdditionalChargeInput {
 
 export interface ManagementAdditionalChargesUpdateRequest {
   charges: ManagementAdditionalChargeInput[]
+}
+
+export interface ManagementSettlementConfirmation extends ManagementAdditionalChargesUpdateRequest {
+  deposit_id: number
+  deposit_amount: string
 }

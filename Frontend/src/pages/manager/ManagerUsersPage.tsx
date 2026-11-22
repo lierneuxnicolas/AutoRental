@@ -72,6 +72,26 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Une erreur est survenue. Veuillez réessayer.'
 }
 
+async function documentPreviewError(error: unknown): Promise<string> {
+  if (axios.isAxiosError(error)) {
+    const response = error.response
+    if (response?.data instanceof Blob && response.data.type.includes('json')) {
+      try {
+        const data: unknown = JSON.parse(await response.data.text())
+        if (typeof data === 'object' && data !== null && 'detail' in data && typeof data.detail === 'string') {
+          return data.detail
+        }
+      } catch {
+        // Fall back to the HTTP status when the response is not valid JSON.
+      }
+    }
+    if (response?.status === 404) return 'Le document ou son fichier est introuvable.'
+    if (response?.status === 403) return 'Vous n’avez pas l’autorisation de consulter ce document.'
+    return 'Le document n’a pas pu être chargé. Veuillez réessayer.'
+  }
+  return errorMessage(error)
+}
+
 function canManageUser(user: ManagementUserListItem, currentUserId: number | undefined): boolean {
   return user.id !== currentUserId && user.role !== null && manageableRoles.has(user.role)
 }
@@ -79,12 +99,16 @@ function canManageUser(user: ManagementUserListItem, currentUserId: number | und
 interface UserActionsProps {
   user: ManagementUserListItem
   currentUserId?: number
+  documentsOnly: boolean
   onView: (user: ManagementUserListItem, panel: 'info' | 'documents') => void
   onToggleStatus: (user: ManagementUserListItem) => void
   isUpdating: boolean
 }
 
-function UserActions({ user, currentUserId, onView, onToggleStatus, isUpdating }: UserActionsProps) {
+function UserActions({ user, currentUserId, documentsOnly, onView, onToggleStatus, isUpdating }: UserActionsProps) {
+  if (documentsOnly) {
+    return <Button variant="secondary" size="sm" onClick={() => onView(user, 'documents')}>Voir documents</Button>
+  }
   const canManage = canManageUser(user, currentUserId)
   return (
     <div className="flex flex-wrap gap-2">
@@ -174,6 +198,7 @@ export default function ManagerUsersPage() {
   const [activePanel, setActivePanel] = useState<'info' | 'documents' | null>(null)
   const [previewingDocumentId, setPreviewingDocumentId] = useState<number | null>(null)
   const [preview, setPreview] = useState<{ url: string; type: string; label: string } | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
   const [operationError, setOperationError] = useState<string | null>(null)
 
   const usersQuery = useQuery({
@@ -237,6 +262,7 @@ export default function ManagerUsersPage() {
     setSelectedUser(target)
     setActivePanel(panel)
     setPreview(null)
+    setPreviewError(null)
     setOperationError(null)
   }
 
@@ -259,16 +285,20 @@ export default function ManagerUsersPage() {
 
   const openDocument = async (document: ManagerClientDocumentList) => {
     setPreviewingDocumentId(document.id)
-    setOperationError(null)
+    setPreviewError(null)
     try {
       const blob = await getManagementDocumentFile(document.id)
+      if (!blob.type.startsWith('image/') && blob.type !== 'application/pdf') {
+        setPreviewError('Ce format de document ne peut pas être affiché dans l’aperçu.')
+        return
+      }
       setPreview({
         url: URL.createObjectURL(blob),
         type: blob.type,
         label: mapDocumentType(document.document_type),
       })
     } catch (error) {
-      setOperationError(errorMessage(error))
+      setPreviewError(await documentPreviewError(error))
     } finally {
       setPreviewingDocumentId(null)
     }
@@ -301,7 +331,7 @@ export default function ManagerUsersPage() {
             <EmptyState title="Aucun utilisateur" description="Aucun compte utilisateur n’est actuellement enregistré." />
           ) : (
             <>
-              <div className="space-y-3 lg:hidden">
+              <div className="space-y-3 min-[1152px]:hidden">
                 {users.map((item) => (
                   <Card key={item.id}>
                     <div className="space-y-3">
@@ -319,6 +349,7 @@ export default function ManagerUsersPage() {
                       <UserActions
                         user={item}
                         currentUserId={currentUser?.id}
+                        documentsOnly={currentUser?.role?.toUpperCase() === 'ADMINISTRATEUR'}
                         onView={openPanel}
                         onToggleStatus={toggleStatus}
                         isUpdating={statusMutation.isPending && statusMutation.variables?.targetUser.id === item.id}
@@ -328,7 +359,7 @@ export default function ManagerUsersPage() {
                 ))}
               </div>
 
-              <div className="hidden overflow-x-auto rounded-3xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)] lg:block">
+              <div className="hidden overflow-x-auto rounded-3xl border border-[#E5E7EB] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)] min-[1152px]:block">
                 <table className="w-full min-w-[1050px] border-collapse text-left">
                   <thead className="border-b border-[#E5E7EB] bg-[#F8FAFC]">
                     <tr>
@@ -352,6 +383,7 @@ export default function ManagerUsersPage() {
                           <UserActions
                             user={item}
                             currentUserId={currentUser?.id}
+                            documentsOnly={currentUser?.role?.toUpperCase() === 'ADMINISTRATEUR'}
                             onView={openPanel}
                             onToggleStatus={toggleStatus}
                             isUpdating={statusMutation.isPending && statusMutation.variables?.targetUser.id === item.id}
@@ -405,6 +437,9 @@ export default function ManagerUsersPage() {
             ) : null}
             {activePanel === 'documents' && documentsQuery.isError ? (
               <Alert variant="danger" title="Documents indisponibles" message={errorMessage(documentsQuery.error)} />
+            ) : null}
+            {activePanel === 'documents' && previewError ? (
+              <Alert variant="danger" title="Consultation impossible" message={previewError} />
             ) : null}
             {activePanel === 'info' && selectedUserQuery.data ? <UserInfo user={selectedUserQuery.data} /> : null}
             {activePanel === 'documents' && documentsQuery.data ? (

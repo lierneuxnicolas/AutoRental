@@ -427,7 +427,7 @@ def _log_deposit_settlement(*, action: str, level, deposit: Deposit, reservation
         logger.exception("Impossible d'ecrire le journal systeme pour la regularisation de caution.")
 
 
-def _capture_stripe_deposit(*, deposit: Deposit, amount_to_capture: Decimal) -> Decimal:
+def _capture_stripe_deposit(*, deposit: Deposit, amount_to_capture: Decimal, require_full_amount: bool = False) -> Decimal:
     """Capture partiellement/totalement la preautorisation Stripe et retourne le montant capture.
 
     Ne capture jamais plus que le montant reellement capturable annonce par Stripe.
@@ -484,6 +484,12 @@ def _capture_stripe_deposit(*, deposit: Deposit, amount_to_capture: Decimal) -> 
     amount_capturable_minor = int(getattr(payment_intent, "amount_capturable", 0) or 0)
     requested_minor = _to_minor_units(amount_to_capture)
     capture_minor = min(requested_minor, amount_capturable_minor)
+    if require_full_amount and capture_minor < requested_minor:
+        _raise_deposit_settlement_error(
+            "INSUFFICIENT_CAPTURABLE_AMOUNT",
+            "Le montant capturable Stripe ne couvre plus les frais confirmés.",
+            http_status=409,
+        )
     if capture_minor <= 0:
         _raise_deposit_settlement_error(
             "DEPOSIT_NOT_CAPTURABLE",
@@ -530,7 +536,7 @@ def _capture_stripe_deposit(*, deposit: Deposit, amount_to_capture: Decimal) -> 
     return (Decimal(capture_minor) / Decimal("100")).quantize(Decimal("0.01"))
 
 
-def settle_reservation_deposit(*, reservation: Reservation, requested_by) -> DepositSettlementResult:
+def settle_reservation_deposit(*, reservation: Reservation, requested_by, check_confirmation=None) -> DepositSettlementResult:
     """Regularise la caution d'une reservation A_CONTROLER en une operation unique.
 
     - frais = 0 EUR : annule la preautorisation (liberation integrale) ;
@@ -576,6 +582,8 @@ def settle_reservation_deposit(*, reservation: Reservation, requested_by) -> Dep
                 details={"deposit_status": deposit.status},
             )
 
+        if check_confirmation is not None:
+            check_confirmation(locked, deposit)
         settlement = calculate_deposit_settlement(reservation=locked)
         amount_to_capture = min(settlement.retained_amount, deposit.amount)
         now = timezone.now()
@@ -583,7 +591,10 @@ def settle_reservation_deposit(*, reservation: Reservation, requested_by) -> Dep
         captured_amount = Decimal("0.00")
         if amount_to_capture > 0:
             if deposit.mode == Deposit.Mode.STRIPE_TEST:
-                captured_amount = _capture_stripe_deposit(deposit=deposit, amount_to_capture=amount_to_capture)
+                captured_amount = _capture_stripe_deposit(
+                    deposit=deposit, amount_to_capture=amount_to_capture,
+                    require_full_amount=check_confirmation is not None,
+                )
             else:
                 captured_amount = amount_to_capture
             deposit.status = Deposit.Status.CAPTUREE

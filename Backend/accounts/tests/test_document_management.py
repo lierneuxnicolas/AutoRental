@@ -181,6 +181,27 @@ class DocumentManagementEndpointsTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_administrator_can_list_users_and_read_private_document(self):
+        admin = create_user(
+            email="admin-preview@example.com",
+            password="StrongPass123!",
+            role=self.roles[Role.Code.ADMINISTRATEUR],
+        )
+        self.document.file.save("admin-preview.pdf", ContentFile(b"%PDF-1.4\n"), save=True)
+        self.addCleanup(self.document.file.delete, save=False)
+        self.client.force_authenticate(admin)
+        self.assertEqual(self.client.get("/api/v1/management/users/").status_code, status.HTTP_200_OK)
+        self.assertEqual(self.client.get(self.management_list_url, {"user_id": self.client_user.pk}).status_code, status.HTTP_200_OK)
+        response = self.client.get(reverse("accounts:management-documents-file", kwargs={"pk": self.document.pk}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4\n")
+        admin.is_active = False
+        admin.save(update_fields=["is_active"])
+        self.assertEqual(
+            self.client.get(reverse("accounts:management-documents-file", kwargs={"pk": self.document.pk})).status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
     def test_client_is_forbidden(self):
         self._authenticate("managed-client@example.com", "StrongPass123!")
         response = self.client.get(self.management_list_url)

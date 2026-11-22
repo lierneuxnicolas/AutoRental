@@ -310,7 +310,7 @@ export default function ManagerDocumentDetailPage() {
       {actionError ? <Alert variant="danger" title="Operation impossible" message={actionError} /> : null}
 
       <Card
-        className="mx-auto w-full max-w-[900px]"
+        className="w-full"
         header={
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h1 className="text-lg font-semibold text-[#1F2937]">
@@ -496,7 +496,7 @@ export default function ManagerDocumentDetailPage() {
           ) : null}
         </div>
       </Card>
-      <div className="mx-auto flex w-full max-w-[900px] justify-end">
+      <div className="flex w-full justify-end">
         <Link to="/manager/documents">
           <Button variant="secondary">Retour à la liste</Button>
         </Link>

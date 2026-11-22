@@ -14,12 +14,14 @@ Données volontairement masquées pour la sécurité:
 from rest_framework import serializers
 
 from django.db.models import Prefetch
+from django.utils import timezone
 
 from accounts.models import ClientProfile
 from inspections.models import Damage, Inspection
 from inspections.serializers import InspectionDamageReadSerializer, InspectionPhotoReadSerializer
 from interventions.models import Intervention
 from interventions.serializers import InterventionManagementResponseSerializer
+from payments.models import Deposit
 from reservations.models import Reservation, ReservationAdditionalCharge
 from reservations.services.return_charges import calculate_return_charges
 from vehicles.models import Vehicle
@@ -243,6 +245,7 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
     vehicle = ReservationManagementVehicleSummarySerializer(read_only=True)
     client_summary = ReservationManagementClientSummarySerializer(source="*", read_only=True)
     deposit_status = serializers.SerializerMethodField()
+    return_charges_editable = serializers.SerializerMethodField()
     departure_inspection = serializers.SerializerMethodField()
     return_inspection = serializers.SerializerMethodField()
     interventions = serializers.SerializerMethodField()
@@ -281,6 +284,7 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
             "rental_amount",
             "deposit_amount",
             "deposit_status",
+            "return_charges_editable",
             "departure_inspection",
             "return_inspection",
             "return_charges_estimate",
@@ -317,14 +321,32 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
                 return inspection
         return None
 
-    def get_deposit_status(self, obj):
+    def _get_current_deposit(self, obj):
         deposits = getattr(obj, "prefetched_deposits", None)
         if deposits is None:
-            deposit = obj.deposits.order_by("-created_at", "-id").first()
-        else:
-            deposit = deposits[0] if deposits else None
+            return obj.deposits.order_by("-authorized_at", "-created_at", "-id").first()
+        return deposits[0] if deposits else None
 
-        return getattr(deposit, "status", None)
+    def get_deposit_status(self, obj):
+        return getattr(self._get_current_deposit(obj), "status", None)
+
+    def get_return_charges_editable(self, obj):
+        if obj.status != Reservation.Status.A_CONTROLER:
+            return False
+        deposit = self._get_current_deposit(obj)
+        if not deposit or deposit.status not in {Deposit.Status.AUTORISEE, Deposit.Status.A_VERIFIER}:
+            return False
+        if deposit.authorization_expires_at and deposit.authorization_expires_at <= timezone.now():
+            return False
+        if deposit.currency != "EUR" or (deposit.mode == Deposit.Mode.STRIPE_TEST and not deposit.stripe_payment_intent_id):
+            return False
+        charges = getattr(obj, "prefetched_additional_charges", None)
+        if charges is None:
+            charges = obj.additional_charges.all()
+        statuses = {charge.status for charge in charges}
+        return ReservationAdditionalCharge.Status.VALIDEE not in statuses and (
+            obj.return_charges_confirmed_at is None or ReservationAdditionalCharge.Status.PROVISOIRE in statuses
+        )
 
     def get_departure_inspection(self, obj):
         inspection = self._get_inspection(obj, Inspection.Type.INITIAL)
@@ -524,6 +546,11 @@ class ReservationManagementAdditionalChargesUpdateRequestSerializer(serializers.
 # ==============================================================================
 # Decision du gestionnaire suite a une anomalie signalee au check-in ("A verifier")
 # ==============================================================================
+
+
+class ReservationManagementSettlementConfirmationSerializer(ReservationManagementAdditionalChargesUpdateRequestSerializer):
+    deposit_id = serializers.IntegerField(min_value=1)
+    deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
 
 
 class ReservationReviewDecisionRequestSerializer(serializers.Serializer):
