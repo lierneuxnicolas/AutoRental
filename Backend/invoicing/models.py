@@ -18,11 +18,21 @@ class Invoice(models.Model):
 		PAID = "PAID", "Paid"
 		CANCELLED = "CANCELLED", "Cancelled"
 
+	class InvoiceType(models.TextChoices):
+		LOCATION = "LOCATION", "Location"
+		COMPLEMENTAIRE = "COMPLEMENTAIRE", "Complementaire"
+		ANNULATION = "ANNULATION", "Annulation"
+
 	number = models.CharField(max_length=32, unique=True, editable=False)
-	reservation = models.OneToOneField(
+	reservation = models.ForeignKey(
 		"reservations.Reservation",
 		on_delete=models.PROTECT,
-		related_name="invoice",
+		related_name="invoices",
+	)
+	invoice_type = models.CharField(
+		max_length=20,
+		choices=InvoiceType.choices,
+		default=InvoiceType.LOCATION,
 	)
 	client = models.ForeignKey(
 		"accounts.ClientProfile",
@@ -56,6 +66,10 @@ class Invoice(models.Model):
 				name="invoice_total_matches_components",
 			),
 			models.CheckConstraint(condition=Q(currency=Upper("currency")), name="invoice_currency_upper"),
+			models.UniqueConstraint(
+				fields=["reservation", "invoice_type"],
+				name="invoice_unique_type_per_reservation",
+			),
 		]
 
 	def __str__(self) -> str:

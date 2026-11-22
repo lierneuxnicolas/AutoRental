@@ -3,10 +3,12 @@ import type {
   ManagementReservationIssueRequest,
   ManagementReservationIssueResponse,
   ManagementReservationListQueryParams,
+  ManagementAdditionalChargesUpdateRequest,
   ManagementReservationValidationRequest,
   ManagementReservationValidationResponse,
   PaginatedManagementReservationListResponse,
   ReservationDepositReleaseResponse,
+  ReservationDepositSettlementResponse,
   ReservationManagementDetail,
   ReservationReassignmentResponse,
   ReservationReplacementVehicle,
@@ -95,6 +97,14 @@ export async function confirmManagementReturnCharges(id: number | string): Promi
   return data
 }
 
+export async function updateManagementAdditionalCharges(
+  id: number | string,
+  payload: ManagementAdditionalChargesUpdateRequest,
+): Promise<ReservationManagementDetail> {
+  const { data } = await api.post<ReservationManagementDetail>(`/management/reservations/${id}/additional-charges/`, payload)
+  return data
+}
+
 export async function reportManagementReservationIssue(
   id: number | string,
   payload: ManagementReservationIssueRequest,
@@ -136,6 +146,15 @@ export async function releaseManagementReservationDeposit(
 ): Promise<ReservationDepositReleaseResponse> {
   const { data } = await api.post<ReservationDepositReleaseResponse>(
     `/management/reservations/${id}/release-deposit/`,
+  )
+  return data
+}
+
+export async function settleManagementReservationDeposit(
+  id: number | string,
+): Promise<ReservationDepositSettlementResponse> {
+  const { data } = await api.post<ReservationDepositSettlementResponse>(
+    `/management/reservations/${id}/settle-deposit/`,
   )
   return data
 }

@@ -236,3 +236,67 @@ class Reservation(models.Model):
 					raise
 
 		raise IntegrityError("Impossible de generer une reference de reservation unique.")
+
+
+class ReservationAdditionalCharge(models.Model):
+	class ChargeType(models.TextChoices):
+		RETARD = "RETARD", "Retard"
+		CARBURANT = "CARBURANT", "Carburant"
+		KILOMETRAGE = "KILOMETRAGE", "Kilometrage"
+		DEGATS = "DEGATS", "Degats"
+
+	class Status(models.TextChoices):
+		PROVISOIRE = "PROVISOIRE", "Provisoire"
+		VALIDEE = "VALIDEE", "Validee"
+		ANNULEE = "ANNULEE", "Annulee"
+
+	reservation = models.ForeignKey(
+		"reservations.Reservation",
+		on_delete=models.PROTECT,
+		related_name="additional_charges",
+	)
+	charge_type = models.CharField(max_length=20, choices=ChargeType.choices)
+	amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
+	justification = models.TextField(blank=True)
+	status = models.CharField(max_length=20, choices=Status.choices, default=Status.PROVISOIRE)
+	created_by = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name="reservation_additional_charges",
+	)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		db_table = "amende"
+		ordering = ["-created_at", "-id"]
+		indexes = [
+			models.Index(fields=["reservation", "status"], name="add_charge_resa_status_idx"),
+			models.Index(fields=["reservation", "charge_type"], name="add_charge_resa_type_idx"),
+		]
+		constraints = [
+			models.CheckConstraint(
+				condition=Q(amount__gte=0),
+				name="add_charge_amount_non_negative",
+			),
+			models.UniqueConstraint(
+				fields=["reservation", "charge_type"],
+				condition=Q(status="PROVISOIRE"),
+				name="add_charge_one_provisional_per_type",
+			),
+		]
+
+	def clean(self):
+		super().clean()
+		if self.amount is not None and self.amount < 0:
+			raise ValidationError({"amount": "Le montant ne peut pas etre negatif."})
+		if self.justification:
+			self.justification = " ".join(self.justification.split())
+		if self.amount is not None and self.amount > 0 and not self.justification:
+			raise ValidationError({"justification": "Une justification est obligatoire pour un montant superieur a 0 EUR."})
+
+	def save(self, *args, **kwargs):
+		self.full_clean()
+		return super().save(*args, **kwargs)

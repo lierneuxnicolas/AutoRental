@@ -17,7 +17,9 @@ from reservations.views import (
     ReservationManagementDetailView,
     ReservationManagementCompleteView,
     ReservationManagementConfirmChargesView,
+    ReservationManagementAdditionalChargesView,
     ReservationManagementDepositReleaseView,
+    ReservationManagementDepositSettleView,
     ReservationManagementIssueView,
     ReservationManagementListView,
     ReservationManagementReviewDecisionView,
@@ -91,6 +93,11 @@ urlpatterns = [
         name="management-reservation-confirm-return-charges",
     ),
     path(
+        "management/reservations/<int:pk>/additional-charges/",
+        ReservationManagementAdditionalChargesView.as_view(),
+        name="management-reservation-additional-charges",
+    ),
+    path(
         "management/reservations/<int:pk>/complete/",
         ReservationManagementCompleteView.as_view(),
         name="management-reservation-complete",
@@ -109,5 +116,10 @@ urlpatterns = [
         "management/reservations/<int:pk>/release-deposit/",
         ReservationManagementDepositReleaseView.as_view(),
         name="management-reservation-release-deposit",
+    ),
+    path(
+        "management/reservations/<int:pk>/settle-deposit/",
+        ReservationManagementDepositSettleView.as_view(),
+        name="management-reservation-settle-deposit",
     ),
 ]

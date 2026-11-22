@@ -30,6 +30,7 @@ from interventions.models import Intervention, LockingLog, VehicleAccess
 from interventions.services.vehicle_access import activate_vehicle_access
 from invoicing.models import Invoice, InvoiceLine
 from invoicing.services import create_invoice_for_reservation
+from invoicing.services.invoice_creation import split_tvac_amount
 from notifications.models import Notification
 from payments.models import Deposit, Payment, Refund
 from reservations.models import Reservation
@@ -2837,12 +2838,14 @@ class ReservationManagementCompletionTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(reservation.vehicle.status, Vehicle.Status.DISPONIBLE)
 		self.assertEqual(response.data["reservation"]["status"], Reservation.Status.TERMINEE)
 		invoice = Invoice.objects.get(reservation=reservation)
-		self.assertEqual(invoice.subtotal, reservation.rental_amount)
+		expected_htva, expected_tva = split_tvac_amount(reservation.rental_amount)
+		self.assertEqual(invoice.subtotal, expected_htva)
+		self.assertEqual(invoice.tax_amount, expected_tva)
 		self.assertEqual(invoice.total_amount, reservation.rental_amount)
 		self.assertEqual(invoice.lines.count(), 1)
 		line = invoice.lines.get()
 		self.assertEqual(line.line_type, InvoiceLine.LineType.VEHICLE_RENTAL)
-		self.assertEqual(line.total_price, reservation.rental_amount)
+		self.assertEqual(line.total_price, expected_htva)
 		self.assertNotEqual(invoice.total_amount, reservation.rental_amount + reservation.deposit_amount)
 		self.assertEqual(len(mail.outbox), 1)
 		email = mail.outbox[0]

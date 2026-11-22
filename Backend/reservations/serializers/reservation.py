@@ -113,17 +113,23 @@ class ReservationListDetailSerializer(serializers.ModelSerializer):
         return pricing.total_amount
 
     def get_invoice_id(self, obj):
-        try:
-            return obj.invoice.id
-        except Reservation.invoice.RelatedObjectDoesNotExist:
-            return None
+        invoice = self._primary_invoice(obj)
+        return invoice.id if invoice else None
 
     def get_invoice_pdf_available(self, obj):
-        try:
-            pdf = obj.invoice.pdf_file
-        except Reservation.invoice.RelatedObjectDoesNotExist:
+        invoice = self._primary_invoice(obj)
+        if invoice is None:
             return False
-        return bool(pdf and obj.invoice.status in {"ISSUED", "PAID"} and pdf.storage.exists(pdf.name))
+        pdf = invoice.pdf_file
+        return bool(pdf and invoice.status in {"ISSUED", "PAID"} and pdf.storage.exists(pdf.name))
+
+    @staticmethod
+    def _primary_invoice(obj):
+        invoices = list(obj.invoices.all())
+        for invoice in invoices:
+            if invoice.invoice_type == "LOCATION":
+                return invoice
+        return invoices[0] if invoices else None
 
     def get_actual_pickup_at(self, obj):
         try:

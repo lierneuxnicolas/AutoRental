@@ -165,7 +165,10 @@ class InvoiceDownloadEndpointTests(TestCase):
 
 		self.assertIn("Assurance Complémentaire", pdf_text)
 		self.assertIn(format_french_amount(Decimal("10.00")), pdf_text)
-		self.assertIn(format_french_amount(Decimal("90.00")), pdf_text)
+		# Le resume financier provient des champs de la facture (88,00 EUR stockes),
+		# plus d'un recalcul de simulation tarifaire.
+		self.assertIn("Sous-total HTVA", pdf_text)
+		self.assertIn(format_french_amount(self.invoice.subtotal), pdf_text)
 
 	def test_generated_pdf_includes_reservation_details(self):
 		pdf_bytes = build_invoice_pdf(self.invoice)
@@ -218,3 +221,361 @@ class InvoiceDownloadEndpointTests(TestCase):
 		self.assertIn("pi_deposit_test_123", pdf_text)
 		self.assertEqual(self.invoice.total_amount, Payment.objects.get(reservation=reservation).amount)
 		self.assertNotIn("500 €", pdf_text)
+
+
+from reservations.tests import ReservationTestDataMixin
+
+
+class InvoiceMultiTypeTests(ReservationTestDataMixin, TestCase):
+	"""Tache 5.2 : plusieurs factures par reservation, une seule par type."""
+
+	def setUp(self):
+		super().setUp()
+		self.reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self.client_profile = self.reservation.client
+
+	def _create_invoice(self, invoice_type):
+		return Invoice.objects.create(
+			reservation=self.reservation,
+			client=self.client_profile,
+			invoice_type=invoice_type,
+			status=Invoice.Status.ISSUED,
+			subtotal=Decimal("50.00"),
+			tax_amount=Decimal("0.00"),
+			total_amount=Decimal("50.00"),
+			currency="EUR",
+			billing_name="Client Test",
+			billing_address="10 Rue de Test",
+		)
+
+	def test_existing_invoice_defaults_to_location_and_stays_accessible(self):
+		invoice = self._create_invoice(Invoice.InvoiceType.LOCATION)
+
+		self.assertEqual(invoice.invoice_type, Invoice.InvoiceType.LOCATION)
+		self.assertEqual(self.reservation.invoices.count(), 1)
+		self.assertEqual(self.reservation.invoices.first().id, invoice.id)
+
+	def test_reservation_can_have_location_and_complementary_invoices(self):
+		location = self._create_invoice(Invoice.InvoiceType.LOCATION)
+		complementary = self._create_invoice(Invoice.InvoiceType.COMPLEMENTAIRE)
+
+		self.assertEqual(self.reservation.invoices.count(), 2)
+		self.assertNotEqual(location.number, complementary.number)
+		types = set(self.reservation.invoices.values_list("invoice_type", flat=True))
+		self.assertEqual(types, {"LOCATION", "COMPLEMENTAIRE"})
+
+	def test_duplicate_invoice_type_is_rejected(self):
+		from django.core.exceptions import ValidationError as DjangoValidationError
+		from django.db import IntegrityError
+
+		self._create_invoice(Invoice.InvoiceType.COMPLEMENTAIRE)
+
+		with self.assertRaises((DjangoValidationError, IntegrityError)):
+			self._create_invoice(Invoice.InvoiceType.COMPLEMENTAIRE)
+
+	def test_create_invoice_service_scopes_by_type(self):
+		from invoicing.services import create_invoice_for_reservation
+
+		location = create_invoice_for_reservation(self.reservation)
+		cancellation = create_invoice_for_reservation(self.reservation, invoice_type=Invoice.InvoiceType.ANNULATION)
+		location_again = create_invoice_for_reservation(self.reservation)
+
+		self.assertEqual(location.invoice_type, Invoice.InvoiceType.LOCATION)
+		self.assertEqual(cancellation.invoice_type, Invoice.InvoiceType.ANNULATION)
+		self.assertEqual(location.id, location_again.id)
+		self.assertEqual(self.reservation.invoices.count(), 2)
+
+	def test_pdf_generation_still_works_after_model_change(self):
+		invoice = self._create_invoice(Invoice.InvoiceType.LOCATION)
+		InvoiceLine.objects.create(
+			invoice=invoice,
+			line_type=InvoiceLine.LineType.VEHICLE_RENTAL,
+			description="Location vehicule",
+			quantity=Decimal("1.00"),
+			unit_price=Decimal("50.00"),
+		)
+
+		pdf_bytes = build_invoice_pdf(invoice)
+
+		self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+
+
+class AdditionalChargesInvoiceTests(ReservationTestDataMixin, TestCase):
+	"""Tache 5.3 : facture complementaire des frais valides."""
+
+	def setUp(self):
+		super().setUp()
+		self.api = APIClient()
+		self.reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self.reservation.deposit_amount = Decimal("500.00")
+		self.reservation.save(update_fields=["deposit_amount", "updated_at"])
+
+	def _create_deposit(self, *, status=Deposit.Status.CAPTUREE, captured_amount=Decimal("0.00")):
+		return Deposit.objects.create(
+			reservation=self.reservation,
+			mode=Deposit.Mode.STRIPE_TEST,
+			amount=Decimal("500.00"),
+			currency="EUR",
+			status=status,
+			captured_amount=captured_amount,
+			stripe_payment_intent_id="pi_charge_invoice_123",
+			authorized_at=timezone.now(),
+			captured_at=timezone.now() if status == Deposit.Status.CAPTUREE else None,
+		)
+
+	def _create_validated_charge(self, charge_type, amount, justification="Constat documente"):
+		from reservations.models import ReservationAdditionalCharge
+
+		return ReservationAdditionalCharge.objects.create(
+			reservation=self.reservation,
+			charge_type=charge_type,
+			amount=Decimal(amount),
+			justification=justification,
+			status=ReservationAdditionalCharge.Status.VALIDEE,
+		)
+
+	def test_no_validated_charges_creates_no_invoice(self):
+		from invoicing.services import create_additional_charges_invoice
+
+		self._create_deposit(status=Deposit.Status.LIBEREE)
+
+		invoice = create_additional_charges_invoice(self.reservation)
+
+		self.assertIsNone(invoice)
+		self.assertFalse(Invoice.objects.filter(reservation=self.reservation).exists())
+
+	def test_validated_charges_produce_invoice_matching_total(self):
+		from invoicing.services import create_additional_charges_invoice
+
+		self._create_deposit(captured_amount=Decimal("110.50"))
+		self._create_validated_charge("RETARD", "30.00", "Retour avec 45 minutes de retard")
+		self._create_validated_charge("DEGATS", "80.50", "Rayure portiere avant droite")
+
+		invoice = create_additional_charges_invoice(self.reservation)
+
+		self.assertIsNotNone(invoice)
+		self.assertEqual(invoice.invoice_type, Invoice.InvoiceType.COMPLEMENTAIRE)
+		self.assertEqual(invoice.total_amount, Decimal("110.50"))
+		self.assertEqual(invoice.lines.count(), 2)
+		descriptions = list(invoice.lines.values_list("description", flat=True))
+		self.assertTrue(any("Retour avec 45 minutes de retard" in d for d in descriptions))
+		self.assertTrue(any("Rayure portiere avant droite" in d for d in descriptions))
+
+	def test_charges_above_deposit_invoice_full_amount_with_remaining_due(self):
+		from invoicing.services import create_additional_charges_invoice
+		from invoicing.services.pdf_generator import build_invoice_financial_details
+
+		self._create_deposit(captured_amount=Decimal("500.00"))
+		self._create_validated_charge("DEGATS", "650.00", "Dommages importants carrosserie")
+
+		invoice = create_additional_charges_invoice(self.reservation)
+
+		self.assertEqual(invoice.total_amount, Decimal("650.00"))
+		details = build_invoice_financial_details(invoice)
+		self.assertEqual(details["total"], Decimal("650.00"))
+		self.assertEqual(details["payment"]["amount_display"], format_french_amount(Decimal("500.00"), "EUR"))
+		self.assertEqual(details["payment"]["balance_display"], format_french_amount(Decimal("150.00"), "EUR"))
+		self.assertIn("Partiellement", details["payment"]["status"])
+
+	def test_multiple_charges_create_distinct_lines(self):
+		from invoicing.services import create_additional_charges_invoice
+
+		self._create_deposit(captured_amount=Decimal("160.00"))
+		self._create_validated_charge("RETARD", "40.00")
+		self._create_validated_charge("CARBURANT", "20.00")
+		self._create_validated_charge("KILOMETRAGE", "30.00")
+		self._create_validated_charge("DEGATS", "70.00")
+
+		invoice = create_additional_charges_invoice(self.reservation)
+
+		self.assertEqual(invoice.lines.count(), 4)
+		self.assertEqual(invoice.total_amount, Decimal("160.00"))
+
+	def test_repeated_call_reuses_single_invoice(self):
+		from invoicing.services import create_additional_charges_invoice
+
+		self._create_deposit(captured_amount=Decimal("110.50"))
+		self._create_validated_charge("DEGATS", "110.50")
+
+		first = create_additional_charges_invoice(self.reservation)
+		second = create_additional_charges_invoice(self.reservation)
+
+		self.assertEqual(first.id, second.id)
+		self.assertEqual(
+			Invoice.objects.filter(reservation=self.reservation, invoice_type=Invoice.InvoiceType.COMPLEMENTAIRE).count(),
+			1,
+		)
+
+	def test_pdf_is_generated_and_downloadable(self):
+		from invoicing.services import create_additional_charges_invoice
+		from invoicing.services.pdf_generator import ensure_invoice_pdf
+
+		self._create_deposit(captured_amount=Decimal("110.50"))
+		self._create_validated_charge("DEGATS", "110.50", "Rayure profonde")
+
+		invoice = create_additional_charges_invoice(self.reservation)
+		invoice = ensure_invoice_pdf(invoice)
+
+		self.assertTrue(invoice.pdf_file)
+		pdf_bytes = build_invoice_pdf(invoice)
+		self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+
+		self.api.force_authenticate(self.manager_user)
+		url = reverse("invoicing:invoice-download", kwargs={"pk": invoice.pk})
+		response = self.api.get(url)
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(response["Content-Type"], "application/pdf")
+
+	def test_existing_rental_invoice_is_preserved(self):
+		from invoicing.services import create_additional_charges_invoice, create_invoice_for_reservation
+
+		rental_invoice = create_invoice_for_reservation(self.reservation)
+		self._create_deposit(captured_amount=Decimal("110.50"))
+		self._create_validated_charge("DEGATS", "110.50")
+
+		complementary = create_additional_charges_invoice(self.reservation)
+
+		rental_invoice.refresh_from_db()
+		self.assertEqual(rental_invoice.invoice_type, Invoice.InvoiceType.LOCATION)
+		self.assertNotEqual(rental_invoice.id, complementary.id)
+		self.assertEqual(self.reservation.invoices.count(), 2)
+
+	def test_invoice_requires_confirmed_settlement(self):
+		from invoicing.services import InvoiceCreationNotAvailable, create_additional_charges_invoice
+
+		self._create_deposit(status=Deposit.Status.AUTORISEE)
+		self._create_validated_charge("DEGATS", "110.50")
+
+		with self.assertRaises(InvoiceCreationNotAvailable):
+			create_additional_charges_invoice(self.reservation)
+
+	def test_invoice_requires_known_captured_amount(self):
+		from invoicing.services import InvoiceCreationNotAvailable, create_additional_charges_invoice
+
+		self._create_deposit(captured_amount=None)
+		self._create_validated_charge("DEGATS", "110.50")
+
+		with self.assertRaises(InvoiceCreationNotAvailable):
+			create_additional_charges_invoice(self.reservation)
+
+
+class VatVentilationTests(ReservationTestDataMixin, TestCase):
+	"""Tache 5.4.1 : ventilation HTVA / TVA 21 % sur les montants TVAC."""
+
+	def setUp(self):
+		super().setUp()
+		self.reservation = self._create_reservation(status=Reservation.Status.A_CONTROLER)
+		self.reservation.deposit_amount = Decimal("500.00")
+		self.reservation.save(update_fields=["deposit_amount", "updated_at"])
+
+	def test_split_tvac_amount_rounds_to_two_decimals_and_sums_exactly(self):
+		from invoicing.services.invoice_creation import split_tvac_amount
+
+		cases = {
+			Decimal("89.00"): (Decimal("73.55"), Decimal("15.45")),
+			Decimal("110.50"): (Decimal("91.32"), Decimal("19.18")),
+			Decimal("120.00"): (Decimal("99.17"), Decimal("20.83")),
+			Decimal("0.00"): (Decimal("0.00"), Decimal("0.00")),
+		}
+		for tvac, expected in cases.items():
+			htva, tva = split_tvac_amount(tvac)
+			self.assertEqual((htva, tva), expected)
+			self.assertEqual(htva + tva, tvac)
+
+	def test_location_invoice_ventilates_vat_and_preserves_tvac_total(self):
+		from invoicing.services import create_invoice_for_reservation
+		from invoicing.services.invoice_creation import split_tvac_amount
+
+		invoice = create_invoice_for_reservation(self.reservation)
+
+		expected_htva, expected_tva = split_tvac_amount(self.reservation.rental_amount)
+		self.assertEqual(invoice.subtotal, expected_htva)
+		self.assertEqual(invoice.tax_amount, expected_tva)
+		self.assertEqual(invoice.total_amount, self.reservation.rental_amount)
+		line = invoice.lines.get()
+		self.assertEqual(line.total_price, expected_htva)
+
+	def test_complementary_invoice_taxes_services_but_not_damage_indemnity(self):
+		from invoicing.services import create_additional_charges_invoice
+		from invoicing.services.invoice_creation import split_tvac_amount
+		from reservations.models import ReservationAdditionalCharge
+
+		Deposit.objects.create(
+			reservation=self.reservation,
+			mode=Deposit.Mode.STRIPE_TEST,
+			amount=Decimal("500.00"),
+			currency="EUR",
+			status=Deposit.Status.CAPTUREE,
+			captured_amount=Decimal("130.50"),
+			authorized_at=timezone.now(),
+			captured_at=timezone.now(),
+		)
+		for charge_type, amount in (("RETARD", "30.00"), ("CARBURANT", "20.00"), ("DEGATS", "80.50")):
+			ReservationAdditionalCharge.objects.create(
+				reservation=self.reservation,
+				charge_type=charge_type,
+				amount=Decimal(amount),
+				justification="Constat documente",
+				status=ReservationAdditionalCharge.Status.VALIDEE,
+			)
+
+		invoice = create_additional_charges_invoice(self.reservation)
+
+		retard_htva, retard_tva = split_tvac_amount(Decimal("30.00"))
+		carburant_htva, carburant_tva = split_tvac_amount(Decimal("20.00"))
+		expected_subtotal = retard_htva + carburant_htva + Decimal("80.50")
+		expected_tax = retard_tva + carburant_tva
+		self.assertEqual(invoice.subtotal, expected_subtotal)
+		self.assertEqual(invoice.tax_amount, expected_tax)
+		# Le total TVAC facture reste exactement la somme des frais valides.
+		self.assertEqual(invoice.total_amount, Decimal("130.50"))
+
+	def test_financial_details_display_21_percent_when_taxed_and_0_for_legacy(self):
+		from invoicing.services import create_invoice_for_reservation
+		from invoicing.services.pdf_generator import build_invoice_financial_details
+
+		new_invoice = create_invoice_for_reservation(self.reservation)
+		details = build_invoice_financial_details(new_invoice)
+		self.assertEqual(details["tax_rate"], Decimal("21.00"))
+		self.assertEqual(details["total"], new_invoice.total_amount)
+		self.assertEqual(details["subtotal"], new_invoice.subtotal)
+
+		legacy_reservation = self._create_reservation(status=Reservation.Status.TERMINEE)
+		legacy_invoice = Invoice.objects.create(
+			reservation=legacy_reservation,
+			client=legacy_reservation.client,
+			status=Invoice.Status.ISSUED,
+			subtotal=Decimal("88.00"),
+			tax_amount=Decimal("0.00"),
+			total_amount=Decimal("88.00"),
+			currency="EUR",
+			billing_name="Client Legacy",
+			billing_address="Adresse legacy",
+		)
+		legacy_details = build_invoice_financial_details(legacy_invoice)
+		self.assertEqual(legacy_details["tax_rate"], Decimal("0.00"))
+		self.assertEqual(legacy_details["subtotal"], Decimal("88.00"))
+		self.assertEqual(legacy_details["total"], Decimal("88.00"))
+
+	def test_legacy_pdf_is_not_regenerated(self):
+		from django.core.files.base import ContentFile
+		from invoicing.services.pdf_generator import ensure_invoice_pdf
+
+		invoice = Invoice.objects.create(
+			reservation=self.reservation,
+			client=self.client_profile_1,
+			status=Invoice.Status.ISSUED,
+			subtotal=Decimal("88.00"),
+			tax_amount=Decimal("0.00"),
+			total_amount=Decimal("88.00"),
+			currency="EUR",
+			billing_name="Client Legacy",
+			billing_address="Adresse legacy",
+		)
+		invoice.pdf_file.save("legacy.pdf", ContentFile(b"legacy-pdf"), save=True)
+
+		ensure_invoice_pdf(invoice)
+
+		invoice.refresh_from_db()
+		with invoice.pdf_file.open("rb") as pdf:
+			self.assertEqual(pdf.read(), b"legacy-pdf")

@@ -20,7 +20,7 @@ from inspections.models import Damage, Inspection
 from inspections.serializers import InspectionDamageReadSerializer, InspectionPhotoReadSerializer
 from interventions.models import Intervention
 from interventions.serializers import InterventionManagementResponseSerializer
-from reservations.models import Reservation
+from reservations.models import Reservation, ReservationAdditionalCharge
 from reservations.services.return_charges import calculate_return_charges
 from vehicles.models import Vehicle
 from vehicles.serializers.public import VehiclePhotoPublicSerializer
@@ -58,6 +58,15 @@ def _reservation_needs_review(obj) -> bool:
 # ==============================================================================
 # Client résumé pour le management (données limitées)
 # ==============================================================================
+
+
+def _primary_reservation_invoice(obj):
+    """Facture principale d'une reservation : LOCATION en priorite, sinon la plus recente."""
+    invoices = list(obj.invoices.all())
+    for invoice in invoices:
+        if invoice.invoice_type == "LOCATION":
+            return invoice
+    return invoices[0] if invoices else None
 
 
 class ReservationManagementClientSummarySerializer(serializers.Serializer):
@@ -204,10 +213,8 @@ class ReservationManagementListSerializer(serializers.ModelSerializer):
         return _reservation_needs_review(obj)
 
     def get_invoice_id(self, obj):
-        try:
-            return obj.invoice.id
-        except Reservation.invoice.RelatedObjectDoesNotExist:
-            return None
+        invoice = _primary_reservation_invoice(obj)
+        return invoice.id if invoice else None
 
     class Meta:
         model = Reservation
@@ -239,6 +246,7 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
     departure_inspection = serializers.SerializerMethodField()
     return_inspection = serializers.SerializerMethodField()
     interventions = serializers.SerializerMethodField()
+    additional_charges = serializers.SerializerMethodField()
     rental_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     deposit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     needs_review = serializers.SerializerMethodField()
@@ -252,10 +260,8 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
         return _reservation_needs_review(obj)
 
     def get_invoice_id(self, obj):
-        try:
-            return obj.invoice.id
-        except Reservation.invoice.RelatedObjectDoesNotExist:
-            return None
+        invoice = _primary_reservation_invoice(obj)
+        return invoice.id if invoice else None
 
     def get_invoice_pdf_available(self, obj):
         from reservations.serializers.reservation import ReservationListDetailSerializer
@@ -283,6 +289,7 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
             "return_charges_confirmed_at",
             "return_charges_confirmed_by",
             "interventions",
+            "additional_charges",
             "needs_review",
             "previous_reservation",
             "vehicle_reference_inspection",
@@ -408,6 +415,12 @@ class ReservationManagementDetailSerializer(serializers.ModelSerializer):
             )
         return InterventionManagementResponseSerializer(interventions, many=True, context=self.context).data
 
+    def get_additional_charges(self, obj):
+        charges = getattr(obj, "prefetched_additional_charges", None)
+        if charges is None:
+            charges = list(obj.additional_charges.order_by("-created_at", "-id"))
+        return ReservationManagementAdditionalChargeSerializer(charges, many=True).data
+
 
 class ReservationManagementCompleteRequestSerializer(serializers.Serializer):
     confirm_vehicle_available = serializers.BooleanField(required=False, default=True)
@@ -448,6 +461,64 @@ class ReservationManagementIssueResponseSerializer(serializers.Serializer):
     message = serializers.CharField(read_only=True)
     reservation = ReservationManagementDetailSerializer(read_only=True)
     intervention = InterventionManagementResponseSerializer(read_only=True, allow_null=True)
+
+
+class ReservationManagementAdditionalChargeSerializer(serializers.ModelSerializer):
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = ReservationAdditionalCharge
+        fields = [
+            "id",
+            "charge_type",
+            "amount",
+            "justification",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class ReservationManagementAdditionalChargeWriteSerializer(serializers.Serializer):
+    charge_type = serializers.ChoiceField(choices=ReservationAdditionalCharge.ChargeType.choices)
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
+    justification = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        amount = attrs["amount"]
+        justification = " ".join(attrs.get("justification", "").split())
+        if amount > 0 and not justification:
+            raise serializers.ValidationError({"justification": "Une justification est obligatoire pour un montant supérieur à 0 EUR."})
+        attrs["justification"] = justification
+        return attrs
+
+
+class ReservationManagementAdditionalChargesUpdateRequestSerializer(serializers.Serializer):
+    charges = ReservationManagementAdditionalChargeWriteSerializer(many=True)
+
+    def validate(self, attrs):
+        charges = attrs["charges"]
+        seen = set()
+        duplicate_types = set()
+        for item in charges:
+            charge_type = item["charge_type"]
+            if charge_type in seen:
+                duplicate_types.add(charge_type)
+            seen.add(charge_type)
+
+        if duplicate_types:
+            raise serializers.ValidationError({"charges": [f"Type de frais dupliqué: {value}" for value in sorted(duplicate_types)]})
+
+        required = {choice for choice, _ in ReservationAdditionalCharge.ChargeType.choices}
+        missing = sorted(required - seen)
+        if missing:
+            raise serializers.ValidationError({"charges": [f"Type de frais manquant: {value}" for value in missing]})
+
+        unexpected = sorted(seen - required)
+        if unexpected:
+            raise serializers.ValidationError({"charges": [f"Type de frais invalide: {value}" for value in unexpected]})
+
+        return attrs
 
 
 # ==============================================================================

@@ -230,7 +230,7 @@ def _sync_cancellation_financial_document(
     if Invoice.objects.select_for_update().filter(reservation=reservation).exists():
         return
 
-    invoice = create_invoice_for_reservation(reservation)
+    invoice = create_invoice_for_reservation(reservation, invoice_type=Invoice.InvoiceType.ANNULATION)
     retained = financials.amount_paid - financials.refundable_amount
     invoice.status = Invoice.Status.ISSUED
     invoice.subtotal = retained

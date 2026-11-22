@@ -139,15 +139,7 @@ class FinancialCompletionTests(ReservationTestDataMixin, TestCase):
 
     def test_existing_invoice_without_pdf_is_generated_after_closure_and_downloadable(self):
         invoice = create_invoice_for_reservation(self.reservation)
-        amount = build_invoice_financial_details(invoice)["total"]
-        self.reservation.rental_amount = amount
-        self.reservation.save(update_fields=["rental_amount"])
-        invoice.subtotal = amount
-        invoice.total_amount = amount
-        invoice.save(update_fields=["subtotal", "total_amount"])
-        line = invoice.lines.get()
-        line.unit_price = amount
-        line.save(update_fields=["unit_price", "total_price"])
+        self.assertEqual(build_invoice_financial_details(invoice)["total"], self.reservation.rental_amount)
         original_lines = list(invoice.lines.values_list("line_type", "description", "unit_price", "total_price"))
         self._paid_and_deposit()
         self.assertEqual(self._confirm().status_code, 200)

@@ -79,6 +79,19 @@ export interface ReservationManagementPreviousSummary {
   return_inspection: ManagementInspection | null
 }
 
+export type ReservationAdditionalChargeType = 'RETARD' | 'CARBURANT' | 'KILOMETRAGE' | 'DEGATS'
+export type ReservationAdditionalChargeStatus = 'PROVISOIRE' | 'VALIDEE' | 'ANNULEE'
+
+export interface ReservationAdditionalCharge {
+  id: number
+  charge_type: ReservationAdditionalChargeType
+  amount: string
+  justification: string
+  status: ReservationAdditionalChargeStatus
+  created_at: string
+  updated_at: string
+}
+
 export interface ReservationManagementDetail {
   id: number
   reference: string
@@ -108,6 +121,7 @@ export interface ReservationManagementDetail {
   return_fuel_fee: string | null
   return_charges_confirmed_at: string | null
   return_charges_confirmed_by: number | null
+  additional_charges: ReservationAdditionalCharge[]
   created_at: string
   confirmed_at: string | null
   cancelled_at: string | null
@@ -216,4 +230,25 @@ export interface ReservationDepositReleaseResponse {
   message: string
   reservation: ReservationManagementDetail
   deposit_status: ManagementDepositStatus
+}
+
+export interface ReservationDepositSettlementResponse {
+  message: string
+  deposit_status: ManagementDepositStatus
+  deposit_amount: string
+  charges_total: string
+  captured_amount: string
+  released_amount: string
+  over_deposit_amount: string
+  stripe_payment_intent_id: string | null
+}
+
+export interface ManagementAdditionalChargeInput {
+  charge_type: ReservationAdditionalChargeType
+  amount: string
+  justification: string
+}
+
+export interface ManagementAdditionalChargesUpdateRequest {
+  charges: ManagementAdditionalChargeInput[]
 }

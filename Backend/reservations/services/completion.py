@@ -59,7 +59,7 @@ def _build_frontend_invoices_url() -> str | None:
 
 
 def _reservation_has_invoice(*, reservation: Reservation) -> bool:
-    return Reservation.objects.filter(pk=reservation.pk, invoice__isnull=False).exists()
+    return Reservation.objects.filter(pk=reservation.pk, invoices__isnull=False).exists()
 
 
 def _notify_reservation_completed_once(*, reservation: Reservation):
@@ -241,7 +241,11 @@ def _validate_existing_invoice(*, reservation: Reservation, invoice: Invoice) ->
 def _ensure_final_invoice(*, reservation: Reservation) -> None:
     from invoicing.services.pdf_generator import ensure_invoice_pdf
 
-    invoice = Invoice.objects.select_for_update().filter(reservation=reservation).first()
+    invoice = (
+        Invoice.objects.select_for_update()
+        .filter(reservation=reservation, invoice_type=Invoice.InvoiceType.LOCATION)
+        .first()
+    )
     if invoice:
         _validate_existing_invoice(reservation=reservation, invoice=invoice)
         if invoice.pdf_file:
@@ -447,7 +451,7 @@ def complete_reservation(*, reservation: Reservation, requested_by) -> Reservati
             )
 
         if locked.status == Reservation.Status.TERMINEE:
-            invoice = Invoice.objects.filter(reservation=locked).first()
+            invoice = Invoice.objects.filter(reservation=locked, invoice_type=Invoice.InvoiceType.LOCATION).first()
             if not invoice or not invoice.pdf_file or not invoice.pdf_file.storage.exists(invoice.pdf_file.name):
                 _assert_return_financials(reservation=locked)
                 deposit = _get_latest_deposit_for_return_validation(reservation=locked)

@@ -52,9 +52,15 @@ from reservations.serializers.management import (
     ReservationReviewDecisionRequestSerializer,
     ReservationReviewDecisionResponseSerializer,
     ReservationDepositReleaseResponseSerializer,
+    ReservationManagementAdditionalChargesUpdateRequestSerializer,
 )
 from reservations.services import ReservationCompletionError, complete_reservation, report_return_issue
 from reservations.services.completion import confirm_return_charges
+from reservations.services.additional_charges import (
+    ReservationAdditionalChargesError,
+    get_positive_provisional_additional_charges_total,
+    save_provisional_additional_charges,
+)
 from reservations.services.reassignment import (
     ReservationReassignmentError,
     get_replacement_vehicles,
@@ -62,7 +68,12 @@ from reservations.services.reassignment import (
 )
 from reservations.services.cancellation import CancellationError, cancel_reservation
 from reservations.services.review import ReservationReviewError, resolve_reservation_review
-from payments.services.deposits import DepositReleaseError, release_reservation_deposit_for_management
+from payments.services.deposits import (
+    DepositReleaseError,
+    DepositSettlementOperationError,
+    release_reservation_deposit_for_management,
+    settle_reservation_deposit,
+)
 
 
 ErrorDetailResponseSerializer = OpenApiResponse(description="Erreur de validation ou d'autorisation.")
@@ -202,13 +213,13 @@ class ReservationManagementListView(generics.ListAPIView):
         return Reservation.objects.exclude(Reservation.unlisted_filter()).select_related(
             "client",
             "client__user",
-            "invoice",
             "vehicle",
             "vehicle__brand",
             "vehicle__category",
             "vehicle__parking_space",
             "vehicle__parking_space__parking",
         ).prefetch_related(
+            "invoices",
             "vehicle__photos",
             Prefetch(
                 "vehicle__reference_inspections",
@@ -413,13 +424,13 @@ class ReservationManagementDetailView(generics.RetrieveAPIView):
         return Reservation.objects.select_related(
             "client",
             "client__user",
-            "invoice",
             "vehicle",
             "vehicle__brand",
             "vehicle__category",
             "vehicle__parking_space",
             "vehicle__parking_space__parking",
         ).prefetch_related(
+            "invoices",
             "vehicle__photos",
             Prefetch(
                 "inspections",
@@ -447,6 +458,10 @@ class ReservationManagementDetailView(generics.RetrieveAPIView):
                     "created_by__role",
                 ),
                 to_attr="prefetched_interventions",
+            ),
+            Prefetch(
+                "additional_charges",
+                to_attr="prefetched_additional_charges",
             ),
         )
 
@@ -673,6 +688,34 @@ class ReservationManagementConfirmChargesView(generics.GenericAPIView):
         return Response(ReservationManagementDetailSerializer(reservation, context={"request": request}).data)
 
 
+class ReservationManagementAdditionalChargesView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    serializer_class = ReservationManagementAdditionalChargesUpdateRequestSerializer
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return ReservationManagementDetailView().get_queryset()
+
+    def post(self, request, *args, **kwargs):
+        reservation = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            save_provisional_additional_charges(
+                reservation=reservation,
+                requested_by=request.user,
+                charges=serializer.validated_data["charges"],
+            )
+        except ReservationAdditionalChargesError as exc:
+            return Response({"code": exc.code, "message": exc.message}, status=exc.http_status)
+        updated_reservation = self.get_queryset().get(pk=reservation.pk)
+        return Response(ReservationManagementDetailSerializer(updated_reservation, context={"request": request}).data)
+
+
 class ReservationManagementCompleteView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
     serializer_class = ReservationManagementCompleteRequestSerializer
@@ -877,6 +920,15 @@ class ReservationManagementDepositReleaseView(generics.GenericAPIView):
     )
     def post(self, request, *args, **kwargs):
         reservation = self.get_object()
+        additional_total = get_positive_provisional_additional_charges_total(reservation=reservation)
+        if additional_total > 0:
+            return Response(
+                {
+                    "code": "ADDITIONAL_CHARGES_PENDING",
+                    "message": "La caution ne peut pas etre liberee tant que des frais supplémentaires provisoires sont positifs.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         try:
             deposit = release_reservation_deposit_for_management(reservation=reservation, requested_by=request.user)
@@ -894,3 +946,62 @@ class ReservationManagementDepositReleaseView(generics.GenericAPIView):
             context={"request": request},
         )
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class ReservationManagementDepositSettleView(generics.GenericAPIView):
+    """Regularisation unique de la caution : capture le montant retenu et libere le reste."""
+
+    permission_classes = [IsAuthenticated, IsManagerOrAdministrator]
+    lookup_field = "id"
+    lookup_url_kwarg = "pk"
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Reservation.objects.none()
+
+        return ReservationManagementDetailView().get_queryset()
+
+    @extend_schema(
+        tags=["Reservation Management"],
+        description=(
+            "Regularise la caution d'une reservation A_CONTROLER en une operation unique : "
+            "frais = 0 EUR -> annulation de la preautorisation (liberation integrale) ; "
+            "frais > 0 EUR -> capture partielle plafonnee a la caution, le reliquat etant "
+            "libere automatiquement par Stripe. Operation idempotente (etat en base + cles "
+            "d'idempotence Stripe)."
+        ),
+        responses={
+            200: OpenApiResponse(description="Caution regularisee."),
+            400: ErrorDetailResponseSerializer,
+            401: ErrorDetailResponseSerializer,
+            403: ErrorDetailResponseSerializer,
+            404: ErrorDetailResponseSerializer,
+            409: ErrorDetailResponseSerializer,
+            502: ErrorDetailResponseSerializer,
+            503: ErrorDetailResponseSerializer,
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        reservation = self.get_object()
+
+        try:
+            result = settle_reservation_deposit(reservation=reservation, requested_by=request.user)
+        except DepositSettlementOperationError as exc:
+            payload = {"code": exc.code, "message": exc.message}
+            if exc.details:
+                payload["details"] = exc.details
+            return Response(payload, status=exc.http_status)
+
+        return Response(
+            {
+                "message": "Caution regularisee.",
+                "deposit_status": result.deposit.status,
+                "deposit_amount": str(result.deposit_amount),
+                "charges_total": str(result.charges_total),
+                "captured_amount": str(result.captured_amount),
+                "released_amount": str(result.released_amount),
+                "over_deposit_amount": str(result.over_deposit_amount),
+                "stripe_payment_intent_id": result.stripe_payment_intent_id,
+            },
+            status=status.HTTP_200_OK,
+        )

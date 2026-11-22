@@ -75,6 +75,10 @@ def _quantize_amount(value: Decimal) -> Decimal:
 	return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+# Taux legal applique aux prestations taxables (affichage).
+_VAT_DISPLAY_RATE = Decimal("21.00")
+
+
 def _format_decimal_number(value: Decimal) -> str:
 	return f"{_quantize_amount(value):.2f}".replace(".", ",")
 
@@ -254,16 +258,63 @@ def build_invoice_financial_details(invoice: Invoice) -> dict[str, object]:
 			},
 		}
 	is_final_snapshot = invoice.lines.filter(description="Location et assurance (montant total confirmé)").exists()
+	if invoice.invoice_type == Invoice.InvoiceType.COMPLEMENTAIRE:
+		deposit = _get_latest_deposit(reservation)
+		line_items = [
+			{
+				"label": line.description,
+				"amount": line.total_price,
+				"amount_display": format_french_amount(line.total_price, invoice.currency),
+			}
+			for line in invoice.lines.all()
+		]
+		subtotal_htva = _quantize_amount(invoice.subtotal)
+		tax_amount = _quantize_amount(invoice.tax_amount)
+		tax_rate = _VAT_DISPLAY_RATE if tax_amount > 0 else Decimal("0.00")
+		total_tvac = _quantize_amount(subtotal_htva + tax_amount)
+		captured = deposit.captured_amount if deposit is not None and deposit.captured_amount is not None else Decimal("0.00")
+		retained_on_deposit = _quantize_amount(min(captured, total_tvac))
+		remaining_due = _quantize_amount(max(total_tvac - retained_on_deposit, Decimal("0.00")))
+		return {
+			"line_items": line_items,
+			"subtotal": subtotal_htva,
+			"subtotal_display": format_french_amount(subtotal_htva, invoice.currency),
+			"tax_amount": tax_amount,
+			"tax_amount_display": format_french_amount(tax_amount, invoice.currency),
+			"tax_rate": tax_rate,
+			"tax_rate_display": format_french_percentage(tax_rate),
+			"total": total_tvac,
+			"total_display": format_french_amount(total_tvac, invoice.currency),
+			"payment": {
+				"available": True,
+				"status": "Réglé par retenue sur caution" if remaining_due == 0 else "Partiellement réglé par retenue sur caution",
+				"date": format_french_datetime(deposit.captured_at) if deposit is not None and deposit.captured_at else None,
+				"method": "Retenue sur la caution préautorisée (Stripe)",
+				"reference": deposit.stripe_payment_intent_id if deposit is not None and deposit.stripe_payment_intent_id else None,
+				"amount_display": format_french_amount(retained_on_deposit, invoice.currency),
+				"balance_display": format_french_amount(remaining_due, invoice.currency),
+			},
+			"deposit": {
+				"available": deposit is not None,
+				"amount": (deposit.amount if deposit is not None else reservation.deposit_amount),
+				"amount_display": format_french_amount(deposit.amount if deposit is not None else reservation.deposit_amount, invoice.currency),
+				"status": format_deposit_status(deposit.status) if deposit is not None else None,
+				"date": format_french_datetime(deposit.captured_at or deposit.authorized_at or deposit.created_at) if deposit is not None else None,
+				"reference": deposit.stripe_payment_intent_id if deposit is not None and deposit.stripe_payment_intent_id else None,
+			},
+		}
 	pricing = (
 		{"rental_amount": invoice.subtotal, "insurance_amount": Decimal("0.00")}
 		if is_final_snapshot else _build_pricing_breakdown(invoice=invoice)
 	)
 	other_fees = _build_other_fees(invoice)
 	other_fees_total = sum((fee["amount"] for fee in other_fees), Decimal("0.00"))
-	subtotal_htva = _quantize_amount(pricing["rental_amount"] + pricing["insurance_amount"] + other_fees_total)
+	# Resume financier depuis les champs factures (source de verite) : les anciennes
+	# factures (tax_amount=0) conservent exactement leur presentation historique.
+	subtotal_htva = _quantize_amount(invoice.subtotal)
 	tax_amount = _quantize_amount(invoice.tax_amount)
-	tax_rate = _quantize_amount((tax_amount / subtotal_htva * Decimal("100")) if subtotal_htva > 0 else Decimal("0.00"))
-	total_tvac = _quantize_amount(subtotal_htva + tax_amount)
+	tax_rate = _VAT_DISPLAY_RATE if tax_amount > 0 else Decimal("0.00")
+	total_tvac = _quantize_amount(invoice.total_amount)
 	payment = _get_latest_payment(reservation)
 	deposit = _get_latest_deposit(reservation)
 

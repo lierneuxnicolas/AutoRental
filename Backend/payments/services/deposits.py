@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone as dt_timezone
 from decimal import Decimal
@@ -13,11 +14,15 @@ from django.utils import timezone
 
 from accounts.models import ClientProfile
 from accounts.services import check_vehicle_compatibility_for_client, validate_client_for_reservation
+from common.models import SystemLog
+from common.services import create_system_log
 from notifications.services import create_notification
 from payments.models import Deposit
-from reservations.models import Reservation
+from reservations.models import Reservation, ReservationAdditionalCharge
 from reservations.services.pricing import PricingError, calculate_price_simulation
 from vehicles.services import is_vehicle_available
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -40,12 +45,33 @@ class DepositReleaseError(ValueError):
         return self.message
 
 
+@dataclass(frozen=True)
+class DepositSettlementOperationError(ValueError):
+    code: str
+    message: str
+    http_status: int = 400
+    details: dict[str, Any] | None = None
+
+    def __str__(self) -> str:
+        return self.message
+
+
 def _raise_deposit_error(code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
     raise DepositAuthorizationError(code=code, message=message, details=details)
 
 
 def _raise_deposit_release_error(code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
     raise DepositReleaseError(code=code, message=message, details=details)
+
+
+def _raise_deposit_settlement_error(
+    code: str,
+    message: str,
+    *,
+    http_status: int = 400,
+    details: dict[str, Any] | None = None,
+) -> None:
+    raise DepositSettlementOperationError(code=code, message=message, http_status=http_status, details=details)
 
 
 def _normalize_mode(mode: str) -> str:
@@ -305,6 +331,325 @@ def release_reservation_deposit_for_management(*, reservation: Reservation, requ
             )
 
     return deposit
+
+
+@dataclass(frozen=True)
+class DepositSettlementResult:
+    """Resultat de la regularisation unique de caution (operation 4.3)."""
+
+    deposit: Deposit
+    deposit_amount: Decimal
+    charges_total: Decimal
+    captured_amount: Decimal
+    released_amount: Decimal
+    over_deposit_amount: Decimal
+    stripe_payment_intent_id: str | None
+
+
+_SETTLEABLE_DEPOSIT_STATUSES = {Deposit.Status.AUTORISEE, Deposit.Status.A_VERIFIER}
+
+
+def _build_settle_capture_idempotency_key(*, deposit: Deposit, amount_minor: int) -> str:
+    return f"deposit_settle_capture:{deposit.id}:{deposit.stripe_payment_intent_id or 'no-pi'}:{amount_minor}"
+
+
+def _assert_settlement_requested_by_manager(requested_by) -> None:
+    role_code = getattr(getattr(requested_by, "role", None), "code", None)
+    if not getattr(requested_by, "is_superuser", False) and role_code not in {"GESTIONNAIRE_COMPTABLE", "ADMINISTRATEUR"}:
+        _raise_deposit_settlement_error(
+            "FORBIDDEN",
+            "Cette action est reservee aux gestionnaires-comptables ou aux administrateurs.",
+            http_status=403,
+        )
+
+
+def _get_deposit_for_settlement(*, reservation: Reservation) -> Deposit:
+    deposit = (
+        Deposit.objects.select_for_update()
+        .filter(reservation=reservation)
+        .order_by("-authorized_at", "-created_at", "-id")
+        .first()
+    )
+    if deposit is None:
+        _raise_deposit_settlement_error(
+            "DEPOSIT_NOT_FOUND",
+            "Aucune caution n'est disponible pour cette reservation.",
+            http_status=409,
+        )
+    return deposit
+
+
+def _expire_stale_deposit_authorization(*, reservation: Reservation) -> None:
+    """Marque EXPIREE (transaction dediee) une preautorisation dont la fenetre est depassee.
+
+    La transition est committee independamment pour conserver la trace meme si
+    l'operation de regularisation echoue ensuite.
+    """
+    now = timezone.now()
+    with transaction.atomic():
+        deposit = (
+            Deposit.objects.select_for_update()
+            .filter(
+                reservation=reservation,
+                status__in=_SETTLEABLE_DEPOSIT_STATUSES,
+                authorization_expires_at__isnull=False,
+                authorization_expires_at__lte=now,
+            )
+            .order_by("-authorized_at", "-created_at", "-id")
+            .first()
+        )
+        if deposit is None:
+            return
+        deposit.status = Deposit.Status.EXPIREE
+        deposit.failed_at = now
+        deposit.save(update_fields=["status", "failed_at", "updated_at"])
+        _log_deposit_settlement(
+            action="DEPOSIT_AUTHORIZATION_EXPIRED",
+            level=SystemLog.Level.WARNING,
+            deposit=deposit,
+            reservation=reservation,
+            user=None,
+            suffix="Preautorisation expiree detectee avant regularisation.",
+        )
+
+
+def _log_deposit_settlement(*, action: str, level, deposit: Deposit, reservation: Reservation, user, suffix: str = "") -> None:
+    try:
+        message = (
+            f"Deposit id={deposit.id}, reservation={reservation.reference} (id={reservation.id}), "
+            f"amount={deposit.amount} {deposit.currency}, "
+            f"stripe_payment_intent={deposit.stripe_payment_intent_id or 'aucun'}."
+        )
+        if suffix:
+            message = f"{message} {suffix}"
+        create_system_log(user=user, action=action, message=message, level=level)
+    except Exception:  # pragma: no cover - le log ne doit jamais faire echouer l'operation
+        logger.exception("Impossible d'ecrire le journal systeme pour la regularisation de caution.")
+
+
+def _capture_stripe_deposit(*, deposit: Deposit, amount_to_capture: Decimal) -> Decimal:
+    """Capture partiellement/totalement la preautorisation Stripe et retourne le montant capture.
+
+    Ne capture jamais plus que le montant reellement capturable annonce par Stripe.
+    """
+    if not deposit.stripe_payment_intent_id:
+        _raise_deposit_settlement_error(
+            "DEPOSIT_REFERENCE_MISSING",
+            "La référence Stripe de la caution est absente.",
+            http_status=409,
+        )
+
+    stripe_api_key = getattr(settings, "STRIPE_SECRET_KEY", "")
+    if not stripe_api_key:
+        _raise_deposit_settlement_error(
+            "STRIPE_NOT_CONFIGURED",
+            "STRIPE_SECRET_KEY est requis pour regulariser une caution STRIPE_TEST.",
+            http_status=503,
+        )
+    stripe.api_key = stripe_api_key
+
+    try:
+        payment_intent = stripe.PaymentIntent.retrieve(deposit.stripe_payment_intent_id)
+    except stripe.error.APIConnectionError:
+        _raise_deposit_settlement_error("STRIPE_UNAVAILABLE", "Stripe est temporairement indisponible.", http_status=503)
+    except stripe.error.StripeError as exc:
+        _raise_deposit_settlement_error(
+            "STRIPE_ERROR",
+            "Impossible de verifier la preautorisation Stripe de caution.",
+            http_status=502,
+            details={"stripe_error": str(exc)},
+        )
+
+    stripe_status = getattr(payment_intent, "status", "")
+    if stripe_status == "canceled":
+        _raise_deposit_settlement_error(
+            "DEPOSIT_AUTHORIZATION_EXPIRED",
+            "La preautorisation Stripe n'est plus active (annulee ou expiree) ; aucune capture n'est possible.",
+            http_status=409,
+        )
+    if stripe_status == "succeeded":
+        _raise_deposit_settlement_error(
+            "DEPOSIT_ALREADY_CAPTURED",
+            "La caution Stripe a deja ete capturee.",
+            http_status=409,
+        )
+    if stripe_status != "requires_capture":
+        _raise_deposit_settlement_error(
+            "DEPOSIT_NOT_CAPTURABLE",
+            "La preautorisation Stripe n'est pas dans un etat capturable.",
+            http_status=409,
+            details={"stripe_status": stripe_status},
+        )
+
+    amount_capturable_minor = int(getattr(payment_intent, "amount_capturable", 0) or 0)
+    requested_minor = _to_minor_units(amount_to_capture)
+    capture_minor = min(requested_minor, amount_capturable_minor)
+    if capture_minor <= 0:
+        _raise_deposit_settlement_error(
+            "DEPOSIT_NOT_CAPTURABLE",
+            "Aucun montant capturable n'est disponible sur la preautorisation Stripe.",
+            http_status=409,
+        )
+
+    try:
+        captured_intent = stripe.PaymentIntent.capture(
+            deposit.stripe_payment_intent_id,
+            amount_to_capture=capture_minor,
+            idempotency_key=_build_settle_capture_idempotency_key(deposit=deposit, amount_minor=capture_minor),
+        )
+    except stripe.error.InvalidRequestError as exc:
+        if getattr(exc, "code", None) == "payment_intent_unexpected_state":
+            _raise_deposit_settlement_error(
+                "DEPOSIT_STATE_CHANGED",
+                "L'etat de la caution Stripe a change ; verifiez-la avant de reessayer.",
+                http_status=409,
+            )
+        _raise_deposit_settlement_error(
+            "STRIPE_ERROR",
+            "Stripe refuse la capture de la caution.",
+            http_status=502,
+            details={"stripe_error": str(exc)},
+        )
+    except stripe.error.APIConnectionError:
+        _raise_deposit_settlement_error("STRIPE_UNAVAILABLE", "Stripe est temporairement indisponible.", http_status=503)
+    except stripe.error.StripeError as exc:
+        _raise_deposit_settlement_error(
+            "STRIPE_ERROR",
+            "Erreur Stripe lors de la capture de la caution.",
+            http_status=502,
+            details={"stripe_error": str(exc)},
+        )
+
+    if getattr(captured_intent, "status", None) != "succeeded":
+        _raise_deposit_settlement_error(
+            "DEPOSIT_CAPTURE_UNCONFIRMED",
+            "Stripe n'a pas confirme la capture de la caution.",
+            http_status=502,
+        )
+
+    return (Decimal(capture_minor) / Decimal("100")).quantize(Decimal("0.01"))
+
+
+def settle_reservation_deposit(*, reservation: Reservation, requested_by) -> DepositSettlementResult:
+    """Regularise la caution d'une reservation A_CONTROLER en une operation unique.
+
+    - frais = 0 EUR : annule la preautorisation (liberation integrale) ;
+    - frais > 0 EUR : capture min(frais, caution, montant capturable Stripe) ;
+      Stripe libere automatiquement le reliquat non capture.
+    En cas d'erreur, aucun etat local n'est modifie : la caution n'est jamais
+    annoncee liberee et la reservation n'est pas cloturee.
+    """
+    from reservations.services.additional_charges import calculate_deposit_settlement
+
+    _assert_settlement_requested_by_manager(requested_by)
+    _expire_stale_deposit_authorization(reservation=reservation)
+
+    with transaction.atomic():
+        locked = Reservation.objects.select_for_update().get(pk=reservation.pk)
+
+        if locked.status != Reservation.Status.A_CONTROLER:
+            _raise_deposit_settlement_error(
+                "INVALID_STATUS",
+                "La reservation doit etre A_CONTROLER pour regulariser la caution.",
+                http_status=409,
+            )
+
+        deposit = _get_deposit_for_settlement(reservation=locked)
+
+        if deposit.status in {Deposit.Status.CAPTUREE, Deposit.Status.LIBEREE}:
+            _raise_deposit_settlement_error(
+                "DEPOSIT_ALREADY_SETTLED",
+                "La caution de cette reservation a deja ete regularisee.",
+                http_status=409,
+            )
+        if deposit.status == Deposit.Status.EXPIREE:
+            _raise_deposit_settlement_error(
+                "DEPOSIT_AUTHORIZATION_EXPIRED",
+                "La preautorisation de caution a expire ; aucune regularisation automatique n'est possible.",
+                http_status=409,
+            )
+        if deposit.status not in _SETTLEABLE_DEPOSIT_STATUSES:
+            _raise_deposit_settlement_error(
+                "DEPOSIT_STATUS_INVALID",
+                "La caution doit etre AUTORISEE ou A_VERIFIER pour etre regularisee.",
+                http_status=409,
+                details={"deposit_status": deposit.status},
+            )
+
+        settlement = calculate_deposit_settlement(reservation=locked)
+        amount_to_capture = min(settlement.retained_amount, deposit.amount)
+        now = timezone.now()
+
+        captured_amount = Decimal("0.00")
+        if amount_to_capture > 0:
+            if deposit.mode == Deposit.Mode.STRIPE_TEST:
+                captured_amount = _capture_stripe_deposit(deposit=deposit, amount_to_capture=amount_to_capture)
+            else:
+                captured_amount = amount_to_capture
+            deposit.status = Deposit.Status.CAPTUREE
+            deposit.captured_at = now
+            deposit.captured_amount = captured_amount
+            deposit.authorization_expires_at = None
+            deposit.save(update_fields=["status", "captured_at", "captured_amount", "authorization_expires_at", "updated_at"])
+        else:
+            if deposit.mode == Deposit.Mode.STRIPE_TEST:
+                try:
+                    _release_stripe_deposit_hold(deposit=deposit)
+                except DepositReleaseError as exc:
+                    http_status = 503 if exc.code == "STRIPE_UNAVAILABLE" else 409
+                    _raise_deposit_settlement_error(exc.code, exc.message, http_status=http_status, details=exc.details)
+            deposit.status = Deposit.Status.LIBEREE
+            deposit.released_at = now
+            deposit.authorization_expires_at = None
+            deposit.save(update_fields=["status", "released_at", "authorization_expires_at", "updated_at"])
+
+        released_amount = (deposit.amount - captured_amount).quantize(Decimal("0.01"))
+        if released_amount < 0:
+            released_amount = Decimal("0.00")
+
+        # Trace de la decision : les lignes provisoires deviennent VALIDEE.
+        ReservationAdditionalCharge.objects.filter(
+            reservation=locked,
+            status=ReservationAdditionalCharge.Status.PROVISOIRE,
+        ).update(status=ReservationAdditionalCharge.Status.VALIDEE, updated_at=now)
+
+        _log_deposit_settlement(
+            action="DEPOSIT_SETTLED",
+            level=SystemLog.Level.INFO,
+            deposit=deposit,
+            reservation=locked,
+            user=requested_by,
+            suffix=(
+                f"Frais retenus={settlement.charges_total} EUR, capture={captured_amount} EUR, "
+                f"libere={released_amount} EUR, depassement={settlement.over_deposit_amount} EUR."
+            ),
+        )
+
+    # Facture complementaire automatique apres regularisation confirmee.
+    # Best-effort : la capture Stripe est deja effective, un echec de facturation
+    # ne doit jamais remettre en cause l'etat regularise (trace en log pour reprise).
+    if captured_amount > 0:
+        try:
+            from invoicing.services import create_additional_charges_invoice
+            from invoicing.services.pdf_generator import ensure_invoice_pdf
+
+            invoice = create_additional_charges_invoice(locked)
+            if invoice is not None:
+                ensure_invoice_pdf(invoice)
+        except Exception:
+            logger.exception(
+                "La facture complementaire n'a pas pu etre generee pour la reservation %s.", locked.pk
+            )
+
+    return DepositSettlementResult(
+        deposit=deposit,
+        deposit_amount=settlement.deposit_amount,
+        charges_total=settlement.charges_total,
+        captured_amount=captured_amount,
+        released_amount=released_amount,
+        over_deposit_amount=settlement.over_deposit_amount,
+        stripe_payment_intent_id=deposit.stripe_payment_intent_id,
+    )
 
 
 

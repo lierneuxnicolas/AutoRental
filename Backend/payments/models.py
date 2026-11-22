@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
@@ -77,6 +79,14 @@ class Deposit(models.Model):
 	currency = models.CharField(max_length=3, default="EUR")
 	status = models.CharField(max_length=20, choices=Status.choices, default=Status.CREE, db_index=True)
 	stripe_payment_intent_id = models.CharField(max_length=255, null=True, blank=True)
+	# Montant reellement capture chez Stripe. NULL = capture historique au montant inconnu.
+	captured_amount = models.DecimalField(
+		max_digits=10,
+		decimal_places=2,
+		default=Decimal("0.00"),
+		null=True,
+		blank=True,
+	)
 	authorization_expires_at = models.DateTimeField(null=True, blank=True)
 	authorized_at = models.DateTimeField(null=True, blank=True)
 	captured_at = models.DateTimeField(null=True, blank=True)
