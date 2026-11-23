@@ -386,7 +386,7 @@ class Tfe83ReservationRulesTests(ReservationTestDataMixin, TestCase):
             patch("payments.services.payment_intents.stripe.PaymentIntent.create") as mocked_create,
             self.settings(STRIPE_SECRET_KEY="sk_test_123"),
         ):
-            response = self.client_api.post(payment_intent_url, {}, format="json")
+            response = self.client_api.post(payment_intent_url, {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "RESERVATION_UNAVAILABLE")

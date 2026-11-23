@@ -11,6 +11,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { getClientDocuments, getClientProfileMe, getClientProfileProgress } from '../../services/authService'
 import { createReservation } from '../../services/reservationService'
 import { getVehicleById, simulatePrice } from '../../services/vehicleService'
+import RentalTermsCheckbox from '../../components/reservations/RentalTermsCheckbox'
 import { createReservationDeposit, createReservationPaymentIntent } from '../../services/paymentService'
 import { getReservationById } from '../../services/reservationService'
 import type { ReservationCreateRequest, ReservationCreateResponse } from '../../types/reservation'
@@ -397,6 +398,9 @@ export default function ReservationPage() {
   const location = useLocation()
   const { isAuthenticated, isLoading: isAuthLoading } = useAuth()
   const stepRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  const [acceptedRentalTermsKey, setAcceptedRentalTermsKey] = useState<string | null>(null)
+  const rentalTermsKey = searchParams.toString()
+  const rentalTermsAccepted = acceptedRentalTermsKey === rentalTermsKey
   const [currentStep, setCurrentStep] = useState(1)
   const [createdReservation, setCreatedReservation] = useState<ReservationCreateResponse | null>(null)
   const [confirmedReservation, setConfirmedReservation] = useState<ReservationCreateResponse | null>(null)
@@ -683,7 +687,7 @@ export default function ReservationPage() {
       return
     }
 
-    if (!canConfirmWithInsurance || !reservationPayload) {
+    if (!rentalTermsAccepted || !canConfirmWithInsurance || !reservationPayload) {
       return
     }
 
@@ -699,6 +703,7 @@ export default function ReservationPage() {
     createdReservation,
     depositAuthorizationMutation.isPending,
     paymentIntentMutation.isPending,
+    rentalTermsAccepted,
     reservationPayload,
   ])
 
@@ -1118,6 +1123,8 @@ export default function ReservationPage() {
                       />
                     ) : paymentWorkflowError ? (
                       <Alert variant="danger" title="Paiement impossible" message={paymentWorkflowError} />
+                    ) : !rentalTermsAccepted ? (
+                      <RentalTermsCheckbox checked={false} onChange={(checked) => setAcceptedRentalTermsKey(checked ? rentalTermsKey : null)} />
                     ) : !createdReservation || !paymentClientSecret ? (
                       <Alert
                         variant="info"

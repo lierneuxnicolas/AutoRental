@@ -7,7 +7,7 @@ export default function ScrollToTop() {
   useEffect(() => {
     if (hash) {
       const scrollToHash = () => {
-        const element = document.querySelector(hash)
+        const element = document.getElementById(hash.slice(1))
         if (element) {
           element.scrollIntoView({ behavior: 'smooth', block: 'start' })
         } else {

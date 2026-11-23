@@ -1,7 +1,7 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js'
-import { loadStripe } from '@stripe/stripe-js'
+import { loadStripe, type Stripe } from '@stripe/stripe-js'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AxiosError } from 'axios'
 import { Car, Check } from 'lucide-react'
@@ -12,6 +12,7 @@ import Input from '../../components/ui/Input'
 import StatusBadge, { type StatusVariant } from '../../components/ui/StatusBadge'
 import { useAuth } from '../../hooks/useAuth'
 import { getClientProfileMe, getClientProfileProgress } from '../../services/authService'
+import RentalTermsCheckbox from '../../components/reservations/RentalTermsCheckbox'
 import { createReservationDeposit, createReservationPaymentIntent } from '../../services/paymentService'
 import { createReservation, getPaymentChecks, getReservationById } from '../../services/reservationService'
 import { getVehicleById, simulatePrice } from '../../services/vehicleService'
@@ -23,7 +24,6 @@ import { formatVehicleDailyRate } from '../../utils/vehiclePrice'
 import { getReservationResume } from '../../utils/reservationResume'
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
-const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null
 const RESERVATION_CONFIRMATION_TIMEOUT_MS = 15000
 const RESERVATION_CONFIRMATION_POLL_DELAY_MS = 3000
 
@@ -168,6 +168,9 @@ function getSimulationErrorMessage(error: unknown): { message: string; retryable
 function getPaymentPreparationErrorMessage(error: unknown): string {
   if (error instanceof AxiosError && isRecord(error.response?.data)) {
     const data = error.response.data
+    if (data.code === 'STRIPE_UNAVAILABLE') {
+      return 'Stripe est temporairement indisponible. Veuillez réessayer.'
+    }
     const details = isRecord(data.details) ? data.details : {}
     if (Array.isArray(details.eligibility_errors)) {
       const messages = details.eligibility_errors.map(getErrorCodeMessage).filter((message): message is string => message !== null)
@@ -671,8 +674,14 @@ export default function VehicleDetailPage() {
   const [simulationContextMessage, setSimulationContextMessage] = useState<string | null>(null)
   const [currentStep, setCurrentStep] = useState<ReservationStepNumber>(() => (hasReservationIdInQuery || resume ? 3 : 1))
   const [selectedInsurance, setSelectedInsurance] = useState<InsuranceOptionKey | null>(() => resume?.reservationDraft.insurance ?? null)
+  const [acceptedRentalTermsKey, setAcceptedRentalTermsKey] = useState<string | null>(null)
   const [createdReservation, setCreatedReservation] = useState<ReservationCreateResponse | null>(null)
-  const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null)
+  const rentalTermsKey = JSON.stringify([id, start, end, selectedInsurance, createdReservation && String(createdReservation.id) === reservationIdParam ? null : reservationIdParam])
+  const rentalTermsAccepted = acceptedRentalTermsKey === rentalTermsKey
+  const [openedPaymentKey, setOpenedPaymentKey] = useState<string | null>(null)
+  const paymentOpened = rentalTermsAccepted && openedPaymentKey === rentalTermsKey
+  const [checkoutStripe, setCheckoutStripe] = useState<Stripe | null>(null)
+  const [paymentSession, setPaymentSession] = useState<{ reservationId: number; secret: string } | null>(null)
   const [paymentWorkflowError, setPaymentWorkflowError] = useState<string | null>(null)
   const [isPreparingPayment, setIsPreparingPayment] = useState(false)
   const [isConfirmingPayment, setIsConfirmingPayment] = useState(false)
@@ -681,7 +690,8 @@ export default function VehicleDetailPage() {
   const [hasPaymentFailed, setHasPaymentFailed] = useState(false)
   const [isRefreshingReservationStatus, setIsRefreshingReservationStatus] = useState(false)
   const finalizedPaymentClientSecretRef = useRef<string | null>(null)
-  const reservationCreationInFlightRef = useRef(false)
+  const paymentPreparationInFlightRef = useRef(false)
+  const authorizedDepositReservationId = useRef<number | null>(null)
   const confirmationPollTimerRef = useRef<number | null>(null)
   const confirmationPollDeadlineRef = useRef<number | null>(null)
 
@@ -780,6 +790,7 @@ export default function VehicleDetailPage() {
   )
 
   const activeReservation = reservationStateQuery.data ?? createdReservation
+  const paymentClientSecret = paymentSession && paymentSession.reservationId === activeReservation?.id ? paymentSession.secret : null
   const effectiveInsuranceSelection: InsuranceOptionKey | null = selectedInsurance
     ?? restoredInsuranceSelection
     ?? (hasReservationIdInQuery ? null : 'standard')
@@ -956,14 +967,16 @@ export default function VehicleDetailPage() {
   })
 
   const preparePayment = useCallback(async (reservationId: number) => {
-    setIsPreparingPayment(true)
     setPaymentWorkflowError(null)
 
     try {
-      const depositResult = await depositAuthorizationMutation.mutateAsync(reservationId)
-      const normalizedDepositStatus = depositResult.deposit_status.toUpperCase()
-      if (normalizedDepositStatus !== 'AUTORISEE' && normalizedDepositStatus !== 'VALIDE') {
-        throw new Error(depositResult.authorization_note || 'La preautorisation Stripe de la caution a ete refusee.')
+      if (authorizedDepositReservationId.current !== reservationId) {
+        const depositResult = await depositAuthorizationMutation.mutateAsync(reservationId)
+        const normalizedDepositStatus = depositResult.deposit_status.toUpperCase()
+        if (normalizedDepositStatus !== 'AUTORISEE' && normalizedDepositStatus !== 'VALIDE') {
+          throw new Error(depositResult.authorization_note || 'La preautorisation Stripe de la caution a ete refusee.')
+        }
+        authorizedDepositReservationId.current = reservationId
       }
 
       const paymentIntentResult = await paymentIntentMutation.mutateAsync(reservationId)
@@ -972,11 +985,9 @@ export default function VehicleDetailPage() {
         throw new Error('Le backend n\'a pas retourne de client_secret Stripe.')
       }
 
-      setPaymentClientSecret(paymentIntentResult.client_secret)
+      setPaymentSession({ reservationId, secret: paymentIntentResult.client_secret })
     } catch (error) {
       setPaymentWorkflowError(getPaymentPreparationErrorMessage(error))
-    } finally {
-      setIsPreparingPayment(false)
     }
   }, [depositAuthorizationMutation, paymentIntentMutation])
 
@@ -990,7 +1001,7 @@ export default function VehicleDetailPage() {
         throw new Error('Le backend n\'a pas retourne de client_secret Stripe.')
       }
 
-      setPaymentClientSecret(paymentIntentResult.client_secret)
+      setPaymentSession({ reservationId, secret: paymentIntentResult.client_secret })
     } catch (error) {
       setPaymentWorkflowError(getPaymentPreparationErrorMessage(error))
     }
@@ -1007,7 +1018,7 @@ export default function VehicleDetailPage() {
     const refreshedReservation = await getReservationById(reservationId)
     setCreatedReservation(refreshedReservation)
     return refreshedReservation
-  }, [])
+  }, [setCreatedReservation])
 
   const handlePaymentSuccess = async (paymentStatus?: string) => {
     if (!activeReservation || !paymentClientSecret) {
@@ -1166,13 +1177,13 @@ export default function VehicleDetailPage() {
   }, [createdReservation, location.pathname, navigate, searchParams])
 
   useEffect(() => {
-    if (currentStep !== 3 || !canProceedToPayment || !simulationQuery.data || simulationQuery.isError) {
+    if (currentStep !== 3 || !paymentOpened || !canProceedToPayment || !simulationQuery.data || simulationQuery.isError) {
       return
     }
 
     if (
       createReservationMutation.isPending
-      || reservationCreationInFlightRef.current
+      || paymentPreparationInFlightRef.current
       || depositAuthorizationMutation.isPending
       || paymentIntentMutation.isPending
       || isPreparingPayment
@@ -1185,42 +1196,37 @@ export default function VehicleDetailPage() {
 
     const timeoutId = window.setTimeout(() => {
       const syncStripePayment = async () => {
-        if (activeReservation) {
-          if (activeReservation.status === 'EN_ATTENTE_PAIEMENT') {
-            await loadExistingPaymentClientSecret(activeReservation.id)
+        if (paymentPreparationInFlightRef.current) return
+        paymentPreparationInFlightRef.current = true
+        setIsPreparingPayment(true)
+
+        try {
+          if (!stripePublishableKey) return
+          try {
+            const stripe = checkoutStripe ?? await loadStripe(stripePublishableKey)
+            if (!stripe) throw new Error()
+            setCheckoutStripe(stripe)
+          } catch {
+            setPaymentWorkflowError('Stripe n’a pas pu charger le formulaire de paiement. Veuillez réessayer.')
             return
           }
 
-          await preparePayment(activeReservation.id)
-          return
-        }
+          const reservation = activeReservation
+            ?? (reservationPayload ? await createReservationMutation.mutateAsync(reservationPayload) : null)
+          if (!reservation) return
 
-        if (!reservationPayload || !simulationQuery.data) {
-          return
-        }
-
-        if (reservationCreationInFlightRef.current) {
-          return
-        }
-
-        reservationCreationInFlightRef.current = true
-        let reservation: ReservationCreateResponse
-        try {
-          reservation = await createReservationMutation.mutateAsync(reservationPayload)
+          if (reservation.status === 'EN_ATTENTE_PAIEMENT') {
+            await loadExistingPaymentClientSecret(reservation.id)
+          } else {
+            await preparePayment(reservation.id)
+          }
         } catch {
-          return
+          // The reservation mutation already provides the error shown in the recap.
         } finally {
-          reservationCreationInFlightRef.current = false
+          paymentPreparationInFlightRef.current = false
+          setIsPreparingPayment(false)
         }
-
-        if (reservation.status === 'EN_ATTENTE_PAIEMENT') {
-          await loadExistingPaymentClientSecret(reservation.id)
-          return
-        }
-
-        await preparePayment(reservation.id)
       }
-
       void syncStripePayment()
     }, 0)
 
@@ -1230,6 +1236,7 @@ export default function VehicleDetailPage() {
   }, [
     activeReservation,
     canProceedToPayment,
+    checkoutStripe,
     createReservationMutation,
     currentStep,
     depositAuthorizationMutation.isPending,
@@ -1239,6 +1246,7 @@ export default function VehicleDetailPage() {
     paymentIntentMutation.isPending,
     paymentWorkflowError,
     preparePayment,
+    paymentOpened,
     reservationPayload,
     simulationQuery.data,
     simulationQuery.isError,
@@ -1448,6 +1456,19 @@ export default function VehicleDetailPage() {
     { id: 'conditions', label: 'Conditions' },
   ]
 
+  const confirmationReservation = createdReservation?.status === 'CONFIRMEE' && createdReservation.id === activeReservation?.id
+    ? createdReservation
+    : activeReservation
+  const confirmedReservationId = !isLoading && vehicle && status && gallery && confirmationReservation?.status === 'CONFIRMEE'
+    ? confirmationReservation.id
+    : null
+
+  useLayoutEffect(() => {
+    if (confirmedReservationId !== null) {
+      window.scrollTo({ top: 0, behavior: 'instant' })
+    }
+  }, [confirmedReservationId])
+
   if (isLoading) {
     return (
       <section className="py-8 sm:py-10" aria-label="Chargement du vehicule">
@@ -1525,9 +1546,6 @@ export default function VehicleDetailPage() {
   const paymentRentalAmountLabel = formatCurrencyFr(simulationQuery.data?.rental_amount) ?? 'Non renseigné'
   const paymentInsuranceAmountLabel = formatCurrencyFr(simulationQuery.data?.insurance_amount) ?? 'Non renseigné'
   const paymentTotalAmountLabel = formatCurrencyFr(simulationQuery.data?.total_amount) ?? 'Non renseigné'
-  const confirmationReservation = createdReservation?.status === 'CONFIRMEE' && createdReservation.id === activeReservation?.id
-    ? createdReservation
-    : activeReservation
   const displayedCurrentStep: ReservationStepNumber = confirmationReservation?.status === 'CONFIRMEE' ? 4 : currentStep
 
   const tabContent = {
@@ -1895,8 +1913,18 @@ export default function VehicleDetailPage() {
                     </section>
                   ) : null}
 
+                  {isAuthenticated ? (
+                    <RentalTermsCheckbox
+                      checked={rentalTermsAccepted}
+                      onChange={(checked) => {
+                        setAcceptedRentalTermsKey(checked ? rentalTermsKey : null)
+                        if (!checked) setOpenedPaymentKey(null)
+                      }}
+                    />
+                  ) : null}
+
                   <section className="space-y-4">
-                    {isAuthenticated ? <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Données de paiement</p> : null}
+                    {isAuthenticated && paymentOpened ? <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Données de paiement</p> : null}
                     {isAuthenticated ? (
                       <div className="space-y-4">
                         {profileQuery.isLoading || profileProgressQuery.isLoading ? (
@@ -1937,7 +1965,22 @@ export default function VehicleDetailPage() {
                           </>
                         ) : (
                           <>
-                            {!stripePublishableKey || !stripePromise ? (
+                            {!paymentOpened ? (
+                              <div className="space-y-2">
+                                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+                                  <Button variant="secondary" onClick={() => setCurrentStep(2)}>Retour</Button>
+                                  <Button
+                                    variant="violet"
+                                    className={!rentalTermsAccepted ? 'bg-slate-200! text-slate-600! disabled:opacity-100!' : undefined}
+                                    disabled={!rentalTermsAccepted || !hasSimulationSummary || shouldShowSimulationError}
+                                    onClick={() => setOpenedPaymentKey(rentalTermsKey)}
+                                  >
+                                    Continuer vers le paiement
+                                  </Button>
+                                </div>
+                                {!rentalTermsAccepted ? <p className="text-right text-sm text-slate-500">Acceptez les conditions pour continuer.</p> : null}
+                              </div>
+                            ) : !stripePublishableKey ? (
                               <Alert
                                 variant="danger"
                                 title="Configuration Stripe manquante"
@@ -1968,7 +2011,7 @@ export default function VehicleDetailPage() {
                               </div>
                             ) : shouldShowSimulationError ? (
                               <Button variant="secondary" onClick={() => setCurrentStep(2)}>Retour</Button>
-                            ) : !activeReservation || !paymentClientSecret ? (
+                            ) : !activeReservation || !paymentClientSecret || !checkoutStripe ? (
                               <Alert
                                 variant="info"
                                 title="Préparation en cours"
@@ -1977,7 +2020,7 @@ export default function VehicleDetailPage() {
                             ) : (
                               <>
                                 <Elements
-                                  stripe={stripePromise}
+                                  stripe={checkoutStripe}
                                   options={{
                                     clientSecret: paymentClientSecret,
                                     appearance: {

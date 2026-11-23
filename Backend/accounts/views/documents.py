@@ -1,17 +1,18 @@
 from azure.core.exceptions import ResourceNotFoundError
+from django.db import transaction
 from django.db.models import Q
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import generics
 from rest_framework import status
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import ClientDocument, ClientProfile
+from accounts.models import ClientDocument, ClientProfile, User
 from accounts.permissions import IsClient, IsManager, IsManagerOrAdministrator
 from accounts.serializers.documents import (
     ClientDocumentCreateSerializer,
@@ -106,7 +107,10 @@ class ClientDocumentListCreateView(_ClientProfileMixin, generics.ListCreateAPIVi
             403: ErrorDetailResponseSerializer,
         },
     )
+    @transaction.atomic
     def post(self, request, *args, **kwargs):
+        if User.objects.select_for_update().get(pk=request.user.pk).account_closed_at:
+            raise PermissionDenied("Ce compte est clôturé.")
         return super().post(request, *args, **kwargs)
 
 

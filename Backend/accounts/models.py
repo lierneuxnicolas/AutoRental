@@ -73,8 +73,11 @@ class User(AbstractUser):
 		blank=True,
 	)
 	email_verified = models.BooleanField(default=False)
+	terms_accepted_at = models.DateTimeField(null=True, blank=True, editable=False)
+	terms_version = models.CharField(max_length=32, blank=True, editable=False)
 	is_active = models.BooleanField(default=True)
 	date_joined = models.DateTimeField(auto_now_add=True)
+	account_closed_at = models.DateTimeField(null=True, blank=True, editable=False)
 
 	# Keep distinct reverse names while AUTH_USER_MODEL is not switched yet.
 	groups = models.ManyToManyField(
@@ -104,6 +107,12 @@ class User(AbstractUser):
 
 	class Meta:
 		ordering = ["-date_joined", "id"]
+		constraints = [
+			models.CheckConstraint(
+				condition=models.Q(account_closed_at__isnull=True) | models.Q(is_active=False),
+				name="account_closed_requires_inactive",
+			),
+		]
 		indexes = [
 			models.Index(fields=["last_name", "first_name"], name="user_name_idx"),
 			models.Index(fields=["role", "is_active"], name="user_role_active_idx"),
@@ -112,6 +121,36 @@ class User(AbstractUser):
 
 	def __str__(self) -> str:
 		return self.email
+
+
+class AccountErasureRequest(models.Model):
+	class Status(models.TextChoices):
+		PENDING = "PENDING", "En attente"
+		CLOSED = "CLOSED", "Compte clôturé"
+
+	class Reason(models.TextChoices):
+		RESERVATION = "RESERVATION", "Une réservation ou location est encore ouverte."
+		RETURN_REVIEW = "RETURN_REVIEW", "Une restitution est en attente de contrôle."
+		VEHICLE_ACCESS = "VEHICLE_ACCESS", "Un accès véhicule est encore actif."
+		DEPOSIT = "DEPOSIT", "Une caution reste à régulariser."
+		PAYMENT = "PAYMENT", "Un paiement reste à régulariser."
+		REFUND = "REFUND", "Un remboursement reste à régulariser."
+		DISPUTE = "DISPUTE", "Un litige de paiement reste ouvert."
+
+	class ProcessingStatus(models.TextChoices):
+		PENDING = "PENDING", "À traiter"
+		HELD = "HELD", "Conservation temporaire"
+		FAILED = "FAILED", "À reprendre"
+		COMPLETED = "COMPLETED", "Traité"
+
+	user = models.OneToOneField(User, on_delete=models.PROTECT, related_name="erasure_request")
+	requested_at = models.DateTimeField(auto_now_add=True)
+	status = models.CharField(max_length=12, choices=Status, default=Status.PENDING)
+	reason = models.CharField(max_length=20, choices=Reason, blank=True)
+	processing_status = models.CharField(max_length=12, choices=ProcessingStatus, default=ProcessingStatus.PENDING)
+	processed_at = models.DateTimeField(null=True, blank=True)
+	processing_error = models.CharField(max_length=30, blank=True)
+	retention_hold = models.BooleanField(default=False, help_text="Conservation temporaire pour litige ou obligation légale documentée.")
 
 
 class ClientProfile(models.Model):

@@ -1,8 +1,8 @@
+import { Mail } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
-import Button from '../../components/ui/Button'
 import { verifyEmail } from '../../services/authService'
 import { getReservationResume, readReservationResume } from '../../utils/reservationResume'
 
@@ -54,59 +54,39 @@ export default function VerifyEmailPage() {
   const reservationResume = getReservationResume(location.state) ?? readReservationResume()
 
   return (
-    <div className="flex min-h-[70vh] items-center justify-center bg-[radial-gradient(circle_at_top,#EFF6FF,#FFFFFF_70%)] px-4 py-12">
-      <div className="w-full max-w-3xl overflow-hidden rounded-4xl border border-slate-200 bg-white shadow-[0_20px_60px_-20px_rgba(37,99,235,0.35)]">
-        <div className="grid gap-0 lg:grid-cols-[0.95fr_1.05fr]">
-          <div className="bg-[#0F172A] p-8 text-white sm:p-10 lg:p-12">
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-blue-200">AutoRental</p>
-            <h1 className="mt-4 text-3xl font-semibold sm:text-4xl">Vérification de votre e-mail</h1>
-            <p className="mt-4 max-w-md text-sm leading-7 text-slate-300 sm:text-base">
-              Confirmez votre adresse pour pouvoir utiliser votre espace AutoRental de façon complète.
-            </p>
+    <div className="flex min-h-[70vh] items-center justify-center px-4 py-8">
+      <section className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-sm sm:p-8">
+        <Mail aria-hidden="true" className="mx-auto mb-4 size-6 text-[#6038FF]" />
+        <h1 className="text-2xl font-semibold text-slate-900">Vérifiez votre e-mail</h1>
+
+        {status === 'loading' ? (
+          <div className="mt-4 flex items-center justify-center gap-2 text-sm text-slate-600" role="status">
+            <LoadingSpinner size="sm" aria-hidden="true" />
+            Vérification en cours…
           </div>
+        ) : null}
+        {status === 'success' ? (
+          <Alert variant="success" message={message ?? 'Votre e-mail a bien été confirmé.'} className="mt-4" />
+        ) : null}
+        {status === 'error' ? (
+          <Alert variant="danger" message={message ?? 'La vérification a échoué.'} className="mt-4" />
+        ) : null}
+        {status === 'idle' ? (
+          <p className="mt-4 break-words text-sm leading-6 text-slate-600">
+            {pendingVerification || email ? (
+              <>Un lien de confirmation a été envoyé{email ? <> à <strong className="font-semibold text-slate-900">{email}</strong></> : null}.</>
+            ) : 'Aucun lien de vérification n’a été fourni.'}
+          </p>
+        ) : null}
 
-          <div className="p-8 sm:p-10 lg:p-12">
-            <div className="mb-6">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Authentification</p>
-              <h2 className="mt-2 text-2xl font-semibold text-[#0F172A]">État de la vérification</h2>
-            </div>
-
-            {status === 'loading' ? (
-              <div className="flex items-center gap-3 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-                <LoadingSpinner size="sm" aria-label="Vérification en cours" />
-                Vérification de votre adresse e-mail en cours...
-              </div>
-            ) : null}
-
-            {status === 'success' ? (
-              <Alert variant="success" title="Adresse vérifiée" message={message ?? 'Votre e-mail a bien été confirmé.'} className="mb-6" />
-            ) : null}
-
-            {status === 'error' ? (
-              <Alert variant="danger" title="Vérification impossible" message={message ?? 'La vérification a échoué.'} className="mb-6" />
-            ) : null}
-
-            {status === 'idle' ? (
-              <Alert
-                variant="info"
-                title="Vérification en attente"
-                message={
-                  pendingVerification || email
-                    ? `Un e-mail de confirmation a été envoyé${email ? ` à ${email}` : ''}. Veuillez cliquer sur le lien reçu pour finaliser l’inscription.`
-                    : 'Aucun jeton de vérification n’a été trouvé dans l’URL.'
-                }
-                className="mb-6"
-              />
-            ) : null}
-
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Link to="/login" state={reservationResume} className="inline-flex">
-                <Button type="button" className="w-full sm:w-auto">Se connecter</Button>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </div>
+        <Link
+          to="/login"
+          state={reservationResume}
+          className="mt-6 inline-flex min-h-11 items-center justify-center rounded-2xl bg-[#6038FF] px-5 text-sm font-medium text-white transition-colors hover:bg-[#4F2BE0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6038FF] focus-visible:ring-offset-2"
+        >
+          Se connecter
+        </Link>
+      </section>
     </div>
   )
 }

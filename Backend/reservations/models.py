@@ -110,6 +110,8 @@ class Reservation(models.Model):
 	)
 	confirmed_at = models.DateTimeField(null=True, blank=True)
 	cancelled_at = models.DateTimeField(null=True, blank=True)
+	rental_terms_accepted_at = models.DateTimeField(null=True, blank=True, editable=False)
+	rental_terms_version = models.CharField(max_length=32, blank=True, editable=False)
 	cancellation_reason = models.TextField(blank=True)
 	cancellation_source = models.CharField(
 		max_length=20,

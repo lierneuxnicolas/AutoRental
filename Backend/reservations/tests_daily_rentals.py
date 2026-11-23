@@ -268,8 +268,8 @@ class SameDayRentalValidationTests(ReservationTestDataMixin, TestCase):
             )
             self.assertEqual(resumed_simulation.status_code, 200, resumed_simulation.data)
             url = f"/api/v1/reservations/{reservation.id}/payment-intent/"
-            first = api.post(url, {}, format="json")
-            second = api.post(url, {}, format="json")
+            first = api.post(url, {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
+            second = api.post(url, {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
             self.assertEqual(first.status_code, 200, first.data)
             self.assertEqual(second.status_code, 200, second.data)
             self.assertEqual(first.data["payment_id"], second.data["payment_id"])

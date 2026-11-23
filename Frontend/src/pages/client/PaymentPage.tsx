@@ -9,6 +9,7 @@ import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import StatusBadge from '../../components/ui/StatusBadge'
 import { useAuth } from '../../hooks/useAuth'
+import RentalTermsCheckbox from '../../components/reservations/RentalTermsCheckbox'
 import { createReservationDeposit, createReservationPaymentIntent } from '../../services/paymentService'
 import { getReservationById } from '../../services/reservationService'
 import type { ReservationStatus } from '../../types/reservation'
@@ -200,7 +201,10 @@ export default function PaymentPage() {
   const paymentIntentClientSecretParam = searchParams.get('payment_intent_client_secret')
   const redirectStatusParam = searchParams.get('redirect_status')
 
-  const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null)
+  const [acceptedRentalTermsFor, setAcceptedRentalTermsFor] = useState<number | null>(null)
+  const rentalTermsAccepted = acceptedRentalTermsFor === reservationId
+  const [paymentSession, setPaymentSession] = useState<{ reservationId: number; secret: string } | null>(null)
+  const paymentClientSecret = paymentSession && paymentSession.reservationId === reservationId ? paymentSession.secret : null
   const [workflowError, setWorkflowError] = useState<string | null>(null)
   const [isProcessingConfirmation, setIsProcessingConfirmation] = useState(false)
 
@@ -254,7 +258,7 @@ export default function PaymentPage() {
       return paymentIntentResult.client_secret
     },
     onSuccess: (clientSecret) => {
-      setPaymentClientSecret(clientSecret)
+      setPaymentSession({ reservationId, secret: clientSecret })
       setWorkflowError(null)
     },
     onError: (error) => {
@@ -482,11 +486,15 @@ export default function PaymentPage() {
                   />
                 ) : null}
 
-                {!paymentClientSecret ? (
+                <RentalTermsCheckbox
+                  checked={rentalTermsAccepted}
+                  onChange={(checked) => setAcceptedRentalTermsFor(checked ? reservationId : null)}
+                />
+                {!paymentClientSecret || !rentalTermsAccepted ? (
                   <Button
                     variant="danger"
                     className="w-full"
-                    disabled={preparePaymentMutation.isPending || isProcessingConfirmation}
+                    disabled={!rentalTermsAccepted || preparePaymentMutation.isPending || isProcessingConfirmation}
                     onClick={() => {
                       setWorkflowError(null)
                       void preparePaymentMutation.mutateAsync()

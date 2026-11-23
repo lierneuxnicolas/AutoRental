@@ -58,6 +58,16 @@ export async function logout(refreshToken: string, accessToken: string): Promise
   })
 }
 
+export async function requestAccountErasure(password: string) {
+  const { status, data } = await api.post<{
+    status: string
+    processing_status: string
+    reason_detail?: string
+    detail?: string
+  }>('/users/me/erasure-requests/', { password }, { timeout: 30000 })
+  return { httpStatus: status, ...data }
+}
+
 export async function getClientProfileMe(): Promise<ClientProfileMe> {
   const { data } = await api.get<ClientProfileMe>('/users/me/')
   return data

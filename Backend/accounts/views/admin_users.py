@@ -1,5 +1,6 @@
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import OpenApiResponse, extend_schema
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import generics
 from rest_framework import status
@@ -76,13 +77,19 @@ class AdminUserStatusUpdateView(APIView):
             404: ErrorDetailResponseSerializer,
         },
     )
+    @transaction.atomic
     def patch(self, request, pk):
         serializer = AdminUserStatusUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        user = get_object_or_404(User.objects.select_related("role"), pk=pk)
+        user = get_object_or_404(User.objects.select_for_update(), pk=pk)
 
         new_is_active = serializer.validated_data["is_active"]
+        if new_is_active and user.account_closed_at is not None:
+            return Response(
+                {"detail": "Un compte clôturé sur demande ne peut pas être réactivé."},
+                status=status.HTTP_409_CONFLICT,
+            )
         if user.id == request.user.id and new_is_active is False:
             return Response(
                 {"detail": "Vous ne pouvez pas désactiver votre propre compte."},

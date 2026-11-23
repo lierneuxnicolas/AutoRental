@@ -98,14 +98,16 @@ class AuthRateThrottle(BaseThrottle):
 
         if account_limit:
             # DRF uses email; the Django admin login posts the identifier as username.
-            if scope == "admin_login":
-                email = request.POST.get("username")
+            if scope == "account_erasure":
+                identifier = str(request.user.pk)
+            elif scope == "admin_login":
+                identifier = request.POST.get("username")
             else:
                 payload = request.data
-                email = payload.get("email") if hasattr(payload, "get") else None
-            if isinstance(email, str) and 0 < len(email.strip()) <= 254:
+                identifier = payload.get("email") if hasattr(payload, "get") else None
+            if isinstance(identifier, str) and 0 < len(identifier.strip()) <= 254:
                 self.retry_after = self._check(
-                    scope, "account", email.strip().lower(), account_limit, account_seconds, now
+                    scope, "account", identifier.strip().lower(), account_limit, account_seconds, now
                 )
         return self.retry_after is None
 

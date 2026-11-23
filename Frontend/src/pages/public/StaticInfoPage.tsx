@@ -22,6 +22,9 @@ interface StaticInfoPageProps {
   description?: string
   paragraphs?: string[]
   sections?: StaticInfoSection[]
+  checkClassName?: string
+  footerNote?: string
+  groups?: { id: string; title: string; sections: StaticInfoSection[]; note?: string }[]
 }
 
 function renderBoldText(text: string) {
@@ -31,20 +34,24 @@ function renderBoldText(text: string) {
   )
 }
 
-function StaticInfoSectionBlock({ section }: { section: StaticInfoSection }) {
+function StaticInfoSectionBlock({ section, checkClassName, headingLevel: Heading = 'h2' }: {
+  section: StaticInfoSection
+  checkClassName: string
+  headingLevel?: 'h2' | 'h3'
+}) {
   return (
     <section className="rounded-2xl border border-slate-100 bg-slate-50/60 px-5 py-5 sm:px-6 sm:py-6">
       {section.headingStyle === 'emphasis' ? (
-        <h2 className="text-center text-lg font-bold tracking-tight text-[#1F2937] sm:text-xl">
+        <Heading className="text-center text-lg font-bold tracking-tight text-[#1F2937] sm:text-xl">
           — {section.heading} —
-        </h2>
+        </Heading>
       ) : section.headingStyle === 'plain' ? (
-        <h2 className="text-lg font-bold tracking-tight text-[#1F2937] sm:text-xl">{section.heading}</h2>
+        <Heading className="text-lg font-bold tracking-tight text-[#1F2937] sm:text-xl">{section.heading}</Heading>
       ) : (
-        <h2 className="flex items-center gap-2 text-lg font-bold tracking-tight text-[#1F2937] sm:text-xl">
-          <Check className="h-5 w-5 shrink-0 text-[#2563EB] sm:h-6 sm:w-6" aria-hidden="true" />
+        <Heading className="flex items-center gap-2 text-lg font-bold tracking-tight text-[#1F2937] sm:text-xl">
+          <Check className={checkClassName} aria-hidden="true" />
           {section.heading}
-        </h2>
+        </Heading>
       )}
 
       <div className="mt-4 space-y-3">
@@ -81,7 +88,7 @@ function StaticInfoSectionBlock({ section }: { section: StaticInfoSection }) {
   )
 }
 
-export default function StaticInfoPage({ title, description, paragraphs, sections }: StaticInfoPageProps) {
+export default function StaticInfoPage({ title, description, paragraphs, sections, checkClassName = 'h-5 w-5 shrink-0 text-[#2563EB] sm:h-6 sm:w-6', footerNote, groups }: StaticInfoPageProps) {
   const hasIntro = Boolean(description || paragraphs?.length)
 
   return (
@@ -106,10 +113,22 @@ export default function StaticInfoPage({ title, description, paragraphs, section
         {sections?.length ? (
           <div className={hasIntro ? 'mt-8 space-y-5 border-t border-slate-100 pt-8' : 'mt-6 space-y-5'}>
             {sections.map((section) => (
-              <StaticInfoSectionBlock key={section.heading} section={section} />
+              <StaticInfoSectionBlock key={section.heading} section={section} checkClassName={checkClassName} />
             ))}
           </div>
         ) : null}
+
+        {groups?.map((group) => (
+          <section key={group.id} id={group.id} className="mt-8 scroll-mt-24 space-y-5 border-t border-slate-100 pt-8">
+            <h2 className="text-xl font-bold text-[#1F2937] sm:text-2xl">{group.title}</h2>
+            {group.sections.map((section) => (
+              <StaticInfoSectionBlock key={section.heading} section={section} checkClassName={checkClassName} headingLevel="h3" />
+            ))}
+            {group.note ? <p className="text-sm text-slate-500">{group.note}</p> : null}
+          </section>
+        ))}
+
+        {footerNote ? <p className="mt-6 text-center text-sm text-slate-500">{footerNote}</p> : null}
       </div>
     </section>
   )

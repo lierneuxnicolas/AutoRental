@@ -93,7 +93,7 @@ class Tfe83PaymentsAndCancellationTests(ReservationTestDataMixin, TestCase):
         )
 
         with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-            response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+            response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "DEPOSIT_NOT_AUTHORIZED")

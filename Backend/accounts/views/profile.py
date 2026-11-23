@@ -1,10 +1,12 @@
+from django.db import transaction
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import ClientProfile
+from accounts.models import ClientProfile, User
 from accounts.permissions import IsClient
 from accounts.serializers.profile import (
     ClientProfileMeSerializer,
@@ -53,8 +55,12 @@ class ClientProfileMeView(APIView):
             403: ErrorDetailResponseSerializer,
         },
     )
+    @transaction.atomic
     def patch(self, request):
-        profile = self._get_client_profile(request.user)
+        user = User.objects.select_for_update().get(pk=request.user.pk)
+        if user.account_closed_at:
+            raise PermissionDenied("Ce compte est clôturé.")
+        profile = self._get_client_profile(user)
         serializer = ClientProfileMeSerializer(profile, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()

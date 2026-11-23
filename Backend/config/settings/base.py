@@ -157,6 +157,7 @@ AUTH_RATE_LIMIT_TRUSTED_PROXIES = tuple(
 # Per-IP quota/window, followed by per-email quota/window (in seconds).
 AUTH_RATE_LIMITS = {
     "login": (60, 300, 20, 300),
+    "account_erasure": (20, 900, 5, 900),
     "admin_login": (30, 300, 10, 300),
     "refresh": (120, 300, 0, 0),
     "reset_request": (20, 3600, 3, 3600),

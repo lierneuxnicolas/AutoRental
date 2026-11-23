@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from accounts.models import ClientProfile
+from accounts.models import AccountErasureRequest, ClientProfile, User
 from accounts.services import (
     check_vehicle_compatibility_for_client,
     validate_client_for_reservation,
@@ -179,6 +179,16 @@ def _ensure_vehicle_compatible(*, client: ClientProfile, vehicle: Vehicle) -> No
         )
 
 
+def _ensure_account_accepts_new_reservations(user):
+    if not user.is_active or user.account_closed_at:
+        _raise_reservation_creation_error("ACCOUNT_NOT_ACTIVE", "Ce compte ne peut plus réserver.")
+    if AccountErasureRequest.objects.filter(user=user, status=AccountErasureRequest.Status.PENDING).exists():
+        _raise_reservation_creation_error(
+            "ACCOUNT_ERASURE_PENDING",
+            "La désinscription est en cours. Les nouvelles réservations sont bloquées.",
+        )
+
+
 def create_draft_reservation(
     *,
     client: ClientProfile,
@@ -208,6 +218,7 @@ def create_draft_reservation(
     user = getattr(client, "user", None)
     if user is None:
         _raise_reservation_creation_error("INVALID_CLIENT", "Le profil client n'est lie a aucun utilisateur.")
+    _ensure_account_accepts_new_reservations(user)
 
     if vehicle is None:
         _raise_reservation_creation_error("VEHICLE_NOT_ACTIVE", "Un vehicule valide est obligatoire.")
@@ -236,16 +247,10 @@ def create_draft_reservation(
             "Le vehicule n'est pas disponible sur cette periode.",
         )
 
-    existing_draft = _find_identical_draft(
-        client=client,
-        vehicle=current_vehicle,
-        start_at=normalized_start_at,
-        end_at=normalized_end_at,
-    )
-    if existing_draft is not None:
-        return existing_draft
-
     with transaction.atomic():
+        # Serialise new drafts with account erasure on the same user row.
+        booking_user = User.objects.select_for_update().get(pk=user.pk)
+        _ensure_account_accepts_new_reservations(booking_user)
         locked_vehicle = Vehicle.objects.select_for_update().select_related("category", "brand").filter(pk=vehicle_id).first()
         if locked_vehicle is None:
             _raise_reservation_creation_error("VEHICLE_NOT_ACTIVE", "Le vehicule demande est introuvable.")

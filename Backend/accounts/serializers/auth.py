@@ -8,6 +8,7 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from accounts.models import User
+from accounts.services.registration import CURRENT_TERMS_VERSION
 from accounts.validators import validate_person_name, validate_phone_number
 from common.models import SystemLog
 from common.services import create_system_log
@@ -34,6 +35,18 @@ class RegisterSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=150)
     last_name = serializers.CharField(max_length=150)
     phone = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    terms_accepted = serializers.BooleanField(write_only=True)
+    terms_version = serializers.CharField(max_length=32, write_only=True)
+
+    def validate_terms_accepted(self, value):
+        if not value:
+            raise serializers.ValidationError("Vous devez accepter les conditions générales d’utilisation.")
+        return value
+
+    def validate_terms_version(self, value):
+        if value != CURRENT_TERMS_VERSION:
+            raise serializers.ValidationError("Les conditions ont changé. Actualisez la page et relisez-les avant de les accepter.")
+        return value
 
     def validate_first_name(self, value):
         return validate_person_name(value, label="prénom")

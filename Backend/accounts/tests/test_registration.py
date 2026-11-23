@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -25,10 +26,40 @@ class RegistrationTests(APITestCase):
             "email": "newclient@example.com",
             "password": "StrongSamplePass123!",
             "password_confirm": "StrongSamplePass123!",
+            "terms_accepted": True,
+            "terms_version": "1.2",
             "first_name": "Alice",
             "last_name": "Martin",
             "phone": "0123456789",
         }
+
+    def test_terms_required_and_current(self):
+        cases = (
+            ("terms_accepted", None),
+            ("terms_accepted", False),
+            ("terms_version", None),
+            ("terms_version", "1.0"),
+        )
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                payload = self.payload.copy()
+                if value is None:
+                    del payload[field]
+                else:
+                    payload[field] = value
+                response = self.client.post(self.url, payload, format="json")
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.data)
+                self.assertFalse(get_user_model().objects.filter(email=self.payload["email"]).exists())
+
+    def test_records_terms_version_and_server_date(self):
+        before = timezone.now().replace(microsecond=0)
+        response = self.client.post(self.url, self.payload, format="json")
+        self.assertEqual(response.status_code, 201)
+        user = get_user_model().objects.get(email=self.payload["email"])
+        self.assertEqual(user.terms_version, "1.2")
+        self.assertLessEqual(before, user.terms_accepted_at)
+        self.assertLessEqual(user.terms_accepted_at, timezone.now())
 
     def test_registration_success_sets_client_role_profile_and_security_flags(self):
         with self.captureOnCommitCallbacks(execute=True):

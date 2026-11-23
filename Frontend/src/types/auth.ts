@@ -96,6 +96,8 @@ export interface RegisterRequest {
   email: string
   password: string
   password_confirm: string
+  terms_accepted: boolean
+  terms_version: string
 }
 
 export interface RegisterResponse {

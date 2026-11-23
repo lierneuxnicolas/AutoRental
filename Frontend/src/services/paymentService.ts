@@ -1,3 +1,4 @@
+import { RENTAL_TERMS_VERSION } from '../config/termsVersion'
 import api from './api'
 import type {
   ReservationDepositRequest,
@@ -16,6 +17,9 @@ export async function createReservationDeposit(
 export async function createReservationPaymentIntent(
   reservationId: number,
 ): Promise<ReservationPaymentIntentResponse> {
-  const { data } = await api.post<ReservationPaymentIntentResponse>(`/reservations/${reservationId}/payment-intent/`)
+  const { data } = await api.post<ReservationPaymentIntentResponse>(
+    `/reservations/${reservationId}/payment-intent/`,
+    { rental_terms_accepted: true, rental_terms_version: RENTAL_TERMS_VERSION },
+  )
   return data
 }

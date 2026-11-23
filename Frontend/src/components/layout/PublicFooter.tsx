@@ -7,36 +7,33 @@ export default function PublicFooter() {
         <div className="grid grid-cols-1 gap-8 md:grid-cols-2 xl:grid-cols-4">
           <div>
             <h3 className="text-base font-semibold text-white">À propos</h3>
-            <div className="mt-4 flex flex-col gap-3 text-sm text-slate-200">
-              <Link to="/about" className="transition hover:text-white">Qui sommes-nous ?</Link>
-              <Link to="/terms" className="transition hover:text-white">Conditions de location et assurances</Link>
-              <Link to="/legal-notice" className="transition hover:text-white">Mentions légales</Link>
+            <div className="mt-4 flex flex-col gap-3 text-sm text-white">
+              <Link to="/about" className="transition hover:underline">Qui sommes-nous ?</Link>
+              <Link to="/terms" className="transition hover:underline">Conditions générales</Link>
             </div>
           </div>
 
           <div>
             <h3 className="text-base font-semibold text-white">Confidentialité</h3>
-            <div className="mt-4 flex flex-col gap-3 text-sm text-slate-200">
-              <Link to="/privacy" className="transition hover:text-white">Politique de confidentialité</Link>
-              <Link to="/cookies" className="transition hover:text-white">Cookies</Link>
-              <Link to="/rgpd" className="transition hover:text-white">Vos droits RGPD</Link>
+            <div className="mt-4 flex flex-col gap-3 text-sm text-white">
+              <Link to="/privacy" className="transition hover:underline">Politique de confidentialité et RGPD</Link>
+              <Link to="/cookies" className="transition hover:underline">Gérer les cookies</Link>
             </div>
           </div>
 
           <div>
             <h3 className="text-base font-semibold text-white">Réseaux sociaux</h3>
-            <div className="mt-4 flex flex-col gap-3 text-sm text-slate-200">
-              <a href="https://www.instagram.com" target="_blank" rel="noreferrer" className="transition hover:text-white">Instagram</a>
-              <a href="https://www.facebook.com" target="_blank" rel="noreferrer" className="transition hover:text-white">Facebook</a>
-              <a href="https://www.linkedin.com" target="_blank" rel="noreferrer" className="transition hover:text-white">LinkedIn</a>
+            <div className="mt-4 flex flex-col gap-3 text-sm text-white">
+              <a href="https://www.instagram.com" target="_blank" rel="noreferrer" className="transition hover:underline">Instagram</a>
+              <a href="https://www.facebook.com" target="_blank" rel="noreferrer" className="transition hover:underline">Facebook</a>
+              <a href="https://www.linkedin.com" target="_blank" rel="noreferrer" className="transition hover:underline">LinkedIn</a>
             </div>
           </div>
 
           <div>
             <h3 className="text-base font-semibold text-white">Avis clients</h3>
             <div className="mt-4 rounded-2xl border border-white/15 bg-white/5 p-4">
-              <p className="text-sm font-medium text-white">Avis clients</p>
-              <p className="mt-2 text-sm text-slate-200">Les avis GetACar seront bientôt disponibles.</p>
+              <p className="text-sm text-slate-200">Les avis GetaCar seront bientôt disponibles.</p>
             </div>
           </div>
         </div>

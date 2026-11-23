@@ -371,7 +371,7 @@ class ReservationDepositResponseSerializer(serializers.Serializer):
     authorization_note = serializers.CharField(read_only=True)
 
 
-ALLOWED_PAYMENT_INTENT_FIELDS = set()
+ALLOWED_PAYMENT_INTENT_FIELDS = {"rental_terms_accepted", "rental_terms_version"}
 FORBIDDEN_PAYMENT_INTENT_FIELDS = {
     "amount",
     "currency",
@@ -382,6 +382,9 @@ FORBIDDEN_PAYMENT_INTENT_FIELDS = {
 
 
 class ReservationPaymentIntentRequestSerializer(serializers.Serializer):
+    rental_terms_accepted = serializers.BooleanField(required=False, default=False)
+    rental_terms_version = serializers.CharField(max_length=32, required=False, default="")
+
     def to_internal_value(self, data):
         if hasattr(data, "keys"):
             keys = set(data.keys())

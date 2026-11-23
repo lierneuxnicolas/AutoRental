@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -49,10 +50,11 @@ class ManagerUserStatusUpdateView(APIView):
             return forwarded_for.split(",")[0].strip()
         return request.META.get("REMOTE_ADDR")
 
+    @transaction.atomic
     def patch(self, request, pk):
         serializer = ManagerUserStatusUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = get_object_or_404(User.objects.select_related("role"), pk=pk)
+        user = get_object_or_404(User.objects.select_for_update(), pk=pk)
 
         if user.id == request.user.id:
             return Response(
@@ -73,6 +75,11 @@ class ManagerUserStatusUpdateView(APIView):
             )
 
         new_is_active = serializer.validated_data["is_active"]
+        if new_is_active and user.account_closed_at is not None:
+            return Response(
+                {"detail": "Un compte clôturé sur demande ne peut pas être réactivé."},
+                status=status.HTTP_409_CONFLICT,
+            )
         if user.is_active != new_is_active:
             user.is_active = new_is_active
             user.save(update_fields=["is_active"])

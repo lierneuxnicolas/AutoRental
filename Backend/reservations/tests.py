@@ -3495,11 +3495,14 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(set(response.data.keys()), {"client_secret", "payment_id"})
 		self.assertEqual(response.data["client_secret"], "pi_secret_123")
+		reservation.refresh_from_db()
+		self.assertIsNotNone(reservation.rental_terms_accepted_at)
+		self.assertEqual(reservation.rental_terms_version, "1.1")
 		payment = Payment.objects.get(pk=response.data["payment_id"])
 		self.assertEqual(payment.stripe_payment_intent_id, "pi_pay_123")
 		self.assertEqual(payment.amount, Decimal("88.00"))
@@ -3511,12 +3514,27 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.assertEqual(create_kwargs["metadata"]["insurance_type"], "DUO")
 		mocked_modify.assert_not_called()
 
+	@patch("payments.services.payment_intents.stripe.PaymentIntent.create")
+	def test_payment_intent_rejects_unaccepted_or_outdated_terms_before_stripe(self, mocked_create):
+		reservation = self._create_reservation()
+		self._create_authorized_deposit(reservation)
+		self.client_api.force_authenticate(self.client_user_1)
+		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
+			for payload in ({}, {"rental_terms_accepted": False}, {"rental_terms_accepted": True, "rental_terms_version": "1.0"}):
+				response = self.client_api.post(self._payment_intent_url(reservation.pk), payload, format="json")
+				self.assertEqual(response.status_code, 400)
+				self.assertEqual(response.data["code"], "RENTAL_TERMS_REQUIRED")
+		mocked_create.assert_not_called()
+		reservation.refresh_from_db()
+		self.assertIsNone(reservation.rental_terms_accepted_at)
+		self.assertFalse(Payment.objects.filter(reservation=reservation).exists())
+
 	def test_other_client_is_refused(self):
 		reservation = self._create_reservation(status=Reservation.Status.BROUILLON)
 		self._create_authorized_deposit(reservation)
 		self.client_api.force_authenticate(self.client_user_2)
 
-		response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+		response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
@@ -3525,7 +3543,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.client_api.force_authenticate(self.client_user_1)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "DEPOSIT_NOT_AUTHORIZED")
@@ -3546,7 +3564,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "RESERVATION_UNAVAILABLE")
@@ -3561,7 +3579,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.client_api.force_authenticate(self.client_user_1)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "PROFILE_NOT_ELIGIBLE")
@@ -3580,7 +3598,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.client_api.force_authenticate(self.client_user_1)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "PROFILE_NOT_ELIGIBLE")
@@ -3608,7 +3626,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.client_api.force_authenticate(self.client_user_1)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "VEHICLE_INCOMPATIBLE_WITH_LICENSE")
@@ -3630,7 +3648,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.client_api.force_authenticate(self.client_user_1)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "DRIVING_LICENSE_DETAILS_UNVERIFIED")
@@ -3654,7 +3672,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.client_api.force_authenticate(self.client_user_1)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "DRIVING_LICENSE_CATEGORY_INCOMPATIBLE")
@@ -3689,7 +3707,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		reservation.refresh_from_db()
@@ -3711,7 +3729,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		kwargs = mocked_create.call_args.kwargs
@@ -3753,7 +3771,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(response.data["client_secret"], "new_secret")
@@ -3789,7 +3807,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(response.data["payment_id"], existing.id)
@@ -3811,7 +3829,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(response.data["client_secret"], "secret_reserved_ok")
@@ -3822,7 +3840,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.client_api.force_authenticate(self.client_user_1)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_live_forbidden"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "STRIPE_TEST_ONLY")
@@ -3845,7 +3863,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -3869,7 +3887,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.client_api.force_authenticate(self.client_user_1)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "RESERVATION_UNAVAILABLE")
@@ -3887,7 +3905,7 @@ class ReservationPaymentIntentTests(ReservationTestDataMixin, TestCase):
 		self.client_api.force_authenticate(self.client_user_1)
 
 		with self.settings(STRIPE_SECRET_KEY="sk_test_123"):
-			response = self.client_api.post(self._payment_intent_url(reservation.id), {}, format="json")
+			response = self.client_api.post(self._payment_intent_url(reservation.id), {"rental_terms_accepted": True, "rental_terms_version": "1.1"}, format="json")
 
 		self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(response.data["code"], "DEPOSIT_NOT_AUTHORIZED")

@@ -28,7 +28,7 @@ class TfeMvpAccountsApiTests(APITestCase):
 
         self.client_user = create_user(
             email="tfe-client@example.com",
-            password="StrongPass123!",
+            password="LongerStrongPass123!",
             role=self.roles[Role.Code.CLIENT],
             email_verified=True,
         )
@@ -42,7 +42,7 @@ class TfeMvpAccountsApiTests(APITestCase):
     def _auth_as_client(self):
         response = self.client.post(
             self.login_url,
-            {"email": "tfe-client@example.com", "password": "StrongPass123!"},
+            {"email": "tfe-client@example.com", "password": "LongerStrongPass123!"},
             format="json",
         )
         token = response.data["access"]
@@ -51,8 +51,10 @@ class TfeMvpAccountsApiTests(APITestCase):
     def test_01_register_valid_user_returns_201(self):
         payload = {
             "email": "tfe-register@example.com",
-            "password": "StrongPass123!",
-            "password_confirm": "StrongPass123!",
+            "password": "LongerStrongPass123!",
+            "password_confirm": "LongerStrongPass123!",
+            "terms_accepted": True,
+            "terms_version": "1.2",
             "first_name": "Alice",
             "last_name": "Martin",
             "phone": "0123456789",
@@ -67,7 +69,7 @@ class TfeMvpAccountsApiTests(APITestCase):
     def test_02_login_valid_credentials_returns_200_and_tokens(self):
         response = self.client.post(
             self.login_url,
-            {"email": "tfe-client@example.com", "password": "StrongPass123!"},
+            {"email": "tfe-client@example.com", "password": "LongerStrongPass123!"},
             format="json",
         )
 

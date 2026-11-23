@@ -10,8 +10,10 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from payments.models import Deposit
+from invoicing.models import Invoice
+from payments.models import Deposit, Payment, Refund
 from reservations.models import Reservation, ReservationAdditionalCharge
+from accounts.services.account_erasure import _deferral_reason
 from reservations.tests import ReservationTestDataMixin
 
 
@@ -80,6 +82,60 @@ class ReservationDepositSettlementTests(ReservationTestDataMixin, TestCase):
 		self.deposit.refresh_from_db()
 		self.assertEqual(self.deposit.status, Deposit.Status.LIBEREE)
 		self.assertIsNotNone(self.deposit.released_at)
+
+	def test_unused_reservation_syncs_canceled_intent_without_stripe_write(self):
+		Reservation.objects.filter(pk=self.reservation.pk).update(status=Reservation.Status.NON_UTILISEE)
+		payment = Payment.objects.create(reservation=self.reservation, amount=Decimal("178.00"), status=Payment.Status.REUSSI)
+		invoice = Invoice.objects.create(
+			reservation=self.reservation, client=self.reservation.client, subtotal=Decimal("178.00"),
+			total_amount=Decimal("178.00"), billing_name="Client fictif", billing_address="Adresse fictive",
+		)
+		self.api.force_authenticate(self.manager_user)
+		url = reverse("reservations:management-reservation-release-deposit", kwargs={"pk": self.reservation.pk})
+		self.assertEqual(_deferral_reason(self.reservation.client.user_id), "DEPOSIT")
+		with patch(
+			"payments.services.deposits.stripe.PaymentIntent.retrieve",
+			return_value=self._stripe_intent(pi_status="canceled", amount_capturable=0),
+		) as retrieve, patch("payments.services.deposits.stripe.PaymentIntent.cancel") as cancel, patch(
+			"payments.services.deposits.stripe.PaymentIntent.capture",
+		) as capture:
+			response = self.api.post(url)
+			self.assertEqual(response.status_code, 200)
+			self.assertEqual(self.api.post(url).status_code, 400)
+			retrieve.assert_called_once_with(self.PI_ID)
+			cancel.assert_not_called()
+			capture.assert_not_called()
+		self.deposit.refresh_from_db()
+		self.assertEqual(self.deposit.status, Deposit.Status.LIBEREE)
+		self.assertEqual(self.deposit.captured_amount, Decimal("0.00"))
+		self.assertFalse(_deferral_reason(self.reservation.client.user_id))
+		self.assertTrue(Payment.objects.filter(pk=payment.pk, status=Payment.Status.REUSSI, amount=178).exists())
+		self.assertTrue(Invoice.objects.filter(pk=invoice.pk, total_amount=178).exists())
+		self.assertFalse(Refund.objects.filter(reservation=self.reservation).exists())
+
+	def test_finished_reservation_releases_unconfirmed_intent_only_after_stripe_confirms(self):
+		Reservation.objects.filter(pk=self.reservation.pk).update(status=Reservation.Status.TERMINEE)
+		Deposit.objects.filter(pk=self.deposit.pk).update(status=Deposit.Status.A_VERIFIER)
+		self.api.force_authenticate(self.manager_user)
+		url = reverse("reservations:management-reservation-release-deposit", kwargs={"pk": self.reservation.pk})
+		with patch(
+			"payments.services.deposits.stripe.PaymentIntent.retrieve",
+			return_value=self._stripe_intent(pi_status="requires_payment_method", amount_capturable=0),
+		), patch(
+			"payments.services.deposits.stripe.PaymentIntent.cancel",
+			side_effect=[self._stripe_intent(pi_status="requires_payment_method"), self._stripe_intent(pi_status="canceled")],
+		) as cancel, patch("payments.services.deposits.stripe.PaymentIntent.capture") as capture:
+			failed = self.api.post(url)
+			self.assertEqual(failed.status_code, 400)
+			self.deposit.refresh_from_db()
+			self.assertEqual(self.deposit.status, Deposit.Status.A_VERIFIER)
+			self.assertEqual(_deferral_reason(self.reservation.client.user_id), "DEPOSIT")
+			self.assertEqual(self.api.post(url).status_code, 200)
+			self.assertEqual(cancel.call_args_list[0].kwargs["idempotency_key"], cancel.call_args_list[1].kwargs["idempotency_key"])
+			capture.assert_not_called()
+		self.deposit.refresh_from_db()
+		self.assertEqual(self.deposit.status, Deposit.Status.LIBEREE)
+		self.assertFalse(_deferral_reason(self.reservation.client.user_id))
 
 	def test_partial_charges_capture_only_retained_amount(self):
 		self._create_charge(ReservationAdditionalCharge.ChargeType.DEGATS, "50.00")

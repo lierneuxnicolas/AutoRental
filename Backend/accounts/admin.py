@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import ClientDocument, ClientProfile, Role, User
+from .models import AccountErasureRequest, ClientDocument, ClientProfile, Role, User
 
 
 @admin.register(Role)
@@ -34,7 +34,12 @@ class CustomUserAdmin(UserAdmin):
 	search_fields = ("email", "first_name", "last_name")
 	list_filter = ("role", "is_active", "email_verified", "is_staff", "is_superuser")
 	ordering = ("email",)
-	readonly_fields = ("date_joined", "last_login")
+	readonly_fields = ("date_joined", "last_login", "account_closed_at")
+
+	def get_readonly_fields(self, request, obj=None):
+		if obj is not None and obj.account_closed_at is not None:
+			return self.readonly_fields + ("is_active",)
+		return self.readonly_fields
 	list_select_related = ("role",)
 	list_per_page = 25
 
@@ -46,7 +51,7 @@ class CustomUserAdmin(UserAdmin):
 			"Permissions Django",
 			{"fields": ("is_staff", "is_superuser", "groups", "user_permissions")},
 		),
-		("Dates importantes", {"fields": ("last_login", "date_joined")}),
+		("Dates importantes", {"fields": ("last_login", "date_joined", "account_closed_at")}),
 	)
 
 	add_fieldsets = (
@@ -124,3 +129,28 @@ class ClientDocumentAdmin(admin.ModelAdmin):
 	readonly_fields = ("uploaded_at", "created_at", "updated_at")
 	autocomplete_fields = ("client", "validated_by")
 	list_per_page = 25
+
+
+@admin.register(AccountErasureRequest)
+class AccountErasureRequestAdmin(admin.ModelAdmin):
+	list_display = ("id", "user_id", "status", "processing_status", "processed_at")
+	readonly_fields = ("user_id", "requested_at", "status", "reason", "processing_status", "processed_at", "processing_error")
+	exclude = ("user",)
+	list_filter = ("status", "processing_status", "retention_hold")
+
+	def get_readonly_fields(self, request, obj=None):
+		if obj and obj.processing_status == AccountErasureRequest.ProcessingStatus.COMPLETED:
+			return self.readonly_fields + ("retention_hold",)
+		return self.readonly_fields
+
+	def save_model(self, request, obj, form, change):
+		if "retention_hold" in form.changed_data:
+			AccountErasureRequest.objects.filter(pk=obj.pk).exclude(
+				processing_status=AccountErasureRequest.ProcessingStatus.COMPLETED,
+			).update(retention_hold=obj.retention_hold)
+
+	def has_add_permission(self, request):
+		return False
+
+	def has_delete_permission(self, request, obj=None):
+		return False

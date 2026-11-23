@@ -1,4 +1,4 @@
-import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom'
 import {
   CarFront,
   CircleGauge,
@@ -26,6 +26,7 @@ import ForgotPasswordPage from '../pages/public/ForgotPasswordPage'
 import VerifyEmailPage from '../pages/public/VerifyEmailPage'
 import ResetPasswordPage from '../pages/public/ResetPasswordPage'
 import ReservationPage from '../pages/public/ReservationPage'
+import RentalTermsPage from '../pages/public/RentalTermsPage'
 import StaticInfoPage from '../pages/public/StaticInfoPage'
 import RentalProcessPage from '../pages/public/RentalProcessPage'
 import ClientDashboardPage from '../pages/client/ClientDashboardPage'
@@ -90,11 +91,16 @@ export default function AppRouter() {
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/terms" element={<RentalTermsPage />} />
+          <Route path="/conditions-utilisation" element={<Navigate to="/terms#conditions-compte" replace />} />
+          <Route path="/conditions-location" element={<Navigate to="/terms#conditions-location" replace />} />
+          <Route path="/conditions-location/version-1.1" element={<RentalTermsPage archive />} />
           <Route
-            path="/terms"
+            path="/conditions-location/version-1.0"
             element={(
               <StaticInfoPage
                 title="Conditions de location et assurances"
+                footerNote="Version 1.0 – Conditions de location GetaCar"
                 sections={[
                   {
                     heading: 'Conditions pour louer',
@@ -156,47 +162,45 @@ export default function AppRouter() {
                     ],
                   },
                 ]}
-              />
-            )}
-          />
-          <Route
-            path="/legal-notice"
-            element={(
-              <StaticInfoPage
-                title="Mentions légales"
-                sections={[
+                groups={[
                   {
-                    heading: 'Éditeur du site et contact',
-                    content: (
-                      <div className="space-y-3">
-                        <div className="space-y-1 text-base leading-7 text-slate-600 sm:text-lg">
-                          <p>GetaCar SRL — société fictive dans le cadre du TFE</p>
-                          <p>Responsable du projet : Nicolas Lierneux</p>
-                          <p>Siège social fictif : Bruxelles, Belgique</p>
-                          <p>N° d'entreprise fictif : BE 1111.111.111</p>
-                          <p>N° de TVA fictif : BE 1111.111.111</p>
-                        </div>
-                        <p className="text-sm italic text-slate-500">
-                          Ces coordonnées administratives sont fictives et utilisées uniquement dans le cadre de la démonstration académique GetaCar.
-                        </p>
-                        <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
-                          Pour toute question concernant GetaCar, veuillez utiliser la rubrique{' '}
-                          <Link to="/contact#contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> du site.
-                        </p>
-                      </div>
-                    ),
-                  },
-                  {
-                    heading: 'Hébergement et propriété intellectuelle',
-                    paragraphs: [
-                      "L'application GetaCar est conçue pour être hébergée sur **Microsoft Azure**, notamment pour le frontend, le backend, la base de données et le stockage des fichiers.",
-                      "Les contenus, l'interface et les éléments développés spécifiquement pour GetaCar sont utilisés dans le cadre de ce projet académique. Les marques, logos et services tiers restent la propriété de leurs détenteurs respectifs.",
-                    ],
-                  },
-                  {
-                    heading: 'Responsabilité',
-                    paragraphs: [
-                      "Les informations présentées sur cette version de GetaCar sont fournies dans le cadre d'un **projet académique et démonstratif**. Le service ne constitue pas actuellement une activité commerciale réelle.",
+                    id: 'mentions-legales',
+                    title: 'Mentions légales',
+                    sections: [
+                      {
+                        heading: 'Éditeur du site et contact',
+                        content: (
+                          <div className="space-y-3">
+                            <div className="space-y-1 text-base leading-7 text-slate-600 sm:text-lg">
+                              <p>GetaCar SRL — société fictive dans le cadre du TFE</p>
+                              <p>Responsable du projet : Nicolas Lierneux</p>
+                              <p>Siège social fictif : Bruxelles, Belgique</p>
+                              <p>N° d'entreprise fictif : BE 1111.111.111</p>
+                              <p>N° de TVA fictif : BE 1111.111.111</p>
+                            </div>
+                            <p className="text-sm italic text-slate-500">
+                              Ces coordonnées administratives sont fictives et utilisées uniquement dans le cadre de la démonstration académique GetaCar.
+                            </p>
+                            <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
+                              Pour toute question concernant GetaCar, veuillez utiliser la rubrique{' '}
+                              <Link to="/contact#contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> du site.
+                            </p>
+                          </div>
+                        ),
+                      },
+                      {
+                        heading: 'Hébergement et propriété intellectuelle',
+                        paragraphs: [
+                          "L'application GetaCar est conçue pour être hébergée sur **Microsoft Azure**, notamment pour le frontend, le backend, la base de données et le stockage des fichiers.",
+                          "Les contenus, l'interface et les éléments développés spécifiquement pour GetaCar sont utilisés dans le cadre de ce projet académique. Les marques, logos et services tiers restent la propriété de leurs détenteurs respectifs.",
+                        ],
+                      },
+                      {
+                        heading: 'Responsabilité',
+                        paragraphs: [
+                          "Les informations présentées sur cette version de GetaCar sont fournies dans le cadre d'un **projet académique et démonstratif**. Le service ne constitue pas actuellement une activité commerciale réelle.",
+                        ],
+                      },
                     ],
                   },
                 ]}
@@ -207,7 +211,7 @@ export default function AppRouter() {
             path="/privacy"
             element={(
               <StaticInfoPage
-                title="Politique de confidentialité"
+                title="Politique de confidentialité et RGPD"
                 sections={[
                   {
                     heading: 'Données collectées et utilisation',
@@ -254,9 +258,43 @@ export default function AppRouter() {
                     ],
                   },
                 ]}
+                groups={[
+                  {
+                    id: 'rgpd',
+                    title: 'Vos droits RGPD',
+                    sections: [
+                      {
+                        heading: 'Comprendre vos droits',
+                        paragraphs: [
+                          "Le RGPD est le règlement européen qui encadre l'utilisation des données personnelles et vous donne des droits sur les informations vous concernant.",
+                          "Vous pouvez demander l'accès à vos données personnelles et faire corriger les informations inexactes ou incomplètes.",
+                          'Selon votre situation, vous pouvez également bénéficier des droits de limitation, opposition et portabilité prévus par le RGPD.',
+                        ],
+                      },
+                      {
+                        heading: 'Suppression et conservation des données',
+                        paragraphs: [
+                          "Vous pouvez demander la suppression de votre compte GetaCar. Celui-ci est d'abord désactivé, puis les données qui ne doivent plus être conservées peuvent être supprimées ou anonymisées.",
+                          "Certaines informations peuvent toutefois rester archivées lorsqu'elles sont nécessaires pour respecter une obligation légale, comptable ou pour le traitement d'un litige.",
+                        ],
+                      },
+                      {
+                        heading: 'Exercer vos droits',
+                        content: (
+                          <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
+                            Pour toute demande concernant vos données personnelles, utilisez la rubrique{' '}
+                            <Link to="/contact#contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> de GetaCar.
+                          </p>
+                        ),
+                      },
+                    ],
+                  },
+                ]}
               />
             )}
           />
+          <Route path="/legal-notice" element={<Navigate to="/about#mentions-legales" replace />} />
+          <Route path="/rgpd" element={<Navigate to="/privacy#rgpd" replace />} />
           <Route
             path="/cookies"
             element={(
@@ -289,40 +327,6 @@ export default function AppRouter() {
                     paragraphs: [
                       "GetaCar peut prévoir ultérieurement des cookies facultatifs, par exemple pour des statistiques ou certains services tiers. Lorsqu'un consentement est requis, ils ne sont déposés qu'après votre accord. Vous pouvez ensuite accepter, refuser ou modifier votre choix depuis les paramètres prévus à cet effet.",
                     ],
-                  },
-                ]}
-              />
-            )}
-          />
-          <Route
-            path="/rgpd"
-            element={(
-              <StaticInfoPage
-                title="Vos droits RGPD"
-                sections={[
-                  {
-                    heading: 'Comprendre vos droits',
-                    paragraphs: [
-                      "Le RGPD est le règlement européen qui encadre l'utilisation des données personnelles et vous donne des droits sur les informations vous concernant.",
-                      "Vous pouvez demander l'accès à vos données personnelles et faire corriger les informations inexactes ou incomplètes.",
-                      'Selon votre situation, vous pouvez également bénéficier des droits de limitation, opposition et portabilité prévus par le RGPD.',
-                    ],
-                  },
-                  {
-                    heading: 'Suppression et conservation des données',
-                    paragraphs: [
-                      "Vous pouvez demander la suppression de votre compte GetaCar. Celui-ci est d'abord désactivé, puis les données qui ne doivent plus être conservées peuvent être supprimées ou anonymisées.",
-                      "Certaines informations peuvent toutefois rester archivées lorsqu'elles sont nécessaires pour respecter une obligation légale, comptable ou pour le traitement d'un litige.",
-                    ],
-                  },
-                  {
-                    heading: 'Exercer vos droits',
-                    content: (
-                      <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
-                        Pour toute demande concernant vos données personnelles, utilisez la rubrique{' '}
-                        <Link to="/contact#contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> de GetaCar.
-                      </p>
-                    ),
                   },
                 ]}
               />

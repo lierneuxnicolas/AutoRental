@@ -672,6 +672,7 @@ class ReservationClientPaymentIntentView(generics.GenericAPIView):
             result = create_or_reuse_payment_intent(
                 reservation=reservation,
                 requested_by=request.user,
+                **serializer.validated_data,
             )
         except PaymentIntentError as exc:
             detail = {"code": exc.code, "message": exc.message}

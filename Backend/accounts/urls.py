@@ -26,6 +26,8 @@ from accounts.views import (
     ManagerUserStatusUpdateView,
 )
 
+from accounts.views.erasure import AccountErasureRequestView
+
 app_name = "accounts"
 
 urlpatterns = [
@@ -51,6 +53,11 @@ urlpatterns = [
         name="management-users-status",
     ),
     path("users/me/", ClientProfileMeView.as_view(), name="users-me"),
+    path(
+        "users/me/erasure-requests/",
+        AccountErasureRequestView.as_view(),
+        name="users-me-erasure-requests",
+    ),
     path("users/me/documents/", ClientDocumentListCreateView.as_view(), name="users-me-documents"),
     path(
         "users/me/documents/<int:pk>/",

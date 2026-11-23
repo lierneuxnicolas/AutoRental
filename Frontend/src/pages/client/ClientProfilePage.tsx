@@ -8,6 +8,7 @@ import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import Input from '../../components/ui/Input'
+import AccountErasureAction from '../../components/profile/AccountErasureAction'
 import ProfileDocumentsTab from '../../components/profile/ProfileDocumentsTab'
 import { getClientProfileMe, getClientProfileProgress, updateClientProfile } from '../../services/authService'
 import type { ClientProfileProgress, ClientProfileUpdateRequest } from '../../types/auth'
@@ -390,7 +391,7 @@ export default function ClientProfilePage() {
       </div>
 
       {activeTab === 'personal' ? (
-        <div id="profile-tab-personal" role="tabpanel" aria-labelledby="profile-tab-trigger-personal" className="mt-8 grid items-stretch gap-6 lg:grid-cols-2">
+        <div id="profile-tab-personal" role="tabpanel" aria-labelledby="profile-tab-trigger-personal" className="mt-8 grid items-start gap-6 lg:grid-cols-2">
           <Card
             className="flex h-full flex-col"
             contentClassName="flex flex-1 flex-col"
@@ -446,7 +447,7 @@ export default function ClientProfilePage() {
               </div>
               <Input label="Adresse du domicile" error={errors.address?.message} {...register('address')} />
 
-              <Button type="submit" className="mt-auto w-full" disabled={isSubmitting || updateProfileMutation.isPending}>
+              <Button type="submit" variant="violet" size="sm" className="mt-auto w-11/12 self-center bg-[#6038FF]! hover:bg-[#6038FF]! focus-visible:ring-[#6038FF]!" disabled={isSubmitting || updateProfileMutation.isPending}>
                 {isSubmitting || updateProfileMutation.isPending ? (
                   <span className="flex items-center justify-center gap-2">
                     <LoadingSpinner size="sm" aria-label="Sauvegarde du profil" />
@@ -457,13 +458,13 @@ export default function ClientProfilePage() {
                 )}
               </Button>
             </form>
+            <AccountErasureAction />
           </Card>
 
           <Card
-            className="flex h-full flex-col"
-            contentClassName="flex flex-1 flex-col"
+            contentClassName="px-4! py-4! sm:px-5!"
             header={
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
                 <h2 className="text-xl font-semibold text-[#1F2937]">Mon profil</h2>
                 <span className={`rounded-full border px-4 py-2 text-center text-sm font-semibold ${profileStatusClass}`}>
                   {profileStatusLabel}
@@ -471,21 +472,21 @@ export default function ClientProfilePage() {
               </div>
             }
           >
-            <div className="flex flex-1 flex-col">
+            <div className="grid grid-cols-[minmax(7.5rem,48%)_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[44%_minmax(0,1fr)] sm:gap-4">
               <div className="flex justify-center">
-                <div className="relative flex h-52 w-52 items-center justify-center rounded-full bg-[conic-gradient(#4F46E5_0deg,#4F46E5_calc(var(--progress)*3.6deg),#E2E8F0_calc(var(--progress)*3.6deg),#E2E8F0_360deg)] p-[1.4rem]" style={progressCircleStyle}>
+                <div className="relative flex aspect-square w-full max-w-52 items-center justify-center rounded-full bg-[conic-gradient(#4F46E5_0deg,#4F46E5_calc(var(--progress)*3.6deg),#E2E8F0_calc(var(--progress)*3.6deg),#E2E8F0_360deg)] p-3 sm:p-4" style={progressCircleStyle}>
                   <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-white text-center">
-                    <span className="text-4xl font-semibold text-[#0F172A]">{completion}%</span>
-                    <span className="mt-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Complet</span>
+                    <span className="text-[2rem] leading-none font-semibold text-[#0F172A] sm:text-[2.5rem]">{completion}%</span>
+                    <span className="mt-1.5 text-[0.8125rem] font-semibold uppercase tracking-wide text-slate-500 sm:text-sm">Complet</span>
                   </div>
                 </div>
               </div>
 
-              <ul className="mt-10 flex flex-1 flex-col gap-2" aria-label="Critères de complétude du profil">
+              <ul className="flex flex-col gap-2" aria-label="Critères de complétude du profil">
                 {progressItems.map((item) => (
-                  <li key={item.key} className="flex items-center gap-2 text-sm font-medium text-[#1F2937]">
+                  <li key={item.key} className="flex items-center gap-2 text-sm font-medium text-[#1F2937] min-[375px]:text-[0.9375rem] sm:text-base">
                     <span
-                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${item.done ? 'border-[#16A34A] bg-[#DCFCE7] text-[#16A34A]' : 'border-slate-300 bg-slate-100 text-transparent'}`}
+                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${item.done ? 'border-[#16A34A] bg-[#DCFCE7] text-[#16A34A]' : 'border-slate-300 bg-slate-100 text-transparent'}`}
                       aria-hidden="true"
                     >
                       ✓
@@ -496,7 +497,7 @@ export default function ClientProfilePage() {
               </ul>
 
               {progressQuery.data?.needs_client_action ? (
-                <Button type="button" className="w-full" onClick={completeRequiredInformation}>
+                <Button type="button" className="col-span-2 w-full" onClick={completeRequiredInformation}>
                   Compléter mon profil
                 </Button>
               ) : null}

@@ -170,6 +170,36 @@ class InvoiceDownloadEndpointTests(TestCase):
 		self.assertIn("Sous-total HTVA", pdf_text)
 		self.assertIn(format_french_amount(self.invoice.subtotal), pdf_text)
 
+	def test_historical_pdf_keeps_billing_details_after_client_pseudonymization(self):
+		Invoice.objects.filter(pk=self.invoice.pk).update(
+			billing_name="Client & Associés",
+			billing_address="Rue du Test <A>\n1000 Bruxelles",
+		)
+		self.invoice.refresh_from_db()
+
+		def invoice_text(invoice):
+			with pymupdf.open(stream=build_invoice_pdf(invoice), filetype="pdf") as document:
+				return "\n".join(page.get_text() for page in document)
+
+		original = invoice_text(self.invoice)
+		self.client_user.first_name = "Compte"
+		self.client_user.last_name = "Clôturé"
+		self.client_user.email = "closed-account@example.invalid"
+		self.client_user.is_active = False
+		self.client_user.save(update_fields=["first_name", "last_name", "email", "is_active"])
+		self.client_profile.address = ""
+		self.client_profile.save(update_fields=["address"])
+		self.invoice.refresh_from_db()
+
+		rebuilt = invoice_text(self.invoice)
+		self.assertEqual(rebuilt, original)
+		self.assertIn("Client & Associés", rebuilt)
+		self.assertIn("Rue du Test <A>", rebuilt)
+		self.assertIn("1000 Bruxelles", rebuilt)
+		self.assertIn(self.invoice.number, rebuilt)
+		self.assertIn(format_french_amount(self.invoice.total_amount), rebuilt)
+		self.assertNotIn("closed-account@example.invalid", rebuilt)
+
 	def test_generated_pdf_includes_reservation_details(self):
 		pdf_bytes = build_invoice_pdf(self.invoice)
 		reservation = self.reservation
@@ -179,9 +209,10 @@ class InvoiceDownloadEndpointTests(TestCase):
 		self.assertTrue(pdf_bytes.startswith(b"%PDF"))
 		self.assertIn("Détails de la location", pdf_text)
 		self.assertIn("Facturé à", pdf_text)
-		self.assertIn(f"{self.client_user.first_name} {self.client_user.last_name}".strip(), pdf_text)
-		self.assertIn("10 Rue de Test, Paris", pdf_text)
-		self.assertIn(self.client_user.email, pdf_text)
+		self.assertIn(self.invoice.billing_name, pdf_text)
+		for line in self.invoice.billing_address.splitlines():
+			self.assertIn(line, pdf_text)
+		self.assertNotIn(self.client_user.email, pdf_text)
 		self.assertIn("Numéro:", pdf_text)
 		self.assertIn(invoice_details := self.invoice.number, pdf_text)
 		self.assertIn("Date d'émission:", pdf_text)

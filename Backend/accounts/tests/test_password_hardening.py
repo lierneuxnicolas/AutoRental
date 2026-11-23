@@ -83,6 +83,8 @@ class PasswordHardeningTests(APITestCase):
             "phone": "0102030405",
             "password": self.passphrase,
             "password_confirm": self.passphrase[1:],
+            "terms_accepted": True,
+            "terms_version": "1.2",
         }
         self.assertEqual(self.client.post(url, payload, format="json").status_code, 400)
         payload["password_confirm"] = self.passphrase

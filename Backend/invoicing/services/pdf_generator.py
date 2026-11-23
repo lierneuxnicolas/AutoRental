@@ -4,6 +4,7 @@ from datetime import timedelta
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 from io import BytesIO
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -129,11 +130,6 @@ def format_french_duration(value: timedelta) -> str:
 	return " ".join(parts) if parts else "0 heure"
 
 
-def _format_person_name(name: str) -> str:
-	"""Capitalize a raw name for display (e.g. 'nicolas lierneux' -> 'Nicolas Lierneux')."""
-	return " ".join(part.strip().title() for part in name.split(" ") if part.strip())
-
-
 def _build_other_fees(invoice: Invoice) -> list[dict[str, str]]:
 	other_fees: list[dict[str, str]] = []
 	for line in invoice.lines.exclude(line_type=InvoiceLine.LineType.VEHICLE_RENTAL):
@@ -208,17 +204,6 @@ def _get_latest_payment(reservation) -> Payment | None:
 
 def _get_latest_deposit(reservation) -> Deposit | None:
 	return reservation.deposits.order_by("-authorized_at", "-created_at").first()
-
-
-def _build_billed_to_details(invoice: Invoice) -> dict[str, str | None]:
-	client_profile = invoice.client
-	user = client_profile.user
-	full_name = f"{(user.first_name or '').strip()} {(user.last_name or '').strip()}".strip()
-	return {
-		"name": _format_person_name(full_name) if full_name else user.email,
-		"address": (client_profile.address or "").strip() or None,
-		"email": (user.email or "").strip() or None,
-	}
 
 
 def build_invoice_financial_details(invoice: Invoice) -> dict[str, object]:
@@ -385,7 +370,6 @@ def _invoice_pdf_footer(canvas_obj, _doc) -> None:
 def build_invoice_pdf(invoice: Invoice) -> bytes:
 	"""Build the PDF bytes for an invoice using ReportLab (pure Python, no native GTK/Pango/Cairo dependency)."""
 	reservation = invoice.reservation
-	billed_to = _build_billed_to_details(invoice)
 	financial = build_invoice_financial_details(invoice)
 
 	brand_dark_blue = colors.HexColor("#002B50")
@@ -467,11 +451,10 @@ def build_invoice_pdf(invoice: Invoice) -> bytes:
 	elements.append(Spacer(1, 4 * mm))
 
 	elements.append(Paragraph("Factur\u00e9 \u00e0", heading_style))
-	billed_lines = [f"<b>{billed_to['name']}</b>"]
-	if billed_to.get("address"):
-		billed_lines.append(billed_to["address"].replace("\n", "<br/>"))
-	if billed_to.get("email"):
-		billed_lines.append(billed_to["email"])
+	# Billing details were recorded when the invoice was issued.
+	billed_lines = [f"<b>{escape(invoice.billing_name)}</b>"]
+	if invoice.billing_address:
+		billed_lines.extend(escape(line) for line in invoice.billing_address.splitlines())
 	elements.append(Paragraph("<br/>".join(billed_lines), body_style))
 	elements.append(Spacer(1, 4 * mm))
 

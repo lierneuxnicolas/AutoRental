@@ -20,6 +20,7 @@ const loginSchema = z.object({
 export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const erasureSessionExpired = new URLSearchParams(location.search).get('session') === 'erasure-expired'
   const { login } = useAuth()
   const [serverError, setServerError] = useState<string | null>(null)
 
@@ -81,6 +82,9 @@ export default function LoginPage() {
               <h1 className="text-center text-2xl font-semibold text-[#0F172A]">Accédez à votre espace</h1>
             </div>
 
+            {erasureSessionExpired && !serverError ? (
+              <Alert variant="warning" title="Session expirée" message="Reconnectez-vous pour réessayer la suppression de votre compte." className="mb-6" />
+            ) : null}
             {serverError ? (
               <Alert variant="danger" title="Connexion impossible" message={serverError} className="mb-6" />
             ) : null}

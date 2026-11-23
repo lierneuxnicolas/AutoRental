@@ -67,6 +67,8 @@ class JwtAuthenticationTests(APITestCase):
             "email": "workflow@example.com",
             "password": "StrongSamplePass123!",
             "password_confirm": "StrongSamplePass123!",
+            "terms_accepted": True,
+            "terms_version": "1.2",
             "first_name": "Workflow",
             "last_name": "User",
             "phone": "0102030408",

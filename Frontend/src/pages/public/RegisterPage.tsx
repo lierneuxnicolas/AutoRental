@@ -11,8 +11,11 @@ import Button from '../../components/ui/Button'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
 import { register as registerUser } from '../../services/authService'
+import { ACCOUNT_TERMS_VERSION } from '../../config/termsVersion'
 import type { RegisterRequest } from '../../types/auth'
 import { clearReservationResume, getReservationResume, saveReservationResume } from '../../utils/reservationResume'
+
+type RegisterFormValues = Omit<RegisterRequest, 'terms_version'>
 
 const registerSchema = z
   .object({
@@ -20,6 +23,7 @@ const registerSchema = z
     last_name: z.string().trim().min(1, 'Le nom est obligatoire.'),
     email: z.string().trim().email('Une adresse e-mail valide est requise.'),
     password: newPasswordSchema,
+    terms_accepted: z.boolean().refine((accepted) => accepted, 'Vous devez accepter les conditions générales d’utilisation.'),
     password_confirm: z.string().min(1, 'La confirmation du mot de passe est obligatoire.'),
   })
   .refine((data) => data.password === data.password_confirm, {
@@ -38,7 +42,7 @@ export default function RegisterPage() {
     control,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<RegisterRequest>({
+  } = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
       first_name: '',
@@ -46,17 +50,20 @@ export default function RegisterPage() {
       email: '',
       password: '',
       password_confirm: '',
+      terms_accepted: false,
     },
   })
 
   const passwordValue = useWatch({ control, name: 'password' })
 
-  const onSubmit = async (values: RegisterRequest) => {
+  const termsError = fieldErrors.terms_accepted ?? fieldErrors.terms_version ?? errors.terms_accepted?.message
+
+  const onSubmit = async (values: RegisterFormValues) => {
     setServerError(null)
     setFieldErrors({})
 
     try {
-      await registerUser(values)
+      await registerUser({ ...values, terms_version: ACCOUNT_TERMS_VERSION })
       const resume = getReservationResume(location.state)
       if (resume) {
         saveReservationResume(resume)
@@ -155,6 +162,26 @@ export default function RegisterPage() {
                 error={fieldErrors.password_confirm ?? errors.password_confirm?.message}
                 {...register('password_confirm')}
               />
+
+              <div>
+                <label className="flex items-start gap-3 text-sm leading-6 text-slate-700">
+                  <input
+                    type="checkbox"
+                    required
+                    aria-invalid={termsError ? true : undefined}
+                    aria-describedby={termsError ? 'register-terms-error' : undefined}
+                    className="mt-1 size-4 shrink-0 accent-[#6038FF]"
+                    {...register('terms_accepted')}
+                  />
+                  <span>
+                    J'ai lu et j'accepte les{' '}
+                    <Link to="/terms#conditions-compte" target="_blank" rel="noopener noreferrer" className="font-medium text-[#6038FF] underline">
+                      Conditions générales d'utilisation
+                    </Link>{' '}de GetaCar.
+                  </span>
+                </label>
+                {termsError ? <p id="register-terms-error" role="alert" className="mt-1 text-sm text-red-700">{termsError}</p> : null}
+              </div>
 
               <Button type="submit" variant="violet" className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? (

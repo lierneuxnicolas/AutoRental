@@ -1,8 +1,12 @@
 from django.db import transaction
+from django.utils import timezone
 
 from accounts.models import ClientProfile, Role, User
 from accounts.services.email_verification import send_verification_email
 from notifications.services import create_notification
+
+
+CURRENT_TERMS_VERSION = "1.2"
 
 
 class RegistrationError(Exception):
@@ -10,7 +14,9 @@ class RegistrationError(Exception):
 
 
 @transaction.atomic
-def register_client_user(*, email, password, first_name, last_name, phone=""):
+def register_client_user(*, email, password, first_name, last_name, terms_accepted, terms_version, phone=""):
+    if terms_accepted is not True or terms_version != CURRENT_TERMS_VERSION:
+        raise RegistrationError("Acceptez la version actuelle des conditions générales d’utilisation.")
     client_role = Role.objects.filter(code=Role.Code.CLIENT, is_active=True).first()
     if client_role is None:
         raise RegistrationError("Le role CLIENT est introuvable. Lancez la commande setup_roles.")
@@ -23,6 +29,8 @@ def register_client_user(*, email, password, first_name, last_name, phone=""):
         phone=phone,
         role=client_role,
         email_verified=False,
+        terms_accepted_at=timezone.now(),
+        terms_version=CURRENT_TERMS_VERSION,
         is_active=True,
     )
 

@@ -261,10 +261,15 @@ def _create_payment_intent(*, reservation: Reservation, payment: Payment, amount
         )
 
 
+CURRENT_RENTAL_TERMS_VERSION = "1.1"
+
+
 def create_or_reuse_payment_intent(
     *,
     reservation,
     requested_by,
+    rental_terms_accepted=False,
+    rental_terms_version="",
 ):
     _configure_stripe()
 
@@ -314,6 +319,19 @@ def create_or_reuse_payment_intent(
         _assert_vehicle_compatible_with_license(reservation_locked)
         _assert_vehicle_still_available(reservation_locked)
         _assert_deposit_authorized(reservation_locked)
+
+        if rental_terms_accepted is not True or rental_terms_version != CURRENT_RENTAL_TERMS_VERSION:
+            _raise_payment_intent_error(
+                "RENTAL_TERMS_REQUIRED",
+                "Acceptez la version actuelle des conditions générales de location avant de payer.",
+            )
+        if (
+            not reservation_locked.rental_terms_accepted_at
+            or reservation_locked.rental_terms_version != CURRENT_RENTAL_TERMS_VERSION
+        ):
+            reservation_locked.rental_terms_accepted_at = timezone.now()
+            reservation_locked.rental_terms_version = CURRENT_RENTAL_TERMS_VERSION
+            reservation_locked.save(update_fields=["rental_terms_accepted_at", "rental_terms_version"])
 
         payable_amount = _recalculate_payable_amount(reservation_locked)
         if reservation_locked.rental_amount != payable_amount:
