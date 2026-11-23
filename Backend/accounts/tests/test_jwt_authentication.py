@@ -24,7 +24,7 @@ class JwtAuthenticationTests(APITestCase):
         user_model = get_user_model()
         self.confirmed_user = user_model.objects.create_user(
             email="confirmed@example.com",
-            password="StrongPass123!",
+            password="StrongSamplePass123!",
             first_name="Confirmed",
             last_name="User",
             phone="0102030405",
@@ -34,7 +34,7 @@ class JwtAuthenticationTests(APITestCase):
         )
         self.unconfirmed_user = user_model.objects.create_user(
             email="pending@example.com",
-            password="StrongPass123!",
+            password="StrongSamplePass123!",
             first_name="Pending",
             last_name="User",
             phone="0102030406",
@@ -44,7 +44,7 @@ class JwtAuthenticationTests(APITestCase):
         )
         self.inactive_user = user_model.objects.create_user(
             email="inactive@example.com",
-            password="StrongPass123!",
+            password="StrongSamplePass123!",
             first_name="Inactive",
             last_name="User",
             phone="0102030407",
@@ -58,15 +58,15 @@ class JwtAuthenticationTests(APITestCase):
         self.logout_url = reverse("accounts:auth-logout")
 
     def login_confirmed_user(self):
-        payload = {"email": "confirmed@example.com", "password": "StrongPass123!"}
+        payload = {"email": "confirmed@example.com", "password": "StrongSamplePass123!"}
         return self.client.post(self.login_url, payload, format="json")
 
     def test_login_success_after_email_verification_workflow(self):
         registration_url = reverse("accounts:auth-register")
         registration_payload = {
             "email": "workflow@example.com",
-            "password": "StrongPass123!",
-            "password_confirm": "StrongPass123!",
+            "password": "StrongSamplePass123!",
+            "password_confirm": "StrongSamplePass123!",
             "first_name": "Workflow",
             "last_name": "User",
             "phone": "0102030408",
@@ -84,7 +84,7 @@ class JwtAuthenticationTests(APITestCase):
 
         login_before_verification = self.client.post(
             self.login_url,
-            {"email": "workflow@example.com", "password": "StrongPass123!"},
+            {"email": "workflow@example.com", "password": "StrongSamplePass123!"},
             format="json",
         )
         self.assertEqual(login_before_verification.status_code, status.HTTP_401_UNAUTHORIZED)
@@ -102,7 +102,7 @@ class JwtAuthenticationTests(APITestCase):
 
         login_after_verification = self.client.post(
             self.login_url,
-            {"email": "workflow@example.com", "password": "StrongPass123!"},
+            {"email": "workflow@example.com", "password": "StrongSamplePass123!"},
             format="json",
         )
 
@@ -174,7 +174,7 @@ class JwtAuthenticationTests(APITestCase):
     def test_login_rejects_inactive_user(self):
         response = self.client.post(
             self.login_url,
-            {"email": "inactive@example.com", "password": "StrongPass123!"},
+            {"email": "inactive@example.com", "password": "StrongSamplePass123!"},
             format="json",
         )
 
@@ -183,7 +183,7 @@ class JwtAuthenticationTests(APITestCase):
     def test_login_rejects_unverified_email(self):
         response = self.client.post(
             self.login_url,
-            {"email": "pending@example.com", "password": "StrongPass123!"},
+            {"email": "pending@example.com", "password": "StrongSamplePass123!"},
             format="json",
         )
 

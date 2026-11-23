@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { useNavigate, Link, useLocation } from 'react-router-dom'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { newPasswordSchema } from '../../utils/passwordValidation'
 import axios from 'axios'
 import Input from '../../components/ui/Input'
+import PasswordInput from '../../components/ui/PasswordInput'
 import Button from '../../components/ui/Button'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
@@ -17,7 +19,7 @@ const registerSchema = z
     first_name: z.string().trim().min(1, 'Le prénom est obligatoire.'),
     last_name: z.string().trim().min(1, 'Le nom est obligatoire.'),
     email: z.string().trim().email('Une adresse e-mail valide est requise.'),
-    password: z.string().min(8, 'Le mot de passe doit contenir au moins 8 caractères.'),
+    password: newPasswordSchema,
     password_confirm: z.string().min(1, 'La confirmation du mot de passe est obligatoire.'),
   })
   .refine((data) => data.password === data.password_confirm, {
@@ -33,6 +35,7 @@ export default function RegisterPage() {
 
   const {
     register,
+    control,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<RegisterRequest>({
@@ -45,6 +48,8 @@ export default function RegisterPage() {
       password_confirm: '',
     },
   })
+
+  const passwordValue = useWatch({ control, name: 'password' })
 
   const onSubmit = async (values: RegisterRequest) => {
     setServerError(null)
@@ -134,18 +139,17 @@ export default function RegisterPage() {
                 {...register('email')}
               />
 
-              <Input
+              <PasswordInput
                 label="Mot de passe"
-                type="password"
+                minimumLengthValue={passwordValue}
                 autoComplete="new-password"
                 placeholder="••••••••"
                 error={fieldErrors.password ?? errors.password?.message}
                 {...register('password')}
               />
 
-              <Input
+              <PasswordInput
                 label="Confirmer le mot de passe"
-                type="password"
                 autoComplete="new-password"
                 placeholder="••••••••"
                 error={fieldErrors.password_confirm ?? errors.password_confirm?.message}

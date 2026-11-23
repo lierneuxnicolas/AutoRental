@@ -2,6 +2,8 @@ import os
 
 from .base import *  # noqa: F401,F403
 
+ALLOW_DEMO_SEED = True
+
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in ("true", "1", "yes")
 
 ALLOWED_HOSTS = [

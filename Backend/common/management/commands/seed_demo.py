@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from django.conf import settings
 from django.core.files.base import ContentFile
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from accounts.models import ClientDocument, ClientProfile, Role, User
@@ -131,6 +132,9 @@ class Command(BaseCommand):
     )
 
     def handle(self, *args: Any, **options: Any) -> None:
+        if not settings.ALLOW_DEMO_SEED:
+            raise CommandError("seed_demo est réservé aux réglages de d?veloppement.")
+
         with transaction.atomic():
             roles = self._seed_roles()
             manager = None

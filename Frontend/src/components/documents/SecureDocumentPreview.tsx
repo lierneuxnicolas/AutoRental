@@ -1,3 +1,5 @@
+import DocumentPdfPreview from './DocumentPdfPreview'
+import { documentPreviewKind } from '../../utils/documentPreview'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useMutation } from '@tanstack/react-query'
@@ -47,6 +49,7 @@ export default function SecureDocumentPreview({
   const resetFileMutation = fileMutation.reset
   const isOpenRef = useRef(false)
 
+  const previewKind = documentPreviewKind(fileMutation.data?.type)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
 
@@ -72,7 +75,7 @@ export default function SecureDocumentPreview({
     setIsOpen(true)
     void fileMutation.mutateAsync().then((file) => {
       if (isOpenRef.current) {
-        setPreviewUrl(URL.createObjectURL(file))
+        if (documentPreviewKind(file.type)) setPreviewUrl(URL.createObjectURL(file))
       }
     }).catch(async (error: unknown) => {
       if (isOpenRef.current) {
@@ -142,23 +145,17 @@ export default function SecureDocumentPreview({
                   message={previewError || 'Le document n’a pas pu être chargé.'}
                 />
               ) : null}
-              {previewUrl && fileMutation.data?.type.startsWith('image/') ? (
+              {previewUrl && previewKind === 'image' ? (
                 <img
                   src={previewUrl}
                   alt={title}
                   className="mx-auto max-h-[75vh] max-w-full rounded-2xl object-contain"
                 />
               ) : null}
-              {previewUrl && fileMutation.data?.type === 'application/pdf' ? (
-                <iframe
-                  src={previewUrl}
-                  title={title}
-                  className="h-[75vh] w-full rounded-2xl border border-slate-200"
-                />
+              {previewUrl && previewKind === 'pdf' ? (
+                <DocumentPdfPreview url={previewUrl} title={title} className="h-[75vh]" />
               ) : null}
-              {previewUrl
-                && !fileMutation.data?.type.startsWith('image/')
-                && fileMutation.data?.type !== 'application/pdf' ? (
+              {fileMutation.isSuccess && !previewKind ? (
                   <Alert
                     variant="warning"
                     title="Format non pris en charge"

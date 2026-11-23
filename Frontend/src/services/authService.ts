@@ -18,7 +18,7 @@ import type {
 } from '../types/auth'
 
 export async function login(credentials: LoginCredentials): Promise<AuthResponse> {
-  const { data } = await api.post<AuthResponse>('/auth/login/', credentials)
+  const { data } = await api.post<AuthResponse>('/auth/login/', credentials, { timeout: 15000 })
   return data
 }
 
@@ -43,7 +43,7 @@ export async function resetPassword(payload: PasswordResetConfirmRequest): Promi
 }
 
 export async function getCurrentUser(): Promise<AuthUser> {
-  const { data } = await api.get<AuthUser>('/auth/me/')
+  const { data } = await api.get<AuthUser>('/auth/me/', { timeout: 15000 })
   return data
 }
 
@@ -52,8 +52,10 @@ export async function refreshAccessToken(refreshToken: string): Promise<AuthToke
   return data
 }
 
-export async function logout(refreshToken: string): Promise<void> {
-  await api.post('/auth/logout/', { refresh: refreshToken })
+export async function logout(refreshToken: string, accessToken: string): Promise<void> {
+  await api.post('/auth/logout/', { refresh: refreshToken }, {
+    headers: { Authorization: 'Bearer ' + accessToken }, timeout: 15000,
+  })
 }
 
 export async function getClientProfileMe(): Promise<ClientProfileMe> {

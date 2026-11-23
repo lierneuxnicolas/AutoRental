@@ -3,6 +3,7 @@ import os
 from .base import *  # noqa: F401,F403
 
 DEBUG = False
+AUTH_RATE_LIMIT_REQUIRE_SHARED = True
 
 
 def _env_list(name: str) -> list[str]:

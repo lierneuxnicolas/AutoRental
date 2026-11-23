@@ -157,7 +157,13 @@ class _DocumentFileResponseMixin:
         file_handle = None
         try:
             file_handle = document.file.open("rb")
-            file_handle.read(1)
+            prefix = file_handle.read(5)
+            if content_type == "application/pdf" and prefix != b"%PDF-":
+                file_handle.close()
+                return Response(
+                    {"detail": "Le fichier ne correspond pas au format PDF."},
+                    status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                )
             file_handle.seek(0)
         except (FileNotFoundError, ResourceNotFoundError):
             if file_handle is not None:

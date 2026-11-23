@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { newPasswordSchema } from '../../utils/passwordValidation'
 import axios from 'axios'
-import Input from '../../components/ui/Input'
+import PasswordInput from '../../components/ui/PasswordInput'
 import Button from '../../components/ui/Button'
 import Alert from '../../components/feedback/Alert'
 import LoadingSpinner from '../../components/feedback/LoadingSpinner'
@@ -15,7 +16,7 @@ const resetPasswordSchema = z
   .object({
     uid: z.string().min(1, 'Le lien de réinitialisation est incomplet.'),
     token: z.string().min(1, 'Le lien de réinitialisation est incomplet.'),
-    new_password: z.string().min(8, 'Le mot de passe doit contenir au moins 8 caractères.'),
+    new_password: newPasswordSchema,
     new_password_confirm: z.string().min(1, 'La confirmation du mot de passe est obligatoire.'),
   })
   .refine((data) => data.new_password === data.new_password_confirm, {
@@ -35,7 +36,9 @@ export default function ResetPasswordPage() {
 
   const {
     register,
+    control,
     handleSubmit,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<PasswordResetConfirmRequest>({
     resolver: zodResolver(resetPasswordSchema),
@@ -46,6 +49,8 @@ export default function ResetPasswordPage() {
       new_password_confirm: '',
     },
   })
+
+  const passwordValue = useWatch({ control, name: 'new_password' })
 
   const onSubmit = async (values: PasswordResetConfirmRequest) => {
     setServerError(null)
@@ -59,17 +64,29 @@ export default function ResetPasswordPage() {
         new_password_confirm: values.new_password_confirm,
       })
       setSuccessMessage('Votre mot de passe a été réinitialisé avec succès.')
-      window.setTimeout(() => navigate('/login'), 1200)
+      window.setTimeout(() => navigate('/login', { replace: true }), 1200)
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        const detail = error.response?.data?.detail ?? error.response?.data?.message ?? ''
+        const data = error.response?.data
+        let hasPasswordError = false
+        for (const field of ['new_password', 'new_password_confirm'] as const) {
+          const message = Array.isArray(data?.[field]) ? data[field][0] : data?.[field]
+          if (typeof message === 'string') {
+            setError(field, { type: 'server', message })
+            hasPasswordError = true
+          }
+        }
+        if (hasPasswordError) {
+          return
+        }
+        const detail = data?.detail ?? data?.message
 
         if (error.code === 'ERR_NETWORK') {
           setServerError('Impossible de joindre le serveur. Vérifiez votre connexion.')
           return
         }
 
-        setServerError(detail || 'Le lien de réinitialisation est invalide ou a expiré.')
+        setServerError(typeof detail === 'string' ? detail : 'Le lien de réinitialisation est invalide ou a expiré.')
         return
       }
 
@@ -109,18 +126,17 @@ export default function ResetPasswordPage() {
 
             {isReady ? (
               <form className="space-y-5" onSubmit={handleSubmit(onSubmit)} noValidate>
-                <Input
+                <PasswordInput
                   label="Nouveau mot de passe"
-                  type="password"
+                  minimumLengthValue={passwordValue}
                   autoComplete="new-password"
                   placeholder="••••••••"
                   error={errors.new_password?.message}
                   {...register('new_password')}
                 />
 
-                <Input
+                <PasswordInput
                   label="Confirmer le nouveau mot de passe"
-                  type="password"
                   autoComplete="new-password"
                   placeholder="••••••••"
                   error={errors.new_password_confirm?.message}

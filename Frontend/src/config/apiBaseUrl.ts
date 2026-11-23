@@ -1,5 +1,4 @@
-const LOCAL_BACKEND_URL = 'http://127.0.0.1:8000'
-const PROD_FALLBACK_BACKEND_URL = 'https://getacar-backend.salmonmushroom-b250896e.northeurope.azurecontainerapps.io'
+import { LOCAL_BACKEND_URL, PROD_FALLBACK_BACKEND_URL } from './mediaOrigins'
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, '')

@@ -17,7 +17,18 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /app/requirements.txt \
     && pip install --no-cache-dir gunicorn
 
-COPY . /app
+# This build expects Backend as its context.
+COPY manage.py /app/manage.py
+COPY accounts/ /app/accounts/
+COPY common/ /app/common/
+COPY config/ /app/config/
+COPY inspections/ /app/inspections/
+COPY interventions/ /app/interventions/
+COPY invoicing/ /app/invoicing/
+COPY notifications/ /app/notifications/
+COPY payments/ /app/payments/
+COPY reservations/ /app/reservations/
+COPY vehicles/ /app/vehicles/
 
 EXPOSE 8000
 

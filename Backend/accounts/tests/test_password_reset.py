@@ -68,7 +68,7 @@ class PasswordResetTests(APITestCase):
         self.assertIn("http://localhost:5173/reset-password?uid=", sent_email.body)
         self.assertIn(f"uid={uid}", sent_email.body)
         self.assertIn(f"token={token}", sent_email.body)
-        self.assertIn("Ce lien est valable pendant la duree configuree par Django.", sent_email.body)
+        self.assertTrue("Ce lien est valable pendant une heure." in sent_email.body)
 
     def test_password_reset_request_unknown_email_returns_same_message_and_no_email(self):
         with self.captureOnCommitCallbacks(execute=True):
@@ -195,7 +195,7 @@ class PasswordResetTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("non_field_errors", response.data)
+        self.assertIn("new_password", response.data)
 
     def test_password_reset_confirm_rejects_password_confirmation_mismatch(self):
         uid, token = self._reset_token_payload()

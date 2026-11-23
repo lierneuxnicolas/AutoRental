@@ -20,12 +20,23 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import HttpResponseNotFound
 from django.urls import include, path
-from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from django.views.decorators.csp import csp_report_only_override
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerSplitView
+
+
+from config.csp_reports import receive_csp_report
 
 
 def deny_public_client_document_access(_request, path):
     return HttpResponseNotFound()
 
+
+swagger_csp = {
+    **settings.SECURE_CSP_REPORT_ONLY,
+    "script-src": ["'self'", "https://cdn.jsdelivr.net"],
+    "style-src": ["'self'", "https://cdn.jsdelivr.net", "'sha256-MMpT0iDxyjALd9PdfepImGX3DBfJPXZ4IlDWdPAgtn0='"],
+    "img-src": ["'self'", "https://cdn.jsdelivr.net", "data:"],
+}
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -33,10 +44,13 @@ urlpatterns = [
         "media/client_documents/<path:path>",
         deny_public_client_document_access,
     ),
+    path("api/csp-report/", receive_csp_report, name="csp-report"),
     path("api/schema/", SpectacularAPIView.as_view(), name="api-schema"),
     path(
         "api/docs/",
-        SpectacularSwaggerView.as_view(url_name="api-schema"),
+        csp_report_only_override(swagger_csp)(
+            SpectacularSwaggerSplitView.as_view(url_name="api-schema", url_self="/api/docs/")
+        ),
         name="api-docs",
     ),
     path("api/v1/", include("accounts.urls")),

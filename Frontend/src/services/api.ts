@@ -1,128 +1,112 @@
-import axios, { AxiosHeaders, type AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import axios, { AxiosHeaders, CanceledError, type AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import type { AuthTokens } from '../types/auth'
 import { getBackendBaseUrl } from '../config/apiBaseUrl'
-
-export const AUTH_LOGOUT_EVENT = 'auth:logout'
+import { clearSession, readSession, SESSION_VERSION_KEY, showSessionProblem, storeRotatedTokens, withSessionLock } from './authSession'
 
 const api = axios.create({
-  baseURL: `${getBackendBaseUrl()}/api/v1`,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseURL: getBackendBaseUrl() + '/api/v1',
+  headers: { 'Content-Type': 'application/json' },
 })
 
-type RetryableRequestConfig = InternalAxiosRequestConfig & { _retry?: boolean }
+type SessionRequest = InternalAxiosRequestConfig & {
+  _sessionVersion?: string | null
+  _retry?: boolean
+}
+const sessionTimeout = 15000
 
-let isRefreshing = false
-let pendingRequests: Array<(token: string | null) => void> = []
-
-function clearAuthSession() {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  window.localStorage.removeItem('accessToken')
-  window.localStorage.removeItem('refreshToken')
-  window.localStorage.removeItem('authUser')
-  window.dispatchEvent(new Event(AUTH_LOGOUT_EVENT))
+function isSessionEndpoint(url: string | undefined) {
+  return url?.includes('/auth/token/refresh/') || url?.includes('/auth/login/') || url?.includes('/auth/logout/')
 }
 
-api.interceptors.request.use((config) => {
-  if (typeof window === 'undefined') {
-    return config
-  }
+export function isRejectedSession(error: unknown) {
+  if (!axios.isAxiosError(error)) return false
+  return error.response?.status === 401 || (
+    error.response?.status === 400 && error.response.data?.code === 'token_not_valid'
+  )
+}
+
+export function sessionErrorMessage(error: unknown) {
+  if (!axios.isAxiosError(error) && error instanceof Error && !navigator.locks) return error.message
+  const status = axios.isAxiosError(error) ? error.response?.status : undefined
+  if (status === 429) return 'Trop de demandes de session. Patientez un instant avant de réessayer.'
+  if (!status) return 'La connexion au serveur est indisponible. Vérifiez votre réseau et réessayez.'
+  return 'Le service de session est temporairement indisponible. Réessayez.'
+}
+
+api.interceptors.request.use(async (config: SessionRequest) => {
+  if (typeof window === 'undefined') return config
 
   const headers = config.headers ?? new AxiosHeaders()
-
-  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
-    // Let the browser generate multipart boundaries for file uploads.
-    headers.delete('Content-Type')
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) headers.delete('Content-Type')
+  if (!isSessionEndpoint(config.url)) {
+    const requestedVersion = config._sessionVersion === undefined
+      ? window.localStorage.getItem(SESSION_VERSION_KEY)
+      : config._sessionVersion
+    // Read the existing localStorage keys together, outside of any in-progress session change.
+    const session = navigator.locks ? await withSessionLock(async () => readSession()) : readSession()
+    if (requestedVersion !== session.version) {
+      throw new CanceledError('Session modifiée')
+    }
+    if (session.access) {
+      config._sessionVersion = session.version
+      headers.set('Authorization', 'Bearer ' + session.access)
+    }
   }
-
-  if (config.url?.includes('/auth/token/refresh/') || config.url?.includes('/auth/login/')) {
-    config.headers = headers
-    return config
-  }
-
-  const accessToken = window.localStorage.getItem('accessToken')
-
-  if (accessToken) {
-    headers.set('Authorization', `Bearer ${accessToken}`)
-  }
-
   config.headers = headers
-
   return config
 })
 
-api.interceptors.response.use(
-  (response) => response,
-  async (error: AxiosError) => {
-    const originalRequest = error.config as RetryableRequestConfig | undefined
+let pendingRefresh: { version: string | null; promise: Promise<void> } | undefined
 
-    if (!originalRequest || originalRequest._retry) {
-      return Promise.reject(error)
+function refreshOnce(version: string | null, usedAccess: string | undefined) {
+  if (pendingRefresh?.version === version) return pendingRefresh.promise
+  const promise = withSessionLock(async () => {
+    const session = readSession()
+    if (session.version !== version || !session.access) throw new CanceledError('Session modifiée')
+    if (usedAccess !== 'Bearer ' + session.access) return
+    if (!session.refresh) {
+      clearSession()
+      throw new CanceledError('Session expirée')
     }
-
-    if (
-      error.response?.status !== 401
-      || originalRequest.url?.includes('/auth/token/refresh/')
-      || originalRequest.url?.includes('/auth/logout/')
-    ) {
-      return Promise.reject(error)
-    }
-
-    if (isRefreshing) {
-      return new Promise((resolve, reject) => {
-        pendingRequests.push((token) => {
-          if (!token) {
-            reject(error)
-            return
-          }
-
-          const headers = originalRequest.headers ?? new AxiosHeaders()
-          headers.set('Authorization', `Bearer ${token}`)
-          originalRequest.headers = headers
-          originalRequest._retry = true
-          resolve(api(originalRequest))
-        })
-      })
-    }
-
-    isRefreshing = true
-
     try {
-      const refreshToken = window.localStorage.getItem('refreshToken')
-
-      if (!refreshToken) {
-        clearAuthSession()
-        return Promise.reject(error)
-      }
-
-      const { data } = await api.post<AuthTokens>('/auth/token/refresh/', { refresh: refreshToken })
-      window.localStorage.setItem('accessToken', data.access)
-
-      if (data.refresh) {
-        window.localStorage.setItem('refreshToken', data.refresh)
-      }
-
-      pendingRequests.forEach((resolveRequest) => resolveRequest(data.access))
-      pendingRequests = []
-
-      const headers = originalRequest.headers ?? new AxiosHeaders()
-      headers.set('Authorization', `Bearer ${data.access}`)
-      originalRequest.headers = headers
-      originalRequest._retry = true
-
-      return api(originalRequest)
-    } catch (refreshError) {
-      pendingRequests.forEach((resolveRequest) => resolveRequest(null))
-      pendingRequests = []
-      clearAuthSession()
-      return Promise.reject(refreshError)
-    } finally {
-      isRefreshing = false
+      const { data } = await api.post<AuthTokens>('/auth/token/refresh/', { refresh: session.refresh }, { timeout: sessionTimeout })
+      if (readSession().version !== version) throw new CanceledError('Session modifiée')
+      storeRotatedTokens(data)
+    } catch (error) {
+      if (readSession().version === version && isRejectedSession(error)) clearSession()
+      throw error
     }
+  }).finally(() => {
+    if (pendingRefresh?.promise === promise) pendingRefresh = undefined
+  })
+  pendingRefresh = { version, promise }
+  return promise
+}
+
+api.interceptors.response.use(
+  (response) => {
+    const version = (response.config as SessionRequest)._sessionVersion
+    if (version !== undefined && readSession().version !== version) throw new CanceledError('Session modifiée')
+    return response
+  },
+  async (error: AxiosError) => {
+    const request = error.config as SessionRequest | undefined
+    const version = request?._sessionVersion
+    if (!request || request._retry || version === undefined || error.response?.status !== 401 || isSessionEndpoint(request.url)) {
+      throw error
+    }
+    if (readSession().version !== version) throw new CanceledError('Session modifiée')
+    try {
+      const usedAccess = request.headers.get('Authorization')?.toString()
+      await refreshOnce(version, usedAccess)
+    } catch (refreshError) {
+      if (readSession().version === version && !axios.isCancel(refreshError) && !isRejectedSession(refreshError)) {
+        showSessionProblem({ message: sessionErrorMessage(refreshError), retry: 'session' })
+      }
+      throw refreshError
+    }
+    request._retry = true
+    return api(request)
   },
 )
 

@@ -145,7 +145,7 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
     setIsLoggingOut(true)
 
     try {
-      await logout()
+      if (!(await logout())) return
       closeMenu()
       navigate('/')
     } finally {

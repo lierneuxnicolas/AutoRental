@@ -73,7 +73,7 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
 INSTALLED_APPS = [
     # Django apps
-    "django.contrib.admin",
+    "accounts.admin_site.GetaCarAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -98,8 +98,23 @@ INSTALLED_APPS = [
     "invoicing",
 ]
 
+# The admin uses local Django assets. Swagger adds its CDN on its own view.
+SECURE_CSP_REPORT_ONLY = {
+    "default-src": ["'self'"],
+    "script-src": ["'self'"],
+    "style-src": ["'self'"],
+    "img-src": ["'self'"],
+    "connect-src": ["'self'"],
+    "object-src": ["'none'"],
+    "base-uri": ["'self'"],
+    "frame-ancestors": ["'none'"],
+    "form-action": ["'self'"],
+    "report-uri": ["/api/csp-report/"],
+}
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "django.middleware.csp.ContentSecurityPolicyMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -131,6 +146,34 @@ WSGI_APPLICATION = "config.wsgi.application"
 AUTH_USER_MODEL = "accounts.User"
 
 
+# Authentication counters are isolated from application caches.
+AUTH_RATE_LIMIT_REDIS_URL = os.getenv("AUTH_RATE_LIMIT_REDIS_URL", "").strip()
+AUTH_RATE_LIMIT_REQUIRE_SHARED = False
+AUTH_RATE_LIMIT_TRUSTED_PROXIES = tuple(
+    cidr.strip()
+    for cidr in os.getenv("AUTH_RATE_LIMIT_TRUSTED_PROXIES", "").split(",")
+    if cidr.strip()
+)
+# Per-IP quota/window, followed by per-email quota/window (in seconds).
+AUTH_RATE_LIMITS = {
+    "login": (60, 300, 20, 300),
+    "admin_login": (30, 300, 10, 300),
+    "refresh": (120, 300, 0, 0),
+    "reset_request": (20, 3600, 3, 3600),
+    "reset_confirm": (30, 900, 0, 0),
+    "register": (15, 3600, 0, 0),
+    "verify_email": (60, 900, 0, 0),
+}
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    "auth_rate_limit": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "getacar-auth-rate-limit",
+        "OPTIONS": {"MAX_ENTRIES": 10000},
+    },
+}
+
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -151,7 +194,8 @@ REST_FRAMEWORK = {
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
-    "ROTATE_REFRESH_TOKENS": False,
+    "ROTATE_REFRESH_TOKENS": True,
+    "CHECK_REVOKE_TOKEN": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,
@@ -186,12 +230,15 @@ DATABASES = {
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
+PASSWORD_RESET_TIMEOUT = 60 * 60
+ALLOW_DEMO_SEED = False
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "NAME": "accounts.passwords.PasswordPolicyValidator",
     },
     {
         "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",

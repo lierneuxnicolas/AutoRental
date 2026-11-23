@@ -1,3 +1,5 @@
+import DocumentPdfPreview from '../../components/documents/DocumentPdfPreview'
+import { documentPreviewKind } from '../../utils/documentPreview'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -197,7 +199,7 @@ export default function ManagerUsersPage() {
   const [selectedUser, setSelectedUser] = useState<ManagementUserListItem | null>(null)
   const [activePanel, setActivePanel] = useState<'info' | 'documents' | null>(null)
   const [previewingDocumentId, setPreviewingDocumentId] = useState<number | null>(null)
-  const [preview, setPreview] = useState<{ url: string; type: string; label: string } | null>(null)
+  const [preview, setPreview] = useState<{ url: string; kind: 'image' | 'pdf'; label: string } | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [operationError, setOperationError] = useState<string | null>(null)
 
@@ -288,13 +290,14 @@ export default function ManagerUsersPage() {
     setPreviewError(null)
     try {
       const blob = await getManagementDocumentFile(document.id)
-      if (!blob.type.startsWith('image/') && blob.type !== 'application/pdf') {
+      const kind = documentPreviewKind(blob.type)
+      if (!kind) {
         setPreviewError('Ce format de document ne peut pas être affiché dans l’aperçu.')
         return
       }
       setPreview({
         url: URL.createObjectURL(blob),
-        type: blob.type,
+        kind,
         label: mapDocumentType(document.document_type),
       })
     } catch (error) {
@@ -452,10 +455,10 @@ export default function ManagerUsersPage() {
                     <h3 className="font-semibold text-[#0F172A]">{preview.label}</h3>
                     <Button variant="secondary" size="sm" onClick={() => setPreview(null)}>Fermer l’aperçu</Button>
                   </div>
-                  {preview.type.startsWith('image/') ? (
+                  {preview.kind === 'image' ? (
                     <img src={preview.url} alt={preview.label} className="max-h-[78vh] w-full object-contain" />
                   ) : (
-                    <iframe title={preview.label} src={preview.url} className="h-[78vh] w-full rounded-lg border border-slate-200" />
+                    <DocumentPdfPreview url={preview.url} title={preview.label} className="h-[78vh]" />
                   )}
                 </div>
               </div>

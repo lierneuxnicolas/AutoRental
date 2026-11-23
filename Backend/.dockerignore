@@ -1,0 +1,20 @@
+# Build with Backend as the context. Include only runtime source and the invoice template.
+**
+!requirements.txt
+!manage.py
+!accounts/**/*.py
+!common/**/*.py
+!config/**/*.py
+!inspections/**/*.py
+!interventions/**/*.py
+!invoicing/**/*.py
+!notifications/**/*.py
+!payments/**/*.py
+!reservations/**/*.py
+!vehicles/**/*.py
+!invoicing/templates/invoicing/invoice.html
+
+# Development-only modules and fixtures are not needed at runtime.
+**/tests/**
+**/test*.py
+common/management/commands/seed_demo.py

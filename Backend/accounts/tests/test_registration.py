@@ -23,8 +23,8 @@ class RegistrationTests(APITestCase):
         self.url = reverse("accounts:auth-register")
         self.payload = {
             "email": "newclient@example.com",
-            "password": "StrongPass123!",
-            "password_confirm": "StrongPass123!",
+            "password": "StrongSamplePass123!",
+            "password_confirm": "StrongSamplePass123!",
             "first_name": "Alice",
             "last_name": "Martin",
             "phone": "0123456789",
@@ -43,8 +43,8 @@ class RegistrationTests(APITestCase):
         user = user_model.objects.get(email="newclient@example.com")
         self.assertEqual(user.role.code, Role.Code.CLIENT)
         self.assertFalse(user.email_verified)
-        self.assertTrue(user.check_password("StrongPass123!"))
-        self.assertNotEqual(user.password, "StrongPass123!")
+        self.assertTrue(user.check_password("StrongSamplePass123!"))
+        self.assertNotEqual(user.password, "StrongSamplePass123!")
 
         profile = ClientProfile.objects.get(user=user)
         self.assertEqual(profile.profile_status, ClientProfile.ProfileStatus.INCOMPLET)
@@ -107,7 +107,7 @@ class RegistrationTests(APITestCase):
         user_model = get_user_model()
         user_model.objects.create_user(
             email="DupLiCate@Example.com",
-            password="StrongPass123!",
+            password="StrongSamplePass123!",
             first_name="Dup",
             last_name="User",
             phone="0101010101",
@@ -139,7 +139,7 @@ class RegistrationTests(APITestCase):
         response = self.client.post(self.url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("non_field_errors", response.data)
+        self.assertIn("password", response.data)
 
     def test_registration_rejects_password_confirmation_mismatch(self):
         payload = dict(self.payload)

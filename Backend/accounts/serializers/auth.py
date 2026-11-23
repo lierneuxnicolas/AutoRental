@@ -1,4 +1,5 @@
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_decode
 from drf_spectacular.utils import extend_schema_field
@@ -12,10 +13,24 @@ from common.models import SystemLog
 from common.services import create_system_log
 
 
+def _validate_new_password(password, user, field):
+    messages = {
+        "password_too_common": "Ce mot de passe est trop courant.",
+        "password_entirely_numeric": "Ce mot de passe ne peut pas contenir uniquement des chiffres.",
+        "password_too_similar": "Ce mot de passe ressemble trop à vos informations personnelles.",
+    }
+    try:
+        validate_password(password, user=user)
+    except DjangoValidationError as exc:
+        raise serializers.ValidationError(
+            {field: [messages.get(error.code, error.message) for error in exc.error_list]}
+        ) from exc
+
+
 class RegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, style={"input_type": "password"})
-    password_confirm = serializers.CharField(write_only=True, style={"input_type": "password"})
+    password = serializers.CharField(write_only=True, trim_whitespace=False, style={"input_type": "password"})
+    password_confirm = serializers.CharField(write_only=True, trim_whitespace=False, style={"input_type": "password"})
     first_name = serializers.CharField(max_length=150)
     last_name = serializers.CharField(max_length=150)
     phone = serializers.CharField(max_length=30, required=False, allow_blank=True)
@@ -48,7 +63,7 @@ class RegisterSerializer(serializers.Serializer):
             last_name=attrs.get("last_name", ""),
             phone=attrs.get("phone", ""),
         )
-        validate_password(password, user=user)
+        _validate_new_password(password, user, "password")
         return attrs
 
 
@@ -92,6 +107,10 @@ def _extract_request_ip(request) -> str | None:
 
 
 class LoginSerializer(TokenObtainPairSerializer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["password"].trim_whitespace = False
+
     def validate(self, attrs):
         email = attrs.get(self.username_field, "")
         attrs[self.username_field] = email.strip().lower()
@@ -152,9 +171,10 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 class PasswordResetConfirmSerializer(serializers.Serializer):
     uid = serializers.CharField(required=True)
     token = serializers.CharField(required=True)
-    new_password = serializers.CharField(write_only=True, required=True, style={"input_type": "password"})
+    new_password = serializers.CharField(write_only=True, required=True, trim_whitespace=False, style={"input_type": "password"})
     new_password_confirm = serializers.CharField(
         write_only=True,
+        trim_whitespace=False,
         required=True,
         style={"input_type": "password"},
     )
@@ -179,14 +199,14 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         except (TypeError, ValueError, OverflowError, UnicodeDecodeError):
             self.fail("invalid_link")
 
-        user = User.objects.filter(pk=user_id).first()
+        user = User.objects.select_for_update().filter(pk=user_id, is_active=True).first()
         if user is None:
             self.fail("invalid_link")
 
         if not default_token_generator.check_token(user, token):
             self.fail("invalid_link")
 
-        validate_password(password, user=user)
+        _validate_new_password(password, user, "new_password")
 
         attrs["user"] = user
         return attrs

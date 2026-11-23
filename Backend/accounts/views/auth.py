@@ -10,6 +10,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView as SimpleJWTTokenRefreshView
 
@@ -23,6 +24,9 @@ from accounts.serializers.auth import (
     VerifyEmailSerializer,
 )
 from accounts.models import User
+from accounts.throttling import AuthRateThrottle
+from accounts.logout_authentication import LogoutJWTAuthentication
+from accounts.serializers.jwt import PasswordBoundTokenRefreshSerializer
 from accounts.services.email_verification import (
     AlreadyUsedEmailVerificationToken,
     ExpiredEmailVerificationToken,
@@ -82,7 +86,7 @@ TokenRefreshRequestSerializer = inline_serializer(
 
 TokenRefreshResponseSerializer = inline_serializer(
     name="TokenRefreshResponse",
-    fields={"access": drf_serializers.CharField()},
+    fields={"access": drf_serializers.CharField(), "refresh": drf_serializers.CharField()},
 )
 
 
@@ -95,6 +99,8 @@ def _extract_request_ip(request) -> str | None:
 
 
 class RegisterView(APIView):
+    throttle_classes = [AuthRateThrottle]
+    auth_rate_scope = "register"
     permission_classes = [AllowAny]
 
     @extend_schema(
@@ -147,6 +153,8 @@ class MeView(APIView):
 
 
 class VerifyEmailView(APIView):
+    throttle_classes = [AuthRateThrottle]
+    auth_rate_scope = "verify_email"
     permission_classes = [AllowAny]
 
     @extend_schema(
@@ -188,6 +196,8 @@ class VerifyEmailView(APIView):
     )
 )
 class LoginView(TokenObtainPairView):
+    throttle_classes = [AuthRateThrottle]
+    auth_rate_scope = "login"
     permission_classes = [AllowAny]
     serializer_class = LoginSerializer
 
@@ -204,10 +214,14 @@ class LoginView(TokenObtainPairView):
     )
 )
 class TokenRefreshView(SimpleJWTTokenRefreshView):
+    serializer_class = PasswordBoundTokenRefreshSerializer
+    throttle_classes = [AuthRateThrottle]
+    auth_rate_scope = "refresh"
     permission_classes = [AllowAny]
 
 
 class LogoutView(APIView):
+    authentication_classes = [LogoutJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
@@ -227,9 +241,15 @@ class LogoutView(APIView):
 
         try:
             token = RefreshToken(refresh_token)
+            owner_id = token.get(api_settings.USER_ID_CLAIM)
+            if str(owner_id) != str(getattr(request.user, api_settings.USER_ID_FIELD)):
+                raise TokenError("Refresh token does not belong to the authenticated user")
             token.blacklist()
         except TokenError:
-            return Response({"detail": "Refresh token invalide."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Refresh token invalide.", "code": "token_not_valid"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         create_system_log(
             user=request.user,
@@ -243,6 +263,8 @@ class LogoutView(APIView):
 
 
 class PasswordResetRequestView(APIView):
+    throttle_classes = [AuthRateThrottle]
+    auth_rate_scope = "reset_request"
     permission_classes = [AllowAny]
 
     @extend_schema(
@@ -273,7 +295,7 @@ class PasswordResetRequestView(APIView):
                         "Pour choisir un nouveau mot de passe, ouvrez le lien suivant :\n\n"
                         f"{reset_url}\n\n"
                         "Si vous n'etes pas a l'origine de cette demande, ignorez simplement cet e-mail.\n\n"
-                        "Ce lien est valable pendant la duree configuree par Django.\n\n"
+                        "Ce lien est valable pendant une heure.\n\n"
                         "GetACar"
                     ),
                     from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
@@ -281,7 +303,7 @@ class PasswordResetRequestView(APIView):
                     fail_silently=False,
                 )
 
-            transaction.on_commit(_send_reset_email)
+            transaction.on_commit(_send_reset_email, robust=True)
 
         return Response(
             {"message": "Si un compte correspond a cette adresse, un e-mail a ete envoye."},
@@ -290,6 +312,8 @@ class PasswordResetRequestView(APIView):
 
 
 class PasswordResetConfirmView(APIView):
+    throttle_classes = [AuthRateThrottle]
+    auth_rate_scope = "reset_confirm"
     permission_classes = [AllowAny]
 
     @extend_schema(
@@ -301,6 +325,7 @@ class PasswordResetConfirmView(APIView):
             400: OpenApiResponse(response=ErrorDetailResponseSerializer),
         },
     )
+    @transaction.atomic
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
