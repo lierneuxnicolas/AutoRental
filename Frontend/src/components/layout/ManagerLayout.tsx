@@ -1,8 +1,10 @@
+import { useTranslation } from 'react-i18next'
 import { Outlet } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import Button from '../ui/Button'
 
 export default function ManagerLayout() {
+  const { t } = useTranslation()
   const { user, logout } = useAuth()
 
   return (
@@ -20,7 +22,7 @@ export default function ManagerLayout() {
             </div>
 
             <Button type="button" variant="secondary" className="w-full" onClick={() => void logout()}>
-              Déconnexion
+              {t('auth.logout')}
             </Button>
           </div>
         </aside>

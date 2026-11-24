@@ -1,73 +1,74 @@
+import { useTranslation } from 'react-i18next'
 import { ACCOUNT_TERMS_VERSION, RENTAL_TERMS_VERSION } from '../../config/termsVersion'
 import StaticInfoPage, { type StaticInfoSection } from './StaticInfoPage'
 
 const sections: StaticInfoSection[] = [
   {
-    heading: 'Conditions pour louer',
+    heading: 'public.conditions_pour_louer',
     paragraphs: [
-      "Le conducteur doit avoir **au moins 21 ans**, une carte d’identité et un permis de conduire validés, **valables jusqu’à la fin de la location**. Le permis doit être **compatible avec le véhicule choisi**.",
+      'public.le_conducteur_doit_avoir_au_moins_21_ans_une_carte_didentite',
     ],
   },
   {
-    heading: 'Tarifs et assurances',
+    heading: 'public.tarifs_et_assurances',
     paragraphs: [
-      "Les prix sont **TTC**. L’assurance **Standard** est incluse avec une franchise de **1 000 €**. L’assurance **Complémentaire** coûte **10 €/jour** et réduit la franchise à **300 €** pour les dommages couverts. La franchise correspond à la part des dommages qui reste à la charge du client.",
+      'public.les_prix_sont_ttc_lassurance_standard_est_incluse_avec_une_franchise',
     ],
   },
   {
-    heading: 'Caution de 500 €',
+    heading: 'public.caution_de_500',
     paragraphs: [
-      "Une caution de **500 €** est temporairement bloquée sur la carte bancaire, **sans débit immédiat**. Elle peut le rester jusqu’au contrôle du véhicule et à la finalisation de la facture, dans la limite de validité de l’autorisation bancaire. Les **frais justifiés** peuvent être retenus et le solde est libéré.",
+      'public.une_caution_de_500_est_temporairement_bloquee_sur_la_carte_bancaire',
     ],
   },
   {
-    heading: 'Annulation',
+    heading: 'public.annulation',
     paragraphs: [
-      "L’annulation est possible avant le départ. **Plus de 24 h avant le départ**, des frais de gestion de **20 €** sont déduits et le solde est remboursé. **À 24 h du départ ou moins**, le prix de la location n’est pas remboursé.",
+      'public.lannulation_est_possible_avant_le_depart_plus_de_24_h_avant',
     ],
   },
   {
-    heading: 'Départ et restitution',
+    heading: 'public.depart_et_restitution',
     paragraphs: [
-      "Les **états des lieux avec photos** sont obligatoires. Le véhicule doit être restitué au **parking prévu**, avec le **même niveau de carburant** qu’au départ. Le kilométrage est relevé.",
+      'public.les_etats_des_lieux_avec_photos_sont_obligatoires_le_vehicule_doit',
     ],
   },
   {
-    heading: 'Retards, dommages et amendes',
+    heading: 'public.retards_dommages_et_amendes',
     paragraphs: [
-      "Tout retard, **même de 10 minutes**, entraîne **120 € par période de 24 h entamée**. Le carburant manquant, les dommages justifiés et les amendes imputables au conducteur peuvent être facturés selon les conditions applicables.",
+      'public.tout_retard_meme_de_10_minutes_entraine_120_par_periode_de',
     ],
   },
 ]
 
-const rentalVersionNote = `Version ${RENTAL_TERMS_VERSION} – Conditions de location GetaCar`
-
 export default function RentalTermsPage({ archive = false }: { archive?: boolean }) {
+  const { t } = useTranslation()
+  const rentalVersionNote = t('public.version_version_conditions_de_location_getacar', { version: RENTAL_TERMS_VERSION })
   return (
     <StaticInfoPage
-      title={archive ? "Conditions de location et assurances" : "Conditions générales"}
+      title={archive ? 'public.conditions_de_location_et_assurances' : 'public.conditions_generales'}
       sections={archive ? sections : undefined}
       groups={archive ? undefined : [
         {
           id: 'conditions-compte',
-          title: "Conditions d'utilisation du compte",
+          title: 'public.conditions_d_utilisation_du_compte',
           sections: [{
-            heading: 'Utilisation du compte GetaCar',
+            heading: 'public.utilisation_du_compte_getacar',
             paragraphs: [
-              "Pour utiliser GetaCar, vous devez créer un compte avec des informations exactes, confirmer votre adresse e-mail et respecter les règles du service. Vous êtes responsable de la confidentialité de vos identifiants. L'accès aux réservations nécessite un profil et des documents validés. Toute utilisation frauduleuse ou abusive peut entraîner la suspension du compte.",
+              'public.pour_utiliser_getacar_vous_devez_creer_un_compte_avec_des_informations',
             ],
           }],
-          note: `Version ${ACCOUNT_TERMS_VERSION} – Conditions d'utilisation du compte`,
+          note: t('public.version_version_conditions_d_utilisation_du_compte', { version: ACCOUNT_TERMS_VERSION }),
         },
         {
           id: 'conditions-location',
-          title: 'Conditions de location',
+          title: 'public.conditions_de_location',
           sections,
           note: rentalVersionNote,
         },
       ]}
       checkClassName="size-5 shrink-0 text-[#6038FF]"
-      footerNote={archive ? "Version 1.1 – Conditions de location GetaCar" : undefined}
+      footerNote={archive ? t('public.version_version_conditions_de_location_getacar', { version: "1.1" }) : undefined}
     />
   )
 }

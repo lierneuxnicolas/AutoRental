@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import axios from 'axios'
 import { useQuery } from '@tanstack/react-query'
@@ -40,7 +43,7 @@ function formatDateTime(value: string): string {
     return value
   }
 
-  return parsed.toLocaleString('fr-FR', {
+  return parsed.toLocaleString(clientLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
@@ -69,6 +72,7 @@ function formatUser(log: SystemLog): string {
 }
 
 export default function AdminSystemLogsPage() {
+  const { t } = useTranslation()
   const [page, setPage] = useState(1)
 
   const logsQuery = useQuery({
@@ -81,32 +85,31 @@ export default function AdminSystemLogsPage() {
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Administration</p>
-        <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Journaux système</h1>
+        <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">{t("professional.administration")}</p>
+        <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">{t("professional.journaux_systeme")}</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-          Consultez les événements importants enregistrés par la plateforme.
-        </p>
+          {t("professional.consultez_les_evenements_importants_enregistres_par_la_plateforme")}</p>
       </div>
 
       {logsQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
-          <LoadingSpinner size="lg" aria-label="Chargement des journaux système" />
+          <LoadingSpinner size="lg" aria-label={t("professional.chargement_des_journaux_systeme")} />
         </div>
       ) : null}
 
       {logsQuery.isError ? (
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message={toErrorMessage(logsQuery.error)}
+          title={t("client.chargement_impossible")}
+          message={professionalDisplay(t, toErrorMessage(logsQuery.error))}
           className="mb-6"
         />
       ) : null}
 
       {!logsQuery.isLoading && !logsQuery.isError && logs.length === 0 ? (
         <EmptyState
-          title="Aucun journal"
-          description="Aucun événement système n'est actuellement enregistré."
+          title={t("professional.aucun_journal")}
+          description={t("professional.aucun_evenement_systeme_n_est_actuellement_enregistre")}
         />
       ) : null}
 
@@ -118,7 +121,7 @@ export default function AdminSystemLogsPage() {
               header={
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Événement</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{t("professional.evenement")}</p>
                     <p className="text-base font-semibold text-[#0F172A]">{formatDateTime(log.created_at)}</p>
                   </div>
                   <StatusBadge variant={mapLevelToVariant(log.level)} label={log.level} />
@@ -127,23 +130,23 @@ export default function AdminSystemLogsPage() {
             >
               <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 lg:grid-cols-5">
                 <div>
-                  <p className="font-medium text-[#1F2937]">Date et heure</p>
+                  <p className="font-medium text-[#1F2937]">{t("professional.date_et_heure")}</p>
                   <p className="mt-1">{formatDateTime(log.created_at)}</p>
                 </div>
                 <div>
-                  <p className="font-medium text-[#1F2937]">Utilisateur</p>
+                  <p className="font-medium text-[#1F2937]">{t("navigation.user")}</p>
                   <p className="mt-1">{formatUser(log)}</p>
                 </div>
                 <div>
-                  <p className="font-medium text-[#1F2937]">Action</p>
+                  <p className="font-medium text-[#1F2937]">{t("professional.action")}</p>
                   <p className="mt-1">{log.action}</p>
                 </div>
                 <div>
-                  <p className="font-medium text-[#1F2937]">Adresse IP</p>
+                  <p className="font-medium text-[#1F2937]">{t("professional.adresse_ip")}</p>
                   <p className="mt-1">{log.ip_address ?? '—'}</p>
                 </div>
                 <div className="md:col-span-2 lg:col-span-5">
-                  <p className="font-medium text-[#1F2937]">Message</p>
+                  <p className="font-medium text-[#1F2937]">{t("professional.message")}</p>
                   <p className="mt-1 whitespace-pre-wrap">{log.message}</p>
                 </div>
               </div>
@@ -152,9 +155,9 @@ export default function AdminSystemLogsPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
             <p className="text-sm text-slate-600">
-              Page actuelle: <span className="font-semibold text-[#1F2937]">{page}</span>
+              {t("professional.page_actuelle")}<span className="font-semibold text-[#1F2937]">{page}</span>
               {' · '}
-              Total: <span className="font-semibold text-[#1F2937]">{logsQuery.data?.count ?? 0}</span>
+              {t("client.total")}<span className="font-semibold text-[#1F2937]">{logsQuery.data?.count ?? 0}</span>
             </p>
             <div className="flex items-center gap-2">
               <Button
@@ -165,8 +168,7 @@ export default function AdminSystemLogsPage() {
                 }}
                 disabled={!logsQuery.data?.previous}
               >
-                Précédent
-              </Button>
+                {t("client.precedent_alt")}</Button>
               <Button
                 variant="secondary"
                 size="sm"
@@ -175,8 +177,7 @@ export default function AdminSystemLogsPage() {
                 }}
                 disabled={!logsQuery.data?.next}
               >
-                Suivant
-              </Button>
+                {t("client.suivant")}</Button>
             </div>
           </div>
         </div>

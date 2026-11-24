@@ -1,3 +1,5 @@
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useMemo, useState } from 'react'
 import Alert from '../feedback/Alert'
 import Button from '../ui/Button'
@@ -70,6 +72,7 @@ export default function VehicleStatusForm({
   reservations = [],
   interventions = [],
 }: VehicleStatusFormProps) {
+  const { t } = useTranslation()
   const [status, setStatus] = useState<VehicleManagementStatus>(forcedStatus ?? currentStatus)
   const [reason, setReason] = useState('')
   const [assignedUserId, setAssignedUserId] = useState('')
@@ -185,23 +188,23 @@ export default function VehicleStatusForm({
   }
 
   return (
-    <Card className="border-[#DBEAFE] bg-[#F8FAFC]" header={<h2 className="text-base font-semibold text-[#1F2937]">Planifier une intervention</h2>}>
+    <Card className="border-[#DBEAFE] bg-[#F8FAFC]" header={<h2 className="text-base font-semibold text-[#1F2937]">{t("professional.planifier_une_intervention")}</h2>}>
       <div className="space-y-3">
         <div className="text-sm">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Véhicule</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{t("client.vehicule_alt")}</p>
             <p className="mt-1 font-medium text-[#1F2937]">{vehicleLabel}</p>
           </div>
         </div>
 
-        {apiError ? <Alert variant="danger" title="Mise a jour impossible" message={apiError} /> : null}
+        {apiError ? <Alert variant="danger" title={t("professional.mise_a_jour_impossible")} message={apiError} /> : null}
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="grid gap-3 md:grid-cols-2">
             {forcedStatus ? (
               <div className="space-y-2">
                 <Select
-                  label="Service"
+                  label={t("professional.service")}
                   options={[{ value: 'MAINTENANCE', label: 'Maintenance' }, { value: 'NETTOYAGE', label: 'Nettoyage' }]}
                   value={status}
                   onChange={(event) => {
@@ -216,7 +219,7 @@ export default function VehicleStatusForm({
               </div>
             ) : (
               <Select
-                label="Nouveau statut"
+                label={t("professional.nouveau_statut")}
                 options={statusOptions}
                 value={status}
                 onChange={(event) => {
@@ -244,29 +247,29 @@ export default function VehicleStatusForm({
           {requiredRole ? (
             <div className="space-y-3">
               <div className="space-y-2">
-                <p className="block text-sm font-medium text-[#1F2937]">Début prévu</p>
+                <p className="block text-sm font-medium text-[#1F2937]">{t("professional.debut_prevu")}</p>
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                   <Input
                     type="date"
-                    aria-label="Date de début prévue"
+                    aria-label={t("professional.date_de_debut_prevue")}
                     value={plannedDate}
                     onChange={(event) => setPlannedDate(event.target.value)}
                     disabled={isSubmitting}
                   />
-                  <p className="pb-3 text-sm font-medium text-slate-600">Heure fixe : 10 h 00</p>
+                  <p className="pb-3 text-sm font-medium text-slate-600">{t("professional.heure_fixe_10_h_00")}</p>
                 </div>
               </div>
               <div className="space-y-2">
-                <p className="block text-sm font-medium text-[#1F2937]">Fin prévue</p>
+                <p className="block text-sm font-medium text-[#1F2937]">{t("professional.fin_prevue")}</p>
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                   <Input
                     type="date"
-                    aria-label="Date de fin prévue"
+                    aria-label={t("professional.date_de_fin_prevue")}
                     value={plannedEndDate}
                     onChange={(event) => setPlannedEndDate(event.target.value)}
                     disabled={isSubmitting}
                   />
-                  <p className="pb-3 text-sm font-medium text-slate-600">Heure fixe : 22 h 00</p>
+                  <p className="pb-3 text-sm font-medium text-slate-600">{t("professional.heure_fixe_22_h_00")}</p>
                 </div>
               </div>
             </div>
@@ -274,14 +277,14 @@ export default function VehicleStatusForm({
 
           {requiredRole ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-3 text-sm">
-              <p className="font-semibold text-[#1F2937]">Agenda du véhicule</p>
+              <p className="font-semibold text-[#1F2937]">{t("professional.agenda_du_vehicule")}</p>
               {agendaItems.length === 0 ? (
-                <p className="mt-2 text-slate-500">Aucune période réservée. Libre sur la période affichée.</p>
+                <p className="mt-2 text-slate-500">{t("professional.aucune_periode_reservee_libre_sur_la_periode_affichee")}</p>
               ) : (
                 <div className="mt-2 space-y-2">
                   {agendaItems.map((item) => (
                     <p key={item.key} className="text-slate-600">
-                      {item.kind === 'reservation' ? `Réservé · ${item.label}` : `Intervention · ${item.label}`} · {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(item.startAt))} → {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(item.endAt))}
+                      {item.kind === 'reservation' ? `Réservé · ${item.label}` : `Intervention · ${item.label}`} · {new Intl.DateTimeFormat(clientLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(item.startAt))} → {new Intl.DateTimeFormat(clientLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(item.endAt))}
                     </p>
                   ))}
                 </div>
@@ -289,44 +292,44 @@ export default function VehicleStatusForm({
             </div>
           ) : null}
 
-          {plannedEndAt && !hasImmediateConflict && plannedEndDate >= plannedDate ? <p className="text-sm font-medium text-emerald-700">Créneau disponible · fin prévue : {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(plannedEndAt)}</p> : null}
+          {plannedEndAt && !hasImmediateConflict && plannedEndDate >= plannedDate ? <p className="text-sm font-medium text-emerald-700">{t("professional.creneau_disponible_fin_prevue")} {new Intl.DateTimeFormat(clientLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(plannedEndAt)}</p> : null}
           {hasImmediateConflict ? (
             <Alert
               variant="warning"
-              title="Créneau indisponible"
+              title={t("professional.creneau_indisponible")}
               message={(
                 <span>
-                  {conflictLabel} · {conflictStart ? new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflictStart)) : ''} → {conflictEnd ? new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflictEnd)) : ''}
+                  {conflictLabel} · {conflictStart ? new Intl.DateTimeFormat(clientLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflictStart)) : ''} → {conflictEnd ? new Intl.DateTimeFormat(clientLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflictEnd)) : ''}
                 </span>
               )}
             />
           ) : null}
 
           <Input
-            label="Motif"
-            placeholder="Ex: vehicule nettoye, retour atelier..."
+            label={t("professional.motif")}
+            placeholder={t("professional.ex_vehicule_nettoye_retour_atelier")}
             maxLength={500}
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             disabled={isSubmitting}
           />
 
-          {localError ? <Alert variant="danger" title="Valeurs invalides" message={localError} /> : null}
+          {localError ? <Alert variant="danger" title={t("professional.valeurs_invalides")} message={localError} /> : null}
 
           {conflictReservation ? (
             <Alert
               variant="warning"
-              title="Ce véhicule possède une réservation pendant cette période."
+              title={t("professional.ce_vehicule_possede_une_reservation_pendant_cette_periode")}
               message={(
                 <div className="space-y-3">
                   <div className="grid gap-2 text-sm sm:grid-cols-3">
-                    <p><span className="text-slate-500">Référence :</span> {conflictReservation.reference}</p>
-                    <p><span className="text-slate-500">Client :</span> {conflictReservation.client || '—'}</p>
-                    <p><span className="text-slate-500">Période :</span> {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflictReservation.start_at))} → {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflictReservation.end_at))}</p>
+                    <p><span className="text-slate-500">{t("professional.reference")}</span> {conflictReservation.reference}</p>
+                    <p><span className="text-slate-500">{t("professional.client_2")}</span> {conflictReservation.client || '—'}</p>
+                    <p><span className="text-slate-500">{t("professional.periode")}</span> {new Intl.DateTimeFormat(clientLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflictReservation.start_at))} → {new Intl.DateTimeFormat(clientLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflictReservation.end_at))}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <a href={`${reservationBasePath}/${conflictReservation.id}`}><Button type="button" size="sm">Voir réservation</Button></a>
-                    <Button type="button" variant="secondary" size="sm" onClick={onCancel}>Annuler</Button>
+                    <a href={`${reservationBasePath}/${conflictReservation.id}`}><Button type="button" size="sm">{t("professional.voir_reservation")}</Button></a>
+                    <Button type="button" variant="secondary" size="sm" onClick={onCancel}>{t("client.annuler")}</Button>
                   </div>
                 </div>
               )}
@@ -335,10 +338,9 @@ export default function VehicleStatusForm({
 
           {!conflictReservation ? <div className="flex flex-wrap justify-end gap-3">
             <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>
-              Annuler
-            </Button>
+              {t("client.annuler")}</Button>
             <Button type="submit" className="min-w-[13rem] whitespace-nowrap" disabled={isSubmitting || hasImmediateConflict}>
-              {isSubmitting ? 'Planification...' : 'Planifier une intervention'}
+              {isSubmitting ? 'Planification...' : t("professional.planifier_une_intervention")}
             </Button>
           </div> : null}
         </form>

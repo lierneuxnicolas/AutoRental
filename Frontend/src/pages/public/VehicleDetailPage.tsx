@@ -1,3 +1,5 @@
+import { clientApiErrorKey, clientDisplay, clientLocale, stripeLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js'
@@ -81,9 +83,9 @@ const reservationErrorMessages: Record<string, string> = {
 
 const reservationValidationFieldLabels: Record<string, string> = {
   end_at: 'Date de fin',
-  insurance_type: 'Assurance',
+  insurance_type: 'public.assurance',
   start_at: 'Date de début',
-  vehicle_id: 'Véhicule',
+  vehicle_id: 'public.vehicule',
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -95,7 +97,7 @@ function getErrorCodeMessage(code: unknown): string | null {
     return null
   }
 
-  return reservationErrorMessages[code] ?? null
+  return clientApiErrorKey(code) ?? reservationErrorMessages[code] ?? null
 }
 
 function collectValidationMessages(value: unknown): string[] {
@@ -169,7 +171,7 @@ function getPaymentPreparationErrorMessage(error: unknown): string {
   if (error instanceof AxiosError && isRecord(error.response?.data)) {
     const data = error.response.data
     if (data.code === 'STRIPE_UNAVAILABLE') {
-      return 'Stripe est temporairement indisponible. Veuillez réessayer.'
+      return 'public.stripe_est_temporairement_indisponible_veuillez_reessayer'
     }
     const details = isRecord(data.details) ? data.details : {}
     if (Array.isArray(details.eligibility_errors)) {
@@ -183,7 +185,7 @@ function getPaymentPreparationErrorMessage(error: unknown): string {
       return message
     }
   }
-  return "Le paiement n'a pas pu être préparé. Veuillez réessayer ou contacter le support."
+  return 'public.le_paiement_n_a_pas_pu_etre_prepare_veuillez_reessayer_ou'
 }
 
 function getReservationValidationMessage(payload: ReservationApiErrorPayload): string | null {
@@ -295,15 +297,15 @@ function statusToBadge(status: string): { label: string; variant: StatusVariant 
   const upperStatus = status.toUpperCase()
 
   if (upperStatus === 'DISPONIBLE') {
-    return { label: 'Disponible', variant: 'success' }
+    return { label: 'public.disponible', variant: 'success' }
   }
 
   if (upperStatus === 'LOUE') {
-    return { label: 'Loue', variant: 'warning' }
+    return { label: 'public.loue', variant: 'warning' }
   }
 
   if (upperStatus === 'INDISPONIBLE') {
-    return { label: 'Indisponible', variant: 'danger' }
+    return { label: 'public.indisponible', variant: 'danger' }
   }
 
   const lowered = status.replaceAll('_', ' ').toLowerCase()
@@ -328,11 +330,11 @@ function buildGallery(vehicle: PublicVehicle): { main: VehiclePhoto | null; seco
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined || value === '') {
-    return 'Non renseigné'
+    return 'public.non_renseigne'
   }
 
   if (typeof value === 'boolean') {
-    return value ? 'Oui' : 'Non'
+    return value ? 'public.oui' : 'public.non'
   }
 
   return String(value)
@@ -348,15 +350,15 @@ function getVehicleField(vehicle: PublicVehicle, keys: string[]): string {
     }
   }
 
-  return 'Non renseigné'
+  return 'public.non_renseigne'
 }
 
 function buildTabEntry(label: string, value: string): { label: string; value: string } {
-  return { label, value: value || 'Non renseigné' }
+  return { label, value: value || 'public.non_renseigne' }
 }
 
 function formatNumberFr(value: number) {
-  return new Intl.NumberFormat('fr-FR', {
+  return new Intl.NumberFormat(clientLocale(), {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(value)
@@ -368,20 +370,20 @@ function formatCurrencyFr(value: number | string | null | undefined) {
     return null
   }
 
-  return `${formatNumberFr(numericValue)} €`
+  return new Intl.NumberFormat(clientLocale(), { style: 'currency', currency: 'EUR' }).format(numericValue)
 }
 
 function formatDateTimeFr(value: string | null): string {
   if (!value) {
-    return 'Non renseigné'
+    return 'public.non_renseigne'
   }
 
   const parsed = new Date(value)
   if (!Number.isFinite(parsed.getTime())) {
-    return 'Non renseigné'
+    return 'public.non_renseigne'
   }
 
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(clientLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
     timeZone: 'Europe/Brussels',
@@ -393,17 +395,17 @@ function formatDurationFromHours(hours: string | number | null | undefined, fall
 
   if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
     if (fallbackDays > 0) {
-      return `${fallbackDays} jour${fallbackDays > 1 ? 's' : ''}`
+      return new Intl.NumberFormat(clientLocale(), { style: 'unit', unit: 'day', unitDisplay: 'long' }).format(fallbackDays)
     }
-    return 'Non renseignée'
+    return 'public.non_renseignee'
   }
 
   const dayCount = parsedHours / 24
   if (Number.isInteger(dayCount)) {
-    return `${dayCount} jour${dayCount > 1 ? 's' : ''}`
+    return new Intl.NumberFormat(clientLocale(), { style: 'unit', unit: 'day', unitDisplay: 'long' }).format(dayCount)
   }
 
-  return `${formatNumberFr(parsedHours)} heure${parsedHours > 1 ? 's' : ''}`
+  return new Intl.NumberFormat(clientLocale(), { style: 'unit', unit: 'hour', unitDisplay: 'long' }).format(parsedHours)
 }
 
 function isReservationConfirmed(status: string | null | undefined): boolean {
@@ -463,6 +465,7 @@ type StripePaymentFormProps = {
 }
 
 function StripePaymentForm({ clientSecret, initialCardholderName, isSubmitting, onBack, returnUrl, onSubmit, verifyBeforePayment }: StripePaymentFormProps) {
+  const { t } = useTranslation()
   const stripe = useStripe()
   const elements = useElements()
   const [paymentError, setPaymentError] = useState<string | null>(null)
@@ -479,7 +482,7 @@ function StripePaymentForm({ clientSecret, initialCardholderName, isSubmitting, 
     }
 
     if (status === 'requires_payment_method') {
-      setPaymentError('Paiement échoué. Veuillez recommencer votre réservation.')
+      setPaymentError('public.paiement_echoue_veuillez_recommencer_votre_reservation')
       return true
     }
 
@@ -496,12 +499,12 @@ function StripePaymentForm({ clientSecret, initialCardholderName, isSubmitting, 
     }
 
     if (!paymentMethod) {
-      setPaymentError('Veuillez choisir un moyen de paiement.')
+      setPaymentError('public.veuillez_choisir_un_moyen_de_paiement')
       return
     }
 
     if (paymentMethod === 'card' && !cardholderName.trim()) {
-      setCardholderError('Veuillez renseigner le nom et le prénom du titulaire.')
+      setCardholderError('public.veuillez_renseigner_le_nom_et_le_prenom_du_titulaire')
       return
     }
 
@@ -519,7 +522,7 @@ function StripePaymentForm({ clientSecret, initialCardholderName, isSubmitting, 
       }
 
       if (!await verifyBeforePayment()) {
-        setPaymentError('Les vérifications avant paiement ont échoué ou sont indisponibles.')
+        setPaymentError('public.les_verifications_avant_paiement_ont_echoue_ou_sont_indisponibles')
         return
       }
 
@@ -545,7 +548,7 @@ function StripePaymentForm({ clientSecret, initialCardholderName, isSubmitting, 
           }
         }
 
-        setPaymentError('Paiement échoué. Veuillez recommencer votre réservation.')
+        setPaymentError('public.paiement_echoue_veuillez_recommencer_votre_reservation')
         return
       }
 
@@ -553,7 +556,7 @@ function StripePaymentForm({ clientSecret, initialCardholderName, isSubmitting, 
       const wasHandled = await handleResolvedPaymentIntent(confirmedPaymentIntent?.status)
 
       if (!wasHandled) {
-        setPaymentError('Le statut du paiement Stripe est en attente. Veuillez patienter quelques instants avant de réessayer.')
+        setPaymentError('public.le_statut_du_paiement_stripe_est_en_attente_veuillez_patienter_quelques')
       }
     } catch (error) {
       const axiosError = error as AxiosError<{ detail?: string }>
@@ -568,12 +571,12 @@ function StripePaymentForm({ clientSecret, initialCardholderName, isSubmitting, 
     <div className="space-y-4">
       {paymentMethod === 'card' ? (
         <Input
-          label="Nom et prénom du titulaire"
+          label={t('public.nom_et_prenom_du_titulaire')}
           name="cardholder-name"
           autoComplete="cc-name"
           required
           value={cardholderName}
-          error={cardholderError ?? undefined}
+          error={cardholderError ? t(cardholderError) : undefined}
           onChange={(event) => {
             setCardholderName(event.target.value)
             setCardholderError(null)
@@ -596,14 +599,14 @@ function StripePaymentForm({ clientSecret, initialCardholderName, isSubmitting, 
         />
       </div>
 
-      {paymentError ? <Alert variant="danger" title="Erreur Stripe" message={paymentError} /> : null}
+      {paymentError ? <Alert variant="danger" title={t('public.erreur_stripe')} message={clientDisplay(t, t(paymentError))} /> : null}
 
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
         <Button variant="secondary" onClick={onBack} disabled={isSubmitting || isConfirming}>
-          Retour
+          {t('public.retour')}
         </Button>
         <Button onClick={handleSubmit} disabled={!stripe || isSubmitting || isConfirming}>
-          {isSubmitting || isConfirming ? 'Paiement en cours...' : 'Payer et confirmer'}
+          {t(isSubmitting || isConfirming ? 'public.paiement_en_cours' : 'public.payer_et_confirmer')}
         </Button>
       </div>
     </div>
@@ -611,12 +614,13 @@ function StripePaymentForm({ clientSecret, initialCardholderName, isSubmitting, 
 }
 
 function ReservationVehicleThumbnail({ vehicle }: { vehicle: PublicVehicle }) {
+  const { t } = useTranslation()
   const [imageFailed, setImageFailed] = useState(false)
   const photoUrl = resolveMediaUrl(vehicle.main_photo?.file)
 
   if (!photoUrl || imageFailed) {
     return (
-      <div className="flex aspect-[7/5] w-full max-w-[260px] items-center justify-center rounded-lg bg-slate-100 text-slate-400" role="img" aria-label="Photo du véhicule indisponible">
+      <div className="flex aspect-[7/5] w-full max-w-[260px] items-center justify-center rounded-lg bg-slate-100 text-slate-400" role="img" aria-label={t('public.photo_du_vehicule_indisponible')}>
         <Car aria-hidden="true" size={40} />
       </div>
     )
@@ -651,6 +655,7 @@ const INSURANCE_TITLES: Record<InsuranceOptionKey, string> = {
 }
 
 export default function VehicleDetailPage() {
+  const { t, i18n } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const location = useLocation()
   const navigate = useNavigate()
@@ -760,10 +765,10 @@ export default function VehicleDetailPage() {
   }, [isAuthenticated, licenseVehicleCompatibility, licenseVehicleIncompatibilityMessage, profileProgressQuery.data, profileQuery.data])
 
   const reservationSteps: ReservationProgressStep[] = [
-    { order: 1, label: 'Véhicule & période' },
-    { order: 2, label: 'Assurance' },
-    { order: 3, label: 'Récapitulatif et paiement' },
-    { order: 4, label: 'Confirmation' },
+    { order: 1, label: 'public.vehicule_periode' },
+    { order: 2, label: 'public.assurance' },
+    { order: 3, label: 'public.recapitulatif_et_paiement' },
+    { order: 4, label: 'public.confirmation' },
   ]
 
   useEffect(() => {
@@ -829,7 +834,7 @@ export default function VehicleDetailPage() {
     return Math.ceil(rawDays)
   }, [createdReservation, end, hasReservationIdInQuery, reservationStateQuery.data, start])
 
-  const cautionLabel = formatCurrencyFr(activeReservation?.deposit_amount ?? vehicle?.conditions?.minimum_deposit) ?? 'Non renseigné'
+  const cautionLabel = formatCurrencyFr(activeReservation?.deposit_amount ?? vehicle?.conditions?.minimum_deposit) ?? 'public.non_renseigne'
   const backendInsuranceType = mapInsuranceToBackend(effectiveInsuranceSelection)
 
   const stripeReturnUrl = useMemo(() => {
@@ -1207,7 +1212,7 @@ export default function VehicleDetailPage() {
             if (!stripe) throw new Error()
             setCheckoutStripe(stripe)
           } catch {
-            setPaymentWorkflowError('Stripe n’a pas pu charger le formulaire de paiement. Veuillez réessayer.')
+            setPaymentWorkflowError('public.stripe_na_pas_pu_charger_le_formulaire_de_paiement_veuillez_reessayer')
             return
           }
 
@@ -1257,7 +1262,7 @@ export default function VehicleDetailPage() {
 
     async function loadVehicleById() {
       if (!id) {
-        setErrorMessage('Identifiant du vehicule manquant.')
+        setErrorMessage('public.identifiant_du_vehicule_manquant')
         setIsLoading(false)
         return
       }
@@ -1284,7 +1289,7 @@ export default function VehicleDetailPage() {
           setIsNotFound(true)
           setVehicle(null)
         } else {
-          setErrorMessage('Impossible de charger ce vehicule pour le moment.')
+          setErrorMessage('public.impossible_de_charger_ce_vehicule_pour_le_moment')
         }
       } finally {
         if (isMounted) {
@@ -1303,7 +1308,7 @@ export default function VehicleDetailPage() {
   const gallery = useMemo(() => (vehicle ? buildGallery(vehicle) : null), [vehicle])
   const status = useMemo(() => (vehicle ? statusToBadge(vehicle.public_status) : null), [vehicle])
   const usageAdvised = useMemo(
-    () => (vehicle ? getVehicleField(vehicle, ['recommended_use', 'usage_advised', 'usage_conseille', 'recommended_usage', 'usage_recommande']) : 'Non renseigné'),
+    () => (vehicle ? getVehicleField(vehicle, ['recommended_use', 'usage_advised', 'usage_conseille', 'recommended_usage', 'usage_recommande']) : 'public.non_renseigne'),
     [vehicle],
   )
 
@@ -1313,15 +1318,15 @@ export default function VehicleDetailPage() {
     }
 
     return [
-      buildTabEntry('Places', getVehicleField(vehicle, ['seats'])),
-      buildTabEntry('Portes', getVehicleField(vehicle, ['doors'])),
-      buildTabEntry('Motorisation', getVehicleField(vehicle, ['motorisation', 'motorization', 'engine', 'fuel_type'])),
-      buildTabEntry('Boîte', getVehicleField(vehicle, ['boite', 'boite_vitesse', 'gearbox', 'transmission'])),
-      buildTabEntry('Puissance', getVehicleField(vehicle, ['power_hp', 'power', 'horsepower', 'puissance'])),
-      buildTabEntry('Consommation', getVehicleField(vehicle, ['consumption', 'fuel_consumption', 'consommation'])),
-      buildTabEntry('Coffre / volume', getVehicleField(vehicle, ['trunk_volume', 'boot_volume', 'coffre', 'volume_coffre'])),
-      buildTabEntry('Norme Euro', getVehicleField(vehicle, ['euro_standard', 'euro_norm', 'standard_euro'])),
-      buildTabEntry('Couleur', getVehicleField(vehicle, ['color'])),
+      buildTabEntry('public.places', getVehicleField(vehicle, ['seats'])),
+      buildTabEntry('public.portes', getVehicleField(vehicle, ['doors'])),
+      buildTabEntry('public.motorisation', getVehicleField(vehicle, ['motorisation', 'motorization', 'engine', 'fuel_type'])),
+      buildTabEntry('public.boite', getVehicleField(vehicle, ['boite', 'boite_vitesse', 'gearbox', 'transmission'])),
+      buildTabEntry('public.puissance', getVehicleField(vehicle, ['power_hp', 'power', 'horsepower', 'puissance'])),
+      buildTabEntry('public.consommation', getVehicleField(vehicle, ['consumption', 'fuel_consumption', 'consommation'])),
+      buildTabEntry('public.coffre_volume', getVehicleField(vehicle, ['trunk_volume', 'boot_volume', 'coffre', 'volume_coffre'])),
+      buildTabEntry('public.norme_euro', getVehicleField(vehicle, ['euro_standard', 'euro_norm', 'standard_euro'])),
+      buildTabEntry('public.couleur', getVehicleField(vehicle, ['color'])),
     ]
   }, [vehicle])
 
@@ -1330,7 +1335,7 @@ export default function VehicleDetailPage() {
       return []
     }
 
-    return (vehicle.equipment ?? []).map((item) => buildTabEntry(item.label, 'Inclus'))
+    return (vehicle.equipment ?? []).map((item) => buildTabEntry(item.label, 'public.inclus'))
   }, [vehicle])
 
   const conditionRows = useMemo(() => {
@@ -1345,100 +1350,100 @@ export default function VehicleDetailPage() {
     const includedKmPerDay = conditions?.included_km_per_day ?? vehicle.included_km_per_day
     const includedKmValue =
       typeof includedKmPerDay === 'number' && Number.isFinite(includedKmPerDay)
-        ? `${formatNumberFr(includedKmPerDay)} km / jour`
-        : 'Non renseigné'
+        ? t('public.value_km_jour', { value: formatNumberFr(includedKmPerDay) })
+        : 'public.non_renseigne'
 
     const extraKmPrice = conditions?.extra_km_price ?? vehicle.extra_km_price
     const extraKmPriceValue = formatCurrencyFr(extraKmPrice)
     const extraKmValue = extraKmPriceValue
-      ? `${extraKmPriceValue} / km supplémentaire`
-      : 'Non renseigné'
+      ? t('public.value_km_supplementaire', { value: extraKmPriceValue })
+      : 'public.non_renseigne'
 
     const minimumDepositValue = formatCurrencyFr(conditions?.minimum_deposit)
     const depositValue = minimumDepositValue
-      ? `${minimumDepositValue} — préautorisation bancaire`
-      : 'Non renseigné'
+      ? t('public.value_preautorisation_bancaire', { value: minimumDepositValue })
+      : 'public.non_renseigne'
 
     const minimumAge = conditions?.minimum_age ?? vehicle.minimum_age
     const minimumAgeValue =
       typeof minimumAge === 'number' && Number.isFinite(minimumAge)
-        ? `${formatNumberFr(minimumAge)} ans`
-        : 'Non renseigné'
+        ? t('public.value_ans', { value: formatNumberFr(minimumAge) })
+        : 'public.non_renseigne'
 
     const requiredLicense = conditions?.required_license ?? vehicle.required_license
     const permitValue = requiredLicense
-      ? `${requiredLicense} valide requis`
-      : 'Non renseigné'
+      ? t('public.value_valide_requis', { value: requiredLicense })
+      : 'public.non_renseigne'
 
     const validatedDocumentsValue = (() => {
       if (documentsMustBeValid === undefined && !requiredDocuments) {
-        return 'Non renseigné'
+        return 'public.non_renseigne'
       }
 
       if (documentsMustBeValid === false) {
-        return 'Non'
+        return 'public.non'
       }
 
       if (Array.isArray(requiredDocuments) && requiredDocuments.length > 0) {
         const normalizedCodes = new Set(requiredDocuments)
 
         if (normalizedCodes.has('PERMIS_CONDUIRE') && normalizedCodes.has('CARTE_IDENTITE')) {
-          return "Permis de conduire et pièce d'identité obligatoires"
+          return 'public.permis_de_conduire_et_piece_d_identite_obligatoires'
         }
 
         const labels = requiredDocuments.map((documentType) => {
           if (documentType === 'PERMIS_CONDUIRE') {
-            return 'Permis de conduire'
+            return 'public.permis_de_conduire'
           }
 
           if (documentType === 'CARTE_IDENTITE') {
-            return "Pièce d'identité"
+            return 'public.piece_d_identite'
           }
 
           return documentType.replaceAll('_', ' ').toLowerCase()
         })
 
-        return `Documents obligatoires: ${labels.join(', ')}`
+        return t('public.documents_obligatoires_value', { value: labels.map((label) => t(label)).join(', ') })
       }
 
-      return 'Oui'
+      return 'public.oui'
     })()
 
     const fuelTracking = conditions?.fuel_tracking
     const fuelValue = fuelTracking?.managed_in_inspections
-      ? "Le véhicule doit être restitué avec le même niveau de carburant qu'au départ"
-      : 'Non renseigné'
+      ? 'public.le_vehicule_doit_etre_restitue_avec_le_meme_niveau_de_carburant'
+      : 'public.non_renseigne'
 
     const latePolicy = conditions?.late_policy
     const lateValue = latePolicy?.managed_in_departure_inspection_window
-      ? 'Non renseigné'
-      : 'Non renseigné'
+      ? 'public.non_renseigne'
+      : 'public.non_renseigne'
 
     const cancellationPolicy = conditions?.cancellation_policy
     const cancellationValue = cancellationPolicy
-      ? 'Non renseigné'
-      : 'Non renseigné'
+      ? 'public.non_renseigne'
+      : 'public.non_renseigne'
 
     const inspectionPolicy = conditions?.inspection_policy
     const inspectionValue = inspectionPolicy
       ? inspectionPolicy.departure_required && inspectionPolicy.return_required
-        ? 'État des lieux obligatoire au départ et au retour avec photos'
-        : 'Non renseigné'
-      : 'Non renseigné'
+        ? 'public.etat_des_lieux_obligatoire_au_depart_et_au_retour_avec_photos'
+        : 'public.non_renseigne'
+      : 'public.non_renseigne'
 
     return [
-      buildTabEntry('Kilométrage inclus', includedKmValue),
-      buildTabEntry('Kilométrage supplémentaire', extraKmValue),
-      buildTabEntry('Caution', depositValue),
-      buildTabEntry('Âge minimum', minimumAgeValue),
-      buildTabEntry('Permis', permitValue),
-      buildTabEntry('Documents validés', validatedDocumentsValue),
-      buildTabEntry('Carburant', fuelValue),
-      buildTabEntry('Retard', lateValue),
-      buildTabEntry('Annulation', cancellationValue),
-      buildTabEntry('État des lieux', inspectionValue),
+      buildTabEntry('public.kilometrage_inclus', includedKmValue),
+      buildTabEntry('public.kilometrage_supplementaire', extraKmValue),
+      buildTabEntry('public.caution', depositValue),
+      buildTabEntry('public.age_minimum', minimumAgeValue),
+      buildTabEntry('public.permis', permitValue),
+      buildTabEntry('public.documents_valides', validatedDocumentsValue),
+      buildTabEntry('public.carburant', fuelValue),
+      buildTabEntry('public.retard', lateValue),
+      buildTabEntry('public.annulation', cancellationValue),
+      buildTabEntry('public.etat_des_lieux', inspectionValue),
     ]
-  }, [vehicle])
+  }, [t, vehicle])
 
   const handleSimulationClick = () => {
     if (start && end) {
@@ -1447,13 +1452,13 @@ export default function VehicleDetailPage() {
       return
     }
 
-    setSimulationContextMessage('Aucune période sélectionnée. Revenez au catalogue pour choisir une date de début et de fin avant de lancer la simulation.')
+    setSimulationContextMessage('public.aucune_periode_selectionnee_revenez_au_catalogue_pour_choisir_une_date_de')
   }
 
   const tabs: Array<{ id: VehicleDetailTab; label: string }> = [
-    { id: 'features', label: 'Caractéristiques' },
-    { id: 'equipment', label: 'Équipements' },
-    { id: 'conditions', label: 'Conditions' },
+    { id: 'features', label: 'public.caracteristiques' },
+    { id: 'equipment', label: 'public.equipements' },
+    { id: 'conditions', label: 'public.conditions' },
   ]
 
   const confirmationReservation = createdReservation?.status === 'CONFIRMEE' && createdReservation.id === activeReservation?.id
@@ -1471,9 +1476,9 @@ export default function VehicleDetailPage() {
 
   if (isLoading) {
     return (
-      <section className="py-8 sm:py-10" aria-label="Chargement du vehicule">
+      <section className="py-8 sm:py-10" aria-label={t('public.chargement_du_vehicule')}>
         <div className="mx-auto flex max-w-7xl justify-center px-4 sm:px-6 lg:px-8">
-          <LoadingSpinner aria-label="Chargement du vehicule" size="lg" />
+          <LoadingSpinner aria-label={t('public.chargement_du_vehicule')} size="lg" />
         </div>
       </section>
     )
@@ -1484,11 +1489,11 @@ export default function VehicleDetailPage() {
       <section className="py-8 sm:py-10">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           <EmptyState
-            title="Vehicule introuvable"
-            description="Le vehicule demande n'existe pas ou n'est plus accessible."
+            title={t('public.vehicule_introuvable')}
+            description={t('public.le_vehicule_demande_n_existe_pas_ou_n_est_plus_accessible')}
             action={
               <Link to="/vehicles" className="inline-flex">
-                <Button variant="secondary">Retour au catalogue</Button>
+                <Button variant="secondary">{t('public.retour_au_catalogue')}</Button>
               </Link>
             }
           />
@@ -1503,8 +1508,8 @@ export default function VehicleDetailPage() {
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           <Alert
             variant="danger"
-            title="Erreur reseau"
-            message={errorMessage}
+            title={t('public.erreur_reseau')}
+            message={t(errorMessage)}
           />
         </div>
       </section>
@@ -1516,8 +1521,8 @@ export default function VehicleDetailPage() {
       <section className="py-8 sm:py-10">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           <EmptyState
-            title="Donnees indisponibles"
-            description="Les informations de ce vehicule sont incompletes pour le moment."
+            title={t('public.donnees_indisponibles')}
+            description={t('public.les_informations_de_ce_vehicule_sont_incompletes_pour_le_moment')}
           />
         </div>
       </section>
@@ -1543,9 +1548,9 @@ export default function VehicleDetailPage() {
     ?? (mapInsuranceToUi(simulationQuery.data?.insurance_type)
       ? INSURANCE_TITLES[mapInsuranceToUi(simulationQuery.data?.insurance_type) as InsuranceOptionKey]
       : 'Non sélectionnée')
-  const paymentRentalAmountLabel = formatCurrencyFr(simulationQuery.data?.rental_amount) ?? 'Non renseigné'
-  const paymentInsuranceAmountLabel = formatCurrencyFr(simulationQuery.data?.insurance_amount) ?? 'Non renseigné'
-  const paymentTotalAmountLabel = formatCurrencyFr(simulationQuery.data?.total_amount) ?? 'Non renseigné'
+  const paymentRentalAmountLabel = formatCurrencyFr(simulationQuery.data?.rental_amount) ?? 'public.non_renseigne'
+  const paymentInsuranceAmountLabel = formatCurrencyFr(simulationQuery.data?.insurance_amount) ?? 'public.non_renseigne'
+  const paymentTotalAmountLabel = formatCurrencyFr(simulationQuery.data?.total_amount) ?? 'public.non_renseigne'
   const displayedCurrentStep: ReservationStepNumber = confirmationReservation?.status === 'CONFIRMEE' ? 4 : currentStep
 
   const tabContent = {
@@ -1553,44 +1558,44 @@ export default function VehicleDetailPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {featureRows.map((row) => (
           <div key={row.label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{row.label}</p>
-            <p className="mt-2 text-sm font-medium text-slate-800">{row.value}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t(row.label)}</p>
+            <p className="mt-2 text-sm font-medium text-slate-800">{t(row.value)}</p>
           </div>
         ))}
       </div>
     ) : (
-      <p className="text-sm text-slate-500">Aucune information disponible dans cette section.</p>
+      <p className="text-sm text-slate-500">{t('public.aucune_information_disponible_dans_cette_section')}</p>
     )),
     equipment: (equipmentRows.length > 0 ? (
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {equipmentRows.map((row) => (
           <div key={row.label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{row.label}</p>
-            <p className="mt-2 text-sm font-medium text-slate-800">{row.value}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t(row.label)}</p>
+            <p className="mt-2 text-sm font-medium text-slate-800">{t(row.value)}</p>
           </div>
         ))}
       </div>
     ) : (
-      <p className="text-sm text-slate-500">Aucun équipement renseigné pour le moment.</p>
+      <p className="text-sm text-slate-500">{t('public.aucun_equipement_renseigne_pour_le_moment')}</p>
     )),
     conditions: (conditionRows.length > 0 ? (
       <div className="grid gap-4 md:grid-cols-2">
         {conditionRows.map((row) => (
           <div key={row.label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{row.label}</p>
-            <p className="mt-2 text-sm font-medium text-slate-800">{row.value}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t(row.label)}</p>
+            <p className="mt-2 text-sm font-medium text-slate-800">{t(row.value)}</p>
           </div>
         ))}
       </div>
     ) : (
-      <p className="text-sm text-slate-500">Aucune condition disponible pour cette location.</p>
+      <p className="text-sm text-slate-500">{t('public.aucune_condition_disponible_pour_cette_location')}</p>
     )),
   }
 
   return (
-    <section className="py-8 sm:py-10" aria-label="Réservation du véhicule">
+    <section className="py-8 sm:py-10" aria-label={t('public.reservation_du_vehicule')}>
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <nav aria-label="Progression de reservation" className="mb-6 sm:mb-8">
+        <nav aria-label={t('public.progression_de_reservation')} className="mb-6 sm:mb-8">
           <div className="overflow-x-auto pb-2">
             <ol className="flex min-w-185 items-start gap-2 sm:gap-3">
               {reservationSteps.map((step, index) => {
@@ -1619,7 +1624,7 @@ export default function VehicleDetailPage() {
                           isCurrent ? 'text-slate-900' : 'text-slate-500',
                         ].join(' ')}
                       >
-                        {step.label}
+                        {t(step.label)}
                       </span>
                     </li>
 
@@ -1646,7 +1651,7 @@ export default function VehicleDetailPage() {
           >
             <div className="w-full shrink-0">
               <header className="mb-4 flex justify-end">
-                <StatusBadge variant={status.variant} label={status.label} />
+                <StatusBadge variant={status.variant} label={t(status.label)} />
               </header>
 
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.55fr_0.95fr]">
@@ -1660,7 +1665,7 @@ export default function VehicleDetailPage() {
                   ) : (
                     <div className="flex h-72 w-full items-center justify-center rounded-[1.25rem] bg-gradient-to-br from-slate-100 to-slate-200 sm:h-[26rem]">
                       <p className="rounded-full bg-white/90 px-4 py-2 text-sm font-medium text-slate-600">
-                        Aucune photo principale disponible
+                        {t('public.aucune_photo_principale_disponible')}
                       </p>
                     </div>
                   )}
@@ -1671,7 +1676,7 @@ export default function VehicleDetailPage() {
                         <img
                           key={photo.id}
                           src={resolveMediaUrl(photo.file) ?? undefined}
-                          alt={`Photo du vehicule ${vehicle.brand} ${vehicle.model_name}`}
+                          alt={t('public.photo_du_vehicule_name', { name: [vehicle.brand, vehicle.model_name].join(' ') })}
                           className="h-24 w-full rounded-xl object-cover"
                           loading="lazy"
                         />
@@ -1681,30 +1686,30 @@ export default function VehicleDetailPage() {
                 </Card>
 
                 <Card
-                  header={<h2 className="text-lg font-semibold text-[#1F2937]">Informations du véhicule</h2>}
+                  header={<h2 className="text-lg font-semibold text-[#1F2937]">{t('public.informations_du_vehicule')}</h2>}
                   footer={
                     <div className="flex flex-col gap-3">
-                      <Button className="w-full" onClick={handleSimulationClick}>Simuler et réserver</Button>
+                      <Button className="w-full" onClick={handleSimulationClick}>{t('public.simuler_et_reserver')}</Button>
                       {simulationContextMessage ? (
-                        <Alert variant="info" title="Période requise" message={simulationContextMessage} />
+                        <Alert variant="info" title={t('public.periode_requise')} message={t(simulationContextMessage)} />
                       ) : null}
                     </div>
                   }
                 >
                   <div className="space-y-5">
                     <div>
-                      <p className="text-sm font-medium text-slate-500">Modèle</p>
+                      <p className="text-sm font-medium text-slate-500">{t('public.modele')}</p>
                       <p className="mt-1 text-2xl font-semibold text-[#1F2937]">{vehicle.brand} {vehicle.model_name}</p>
                     </div>
 
                     <div>
-                      <p className="text-sm font-medium text-slate-500">Usage conseillé</p>
-                      <p className="mt-1 text-base font-medium text-[#1F2937]">{usageAdvised}</p>
+                      <p className="text-sm font-medium text-slate-500">{t('public.usage_conseille')}</p>
+                      <p className="mt-1 text-base font-medium text-[#1F2937]">{t(usageAdvised)}</p>
                     </div>
 
                     <div className="rounded-2xl border border-[#DBEAFE] bg-[#EFF6FF] p-4">
-                      <p className="text-3xl font-semibold text-[#1F2937]">{formatVehicleDailyRate(vehicle.category_daily_rate)}</p>
-                      <p className="mt-1 text-xs text-slate-500">TVA de 21 % comprise</p>
+                      <p className="text-3xl font-semibold text-[#1F2937]">{formatVehicleDailyRate(vehicle.category_daily_rate, t, i18n.resolvedLanguage)}</p>
+                      <p className="mt-1 text-xs text-slate-500">{t('public.tva_de_21_comprise')}</p>
                     </div>
                   </div>
                 </Card>
@@ -1724,7 +1729,7 @@ export default function VehicleDetailPage() {
                           : 'bg-white text-slate-600 hover:bg-slate-100',
                       ].join(' ')}
                     >
-                      {tab.label}
+                      {t(tab.label)}
                     </button>
                   ))}
                 </div>
@@ -1738,16 +1743,16 @@ export default function VehicleDetailPage() {
             </div>
 
             <div className="w-full shrink-0">
-              <Card className="mt-2" header={<h2 className="text-lg font-semibold text-black">Choisissez votre assurance</h2>}>
+              <Card className="mt-2" header={<h2 className="text-lg font-semibold text-black">{t('public.choisissez_votre_assurance')}</h2>}>
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-slate-50 px-4 py-3 text-[15px] leading-7 text-black sm:text-base sm:leading-8">
                     <span className="font-semibold">{insuranceSummaryVehicleLabel}</span>
                     <span>·</span>
-                    <span>Départ {insuranceSummaryStartLabel}</span>
+                    <span>{t('public.depart')} {t(insuranceSummaryStartLabel)}</span>
                     <span>·</span>
-                    <span>Retour {insuranceSummaryEndLabel}</span>
+                    <span>{t('public.retour')} {t(insuranceSummaryEndLabel)}</span>
                     <span>·</span>
-                    <span className="font-medium">{insuranceSummaryDurationLabel}</span>
+                    <span className="font-medium">{t(insuranceSummaryDurationLabel)}</span>
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-2">
@@ -1766,18 +1771,18 @@ export default function VehicleDetailPage() {
                           ].join(' ')}
                           aria-pressed={isSelected}
                         >
-                          <p className="text-lg font-bold uppercase">{option.title.toUpperCase()}</p>
+                          <p className="text-lg font-bold uppercase">{clientDisplay(t, option.title)}</p>
                           <ul className="mt-3 w-full space-y-1 text-left text-sm leading-5">
-                            <li>• Assurance de base incluse</li>
-                            <li>• Franchise{option.key === 'complementary' ? ' réduite' : ''} : <strong>{formatCurrencyFr(option.deductible)}</strong></li>
-                            <li>• Caution : <strong>{cautionLabel}</strong></li>
+                            <li>{t('client.assurance_de_base_incluse_alt')}</li>
+                            <li>• {t(option.key === 'complementary' ? 'client.franchise_reduite' : 'client.franchise')} <strong>{formatCurrencyFr(option.deductible)}</strong></li>
+                            <li>• {t('client.caution')} <strong>{t(cautionLabel)}</strong></li>
                           </ul>
                           <p className="mt-auto pt-4 text-lg font-bold text-[#7C3AED] sm:text-xl">
                             {option.key === 'standard'
-                              ? '0 € supplémentaire'
+                              ? t('client.0_supplementaire')
                               : complementaryRate && complementaryTotal && complementaryDays
-                                ? `+${complementaryRate} TVAC/jour — ${complementaryTotal} TVAC pour ${complementaryDays} jour${complementaryDays > 1 ? 's' : ''}`
-                                : complementarySimulationQuery.isPending ? 'Calcul en cours…' : 'Tarif indisponible'}
+                                ? t('client.rate_tvac_jour_total_tvac_pour_duration', { rate: complementaryRate, total: complementaryTotal, duration: formatDurationFromHours(null, complementaryDays) })
+                                : complementarySimulationQuery.isPending ? t('public.calcul_en_cours') : t('public.tarif_indisponible')}
                           </p>
                         </button>
                       )
@@ -1785,71 +1790,71 @@ export default function VehicleDetailPage() {
                   </div>
 
                   <div className="space-y-1 text-center text-xs text-black">
-                    <p>Franchise : montant qui peut rester à votre charge en cas de dommage.</p>
-                    <p>Caution : préautorisation distincte sur votre carte.</p>
+                    <p>{t('client.franchise_montant_qui_peut_rester_a_votre_charge_en_cas_de')}</p>
+                    <p>{t('client.caution_preautorisation_distincte_sur_votre_carte')}</p>
                   </div>
 
                   {complementarySimulationQuery.isError && effectiveInsuranceSelection !== 'complementary' ? (
                     <div className="space-y-2">
-                      <Alert variant="danger" title="Tarif complémentaire indisponible" message={getSimulationErrorMessage(complementarySimulationQuery.error).message} />
-                      <Button variant="secondary" onClick={() => void complementarySimulationQuery.refetch()}>Réessayer</Button>
+                      <Alert variant="danger" title={t('client.tarif_complementaire_indisponible')} message={clientDisplay(t, getSimulationErrorMessage(complementarySimulationQuery.error).message)} />
+                      <Button variant="secondary" onClick={() => void complementarySimulationQuery.refetch()}>{t('public.reessayer')}</Button>
                     </div>
                   ) : null}
 
                   {simulationQuery.isError ? (
                     <div className="space-y-2">
                       <Alert variant="danger" title="Tarification indisponible" message={getSimulationErrorMessage(simulationQuery.error).message} />
-                      <Button variant="secondary" onClick={() => void simulationQuery.refetch()}>Réessayer</Button>
+                      <Button variant="secondary" onClick={() => void simulationQuery.refetch()}>{t('public.reessayer')}</Button>
                     </div>
                   ) : !insuranceSummary ? (
-                    <p className="text-center text-sm text-black">{canRunSimulationQuery ? 'Calcul en cours…' : 'Tarification indisponible'}</p>
+                    <p className="text-center text-sm text-black">{canRunSimulationQuery ? t("public.calcul_en_cours") : 'Tarification indisponible'}</p>
                   ) : (
                     <div className="mx-auto w-full space-y-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-black md:w-[65%] sm:px-5 sm:text-base">
-                      <div className="flex justify-between"><span>Location</span><span className="font-medium">{formatCurrencyFr(insuranceSummary.rental_amount) ?? 'Non renseigné'}</span></div>
-                      <div className="flex justify-between"><span>Assurance</span><span className="font-medium">{formatCurrencyFr(insuranceSummary.insurance_amount) ?? 'Non renseigné'}</span></div>
-                      <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-bold sm:text-lg"><span>Total</span><span>{formatCurrencyFr(insuranceSummary.total_amount) ?? 'Non renseigné'}{effectiveInsuranceSelection === 'standard' || effectiveInsuranceSelection === 'complementary' ? ' TVAC' : ''}</span></div>
+                      <div className="flex justify-between"><span>{t('public.location')}</span><span className="font-medium">{formatCurrencyFr(insuranceSummary.rental_amount) ?? t('public.non_renseigne')}</span></div>
+                      <div className="flex justify-between"><span>{t('public.assurance')}</span><span className="font-medium">{formatCurrencyFr(insuranceSummary.insurance_amount) ?? t('public.non_renseigne')}</span></div>
+                      <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-bold sm:text-lg"><span>{t('public.total')}</span><span>{formatCurrencyFr(insuranceSummary.total_amount) ?? t('public.non_renseigne')}{effectiveInsuranceSelection === 'standard' || effectiveInsuranceSelection === 'complementary' ? ' TVAC' : ''}</span></div>
                     </div>
                   )}
 
                   <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                    <Button variant="secondary" onClick={() => setCurrentStep(1)}>Retour</Button>
-                    <Button onClick={() => setCurrentStep(3)} disabled={!effectiveInsuranceSelection}>Continuer</Button>
+                    <Button variant="secondary" onClick={() => setCurrentStep(1)}>{t('public.retour')}</Button>
+                    <Button onClick={() => setCurrentStep(3)} disabled={!effectiveInsuranceSelection}>{t('public.continuer')}</Button>
                   </div>
                 </div>
               </Card>
             </div>
 
             <div className="w-full shrink-0">
-              <Card className="mx-auto mt-2 max-w-3xl" header={<h2 className="text-lg font-semibold text-[#1F2937]">Récapitulatif et paiement</h2>}>
+              <Card className="mx-auto mt-2 max-w-3xl" header={<h2 className="text-lg font-semibold text-[#1F2937]">{t('public.recapitulatif_et_paiement')}</h2>}>
                 <div className="divide-y divide-slate-200 [&>section]:py-4 [&>section:first-child]:pt-0 [&>section:last-child]:pb-0">
                   <section className="-mx-6 px-5">
-                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Votre réservation</p>
+                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">{t('public.votre_reservation')}</p>
                     <div className={`mt-3 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] grid-rows-[auto] auto-rows-fr items-center gap-x-4 gap-y-4 text-[15px] text-slate-700 [overflow-wrap:anywhere] sm:text-base md:grid-cols-[260px_minmax(0,1fr)_minmax(0,1fr)] md:gap-x-10 md:gap-y-2 ${isAuthenticated ? 'md:grid-rows-[repeat(7,minmax(1.5rem,1fr))]' : 'md:grid-rows-[repeat(6,minmax(1.5rem,1fr))]'}`}>
                       <div className="col-span-2 w-full max-w-[260px] justify-self-center md:col-span-1 md:row-span-full">
                         <ReservationVehicleThumbnail key={vehicle.id} vehicle={vehicle} />
                       </div>
                       <dl className="contents [&>div]:contents [&_dd]:text-right [&_dd]:font-semibold [&_dd]:text-slate-900">
-                        <div><dt>Véhicule</dt><dd>{vehicle.brand} {vehicle.model_name}</dd></div>
-                        <div><dt>Départ</dt><dd>{formatDateTimeFr(start)}</dd></div>
-                        <div><dt>Retour</dt><dd>{formatDateTimeFr(end)}</dd></div>
-                        <div><dt>Durée</dt><dd>{paymentDurationLabel}</dd></div>
-                        <div><dt>Assurance</dt><dd>{paymentInsuranceLabel}</dd></div>
+                        <div><dt>{t('public.vehicule')}</dt><dd>{vehicle.brand} {vehicle.model_name}</dd></div>
+                        <div><dt>{t('public.depart')}</dt><dd>{t(formatDateTimeFr(start))}</dd></div>
+                        <div><dt>{t('public.retour')}</dt><dd>{t(formatDateTimeFr(end))}</dd></div>
+                        <div><dt>{t('public.duree')}</dt><dd>{t(paymentDurationLabel)}</dd></div>
+                        <div><dt>{t('public.assurance')}</dt><dd>{clientDisplay(t, t(paymentInsuranceLabel))}</dd></div>
                         {isAuthenticated ? (
-                          <div><dt>Type de permis</dt><dd>{licenseTypeLabel ?? '—'}</dd></div>
+                          <div><dt>{t('client.type_de_permis')}</dt><dd>{licenseTypeLabel ?? '—'}</dd></div>
                         ) : null}
-                        <div><dt>Transmission du véhicule</dt><dd>{vehicleTransmissionLabel ?? '—'}</dd></div>
+                        <div><dt>{t('client.transmission_du_vehicule')}</dt><dd>{vehicleTransmissionLabel ?? '—'}</dd></div>
                       </dl>
                     </div>
                     {hasShortBilledDay ? (
-                      <p className="mt-3 text-sm text-slate-600">Une journée facturée comporte moins de 24 heures ; le retour est prévu à 10 h.</p>
+                      <p className="mt-3 text-sm text-slate-600">{t("professional.une_journee_facturee_comporte_moins_de_24_heures_le_retour_est_prevu")}</p>
                     ) : null}
                   </section>
 
                   <section>
-                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Paiement</p>
+                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">{t("client.paiement")}</p>
                     {simulationQuery.isLoading ? (
                       <div className="mt-3 flex items-center gap-3 text-sm text-slate-600">
-                        <LoadingSpinner size="sm" aria-label="Chargement du récapitulatif paiement" />
+                        <LoadingSpinner size="sm" aria-label={t('client.chargement_du_recapitulatif_paiement')} />
                         Calcul en cours...
                       </div>
                     ) : shouldShowSimulationError ? (
@@ -1857,58 +1862,58 @@ export default function VehicleDetailPage() {
                         <Alert
                           variant="danger"
                           title="Récapitulatif indisponible"
-                          message={simulationError.message}
+                          message={clientDisplay(t, simulationError.message)}
                         />
                         {simulationError.retryable ? (
-                          <Button variant="secondary" onClick={() => void simulationQuery.refetch()}>Réessayer</Button>
+                          <Button variant="secondary" onClick={() => void simulationQuery.refetch()}>{t('public.reessayer')}</Button>
                         ) : null}
                       </div>
                     ) : (
                       <dl className="mt-3 space-y-2 text-[15px] text-slate-700 sm:text-base">
-                        <div className="flex justify-between gap-4"><dt>Location</dt><dd className="font-semibold text-slate-900">{paymentRentalAmountLabel}</dd></div>
-                        <div className="flex justify-between gap-4"><dt>Assurance</dt><dd className="font-semibold text-slate-900">{paymentInsuranceAmountLabel}</dd></div>
+                        <div className="flex justify-between gap-4"><dt>{t('public.location')}</dt><dd className="font-semibold text-slate-900">{t(paymentRentalAmountLabel)}</dd></div>
+                        <div className="flex justify-between gap-4"><dt>{t('public.assurance')}</dt><dd className="font-semibold text-slate-900">{t(paymentInsuranceAmountLabel)}</dd></div>
                         <div className="flex items-baseline justify-between gap-4 rounded-xl bg-violet-50 px-4 py-3">
-                          <dt className="font-semibold text-slate-900">Total à payer</dt>
-                          <dd className="text-2xl font-bold tracking-tight text-[#7C3AED] sm:text-3xl">{paymentTotalAmountLabel}</dd>
+                          <dt className="font-semibold text-slate-900">{t('public.total_a_payer')}</dt>
+                          <dd className="text-2xl font-bold tracking-tight text-[#7C3AED] sm:text-3xl">{t(paymentTotalAmountLabel)}</dd>
                         </div>
                         {!hasReservationIdInQuery ? (
-                          <div className="text-xs text-slate-500">TVA de 21 % comprise pour la location et l'assurance.</div>
+                          <div className="text-xs text-slate-500">{t('public.tva_de_21_comprise_pour_la_location_et_l_assurance')}</div>
                         ) : null}
                         <div className="flex justify-between gap-4 text-sm text-slate-600">
-                          <dt>Caution (préautorisation séparée)</dt><dd className="font-medium">{cautionLabel}</dd>
+                          <dt>{t('public.caution_preautorisation_separee')}</dt><dd className="font-medium">{t(cautionLabel)}</dd>
                         </div>
                       </dl>
                     )}
-                    {!hasReservationIdInQuery && cautionLabel !== 'Non renseigné' ? (
+                    {!hasReservationIdInQuery && cautionLabel !== 'public.non_renseigne' ? (
                       <p className="mt-2 text-xs text-slate-500">
-                        Caution de {cautionLabel} préautorisée sur votre carte. Libérée après restitution et contrôle du véhicule, sous réserve des sommes dues.
+                        {t('public.caution_de_amount_preautorisee_sur_votre_carte_liberee_apres_restitution_et', { amount: cautionLabel })}
                       </p>
                     ) : null}
                   </section>
 
                   {isAuthenticated ? (
                     <section>
-                      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Vérifications avant paiement</p>
+                      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">{t('public.verifications_avant_paiement')}</p>
                       <dl className="mt-3 space-y-2 text-[15px] text-slate-700 sm:text-base">
                         {[
-                          { label: 'Compte client', check: paymentChecksQuery.data?.account },
-                          { label: "Carte d'identité", check: paymentChecksQuery.data?.identity },
-                          { label: 'Permis de conduire', check: paymentChecksQuery.data?.license },
-                          { label: 'Compatibilité permis/véhicule', check: paymentChecksQuery.data?.compatibility },
-                          { label: 'Disponibilité du véhicule', check: paymentChecksQuery.data?.availability },
+                          { label: 'public.compte_client', check: paymentChecksQuery.data?.account },
+                          { label: 'public.carte_d_identite', check: paymentChecksQuery.data?.identity },
+                          { label: 'public.permis_de_conduire', check: paymentChecksQuery.data?.license },
+                          { label: 'public.compatibilite_permis_vehicule', check: paymentChecksQuery.data?.compatibility },
+                          { label: 'public.disponibilite_du_vehicule', check: paymentChecksQuery.data?.availability },
                         ].map(({ label, check }) => (
                           <div key={label} className="flex justify-between gap-4">
-                            <dt>{label}</dt>
+                            <dt>{t(label)}</dt>
                             <dd className={`max-w-[65%] text-right font-semibold ${!paymentChecksQuery.isError && check?.valid ? 'text-emerald-600' : check?.state === 'pending' && !paymentChecksQuery.isError ? 'text-amber-700' : 'text-red-600'}`}>
-                              {paymentChecksQuery.isPending ? 'Vérification...'
-                                : paymentChecksQuery.isError || !check ? 'Vérification indisponible'
-                                  : check.state === 'pending' ? check.message : `${check.valid ? '✓' : '✗'} ${check.message}`}
+                              {paymentChecksQuery.isPending ? t('public.verification')
+                                : paymentChecksQuery.isError || !check ? t('public.verification_indisponible')
+                                  : check.state === 'pending' ? clientDisplay(t, check.message) : `${check.valid ? '✓' : '✗'} ${check.message === 'Vérifié' ? t('public.verifie') : clientDisplay(t, check.message)}`}
                             </dd>
                           </div>
                         ))}
                       </dl>
                       {paymentChecksQuery.isError ? (
-                        <Button variant="secondary" onClick={() => void paymentChecksQuery.refetch()}>Réessayer</Button>
+                        <Button variant="secondary" onClick={() => void paymentChecksQuery.refetch()}>{t('public.reessayer')}</Button>
                       ) : null}
                     </section>
                   ) : null}
@@ -1924,42 +1929,42 @@ export default function VehicleDetailPage() {
                   ) : null}
 
                   <section className="space-y-4">
-                    {isAuthenticated && paymentOpened ? <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Données de paiement</p> : null}
+                    {isAuthenticated && paymentOpened ? <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">{t('public.donnees_de_paiement')}</p> : null}
                     {isAuthenticated ? (
                       <div className="space-y-4">
                         {profileQuery.isLoading || profileProgressQuery.isLoading ? (
                           <div className="flex items-center gap-3 text-sm text-slate-600">
-                            <LoadingSpinner size="sm" aria-label="Vérification du profil" />
-                            Vérification de votre profil avant paiement...
+                            <LoadingSpinner size="sm" aria-label={t('public.verification_du_profil')} />
+                            {t('public.verification_de_votre_profil_avant_paiement')}
                           </div>
                         ) : profileQuery.isError || profileProgressQuery.isError ? (
                           <Alert
                             variant="danger"
-                            title="Vérification du profil impossible"
-                            message="Impossible de vérifier votre profil pour l’instant. Merci de réessayer plus tard."
+                            title={t('public.verification_du_profil_impossible')}
+                            message={t('public.impossible_de_verifier_votre_profil_pour_linstant_merci_de_reessayer_plus')}
                           />
                         ) : paymentChecksQuery.isPending ? (
-                          <div className="text-sm text-slate-600">Vérifications avant paiement en cours...</div>
+                          <div className="text-sm text-slate-600">{t('public.verifications_avant_paiement_en_cours')}</div>
                         ) : paymentChecksQuery.isError || !paymentChecksQuery.data ? (
-                          <div className="text-sm text-red-600">Vérification indisponible. Réessayez avant de payer.</div>
+                          <div className="text-sm text-red-600">{t('public.verification_indisponible_reessayez_avant_de_payer')}</div>
                         ) : paymentErrors.length > 0 || !canProceedToPayment ? (
                           <>
                             {paymentErrors.length > 0 ? <Alert
                               variant="danger"
-                              title="Paiement impossible pour le moment"
+                              title={t('public.paiement_impossible_pour_le_moment')}
                               message={
                                 <ul className="list-disc space-y-1 pl-5">
-                                  {paymentErrors.map((error) => (<li key={error}>{error}</li>))}
+                                  {paymentErrors.map((error) => (<li key={error}>{clientDisplay(t, t(error))}</li>))}
                                 </ul>
                               }
                             /> : null}
                             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                              <Button variant="secondary" onClick={() => setCurrentStep(2)}>Retour</Button>
+                              <Button variant="secondary" onClick={() => setCurrentStep(2)}>{t('public.retour')}</Button>
                               {licenseVehicleCompatibility === 'incompatible' ? (
-                                <Button variant="secondary" onClick={() => navigate('/vehicles')}>Choisir un autre véhicule</Button>
+                                <Button variant="secondary" onClick={() => navigate('/vehicles')}>{t('public.choisir_un_autre_vehicule')}</Button>
                               ) : null}
                               <Button variant="secondary" onClick={() => navigate('/client/profile')}>
-                                Compléter mon profil
+                                {t('public.completer_mon_profil')}
                               </Button>
                             </div>
                           </>
@@ -1968,36 +1973,36 @@ export default function VehicleDetailPage() {
                             {!paymentOpened ? (
                               <div className="space-y-2">
                                 <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                                  <Button variant="secondary" onClick={() => setCurrentStep(2)}>Retour</Button>
+                                  <Button variant="secondary" onClick={() => setCurrentStep(2)}>{t('public.retour')}</Button>
                                   <Button
                                     variant="violet"
                                     className={!rentalTermsAccepted ? 'bg-slate-200! text-slate-600! disabled:opacity-100!' : undefined}
                                     disabled={!rentalTermsAccepted || !hasSimulationSummary || shouldShowSimulationError}
                                     onClick={() => setOpenedPaymentKey(rentalTermsKey)}
                                   >
-                                    Continuer vers le paiement
+                                    {t('public.continuer_vers_le_paiement')}
                                   </Button>
                                 </div>
-                                {!rentalTermsAccepted ? <p className="text-right text-sm text-slate-500">Acceptez les conditions pour continuer.</p> : null}
+                                {!rentalTermsAccepted ? <p className="text-right text-sm text-slate-500">{t('public.acceptez_les_conditions_pour_continuer')}</p> : null}
                               </div>
                             ) : !stripePublishableKey ? (
                               <Alert
                                 variant="danger"
-                                title="Configuration Stripe manquante"
-                                message="La variable VITE_STRIPE_PUBLISHABLE_KEY doit être définie pour activer le paiement Stripe Test."
+                                title={t('public.configuration_stripe_manquante')}
+                                message={t('public.la_variable_vite_stripe_publishable_key_doit_etre_definie_pour_activer')}
                               />
                             ) : isPreparingPayment ? (
                               <Alert
                                 variant="info"
-                                title="Préparation du paiement"
-                                message="Création de la réservation, préautorisation de la caution et préparation du PaymentIntent en cours..."
+                                title={t('public.preparation_du_paiement')}
+                                message={t('public.creation_de_la_reservation_preautorisation_de_la_caution_et_preparation_du')}
                               />
                             ) : paymentWorkflowError ? (
                               <div className="space-y-3">
                               <Alert
                                 variant="danger"
-                                title={createReservationMutation.isError && !activeReservation ? 'Réservation impossible' : 'Paiement impossible'}
-                                message={paymentWorkflowError}
+                                title={createReservationMutation.isError && !activeReservation ? t('public.reservation_impossible') : t('public.paiement_impossible')}
+                                message={clientDisplay(t, t(paymentWorkflowError))}
                               />
                               <Button
                                 variant="secondary"
@@ -2006,23 +2011,23 @@ export default function VehicleDetailPage() {
                                   setPaymentWorkflowError(null)
                                 }}
                                 >
-                                  Réessayer
+                                  {t('public.reessayer')}
                                 </Button>
                               </div>
                             ) : shouldShowSimulationError ? (
-                              <Button variant="secondary" onClick={() => setCurrentStep(2)}>Retour</Button>
+                              <Button variant="secondary" onClick={() => setCurrentStep(2)}>{t('public.retour')}</Button>
                             ) : !activeReservation || !paymentClientSecret || !checkoutStripe ? (
                               <Alert
                                 variant="info"
-                                title="Préparation en cours"
-                                message="Le backend prépare votre paiement Stripe Test."
+                                title={t('public.preparation_en_cours')}
+                                message={t('public.le_backend_prepare_votre_paiement_stripe_test')}
                               />
                             ) : (
                               <>
                                 <Elements
                                   stripe={checkoutStripe}
                                   options={{
-                                    clientSecret: paymentClientSecret,
+                                    clientSecret: paymentClientSecret, locale: stripeLocale(),
                                     appearance: {
                                       theme: 'stripe',
                                       variables: {
@@ -2056,7 +2061,7 @@ export default function VehicleDetailPage() {
                     ) : (
                       <div className="space-y-4 pt-2 text-center">
                         <h3 className="text-2xl font-semibold tracking-tight text-[#1F2937] sm:text-3xl">
-                          Connectez-vous pour continuer
+                          {t('public.connectez_vous_pour_continuer')}
                         </h3>
 
                         <div className="flex flex-wrap items-center justify-center gap-3">
@@ -2073,7 +2078,7 @@ export default function VehicleDetailPage() {
                             }}
                             className="inline-flex"
                           >
-                            <Button variant="secondary" className="h-12 min-w-56">Se connecter</Button>
+                            <Button variant="secondary" className="h-12 min-w-56">{t('auth.login')}</Button>
                           </Link>
                           <Link
                             to="/register"
@@ -2092,7 +2097,7 @@ export default function VehicleDetailPage() {
                               variant="secondary"
                               className="h-12 min-w-56"
                             >
-                              Créer un compte
+                              {t('auth.register')}
                             </Button>
                           </Link>
                         </div>
@@ -2107,28 +2112,28 @@ export default function VehicleDetailPage() {
             <div className="w-full shrink-0">
               <Card
                 className="mx-auto mt-2 max-w-[600px]"
-                header={confirmationReservation?.status === 'CONFIRMEE' ? undefined : <h2 className="text-lg font-semibold text-[#1F2937]">Étape 4 · Confirmation</h2>}
+                header={confirmationReservation?.status === 'CONFIRMEE' ? undefined : <h2 className="text-lg font-semibold text-[#1F2937]">{t('client.etape_4_confirmation')}</h2>}
               >
                 {confirmationReservation?.status === 'CONFIRMEE' ? (
                   <div className="flex flex-col items-center py-4 text-center sm:py-6">
                     <span aria-hidden="true" className="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500 text-white shadow-[0_8px_24px_rgba(16,185,129,0.3)]">
                       <Check className="h-11 w-11" strokeWidth={3.5} />
                     </span>
-                    <h2 className="mt-6 text-2xl font-bold tracking-tight text-[#1F2937] sm:text-3xl">Réservation confirmée !</h2>
+                    <h2 className="mt-6 text-2xl font-bold tracking-tight text-[#1F2937] sm:text-3xl">{t('public.reservation_confirmee')}</h2>
                     <p className="mt-3 text-base text-slate-700">
-                      Votre paiement de {formatCurrencyFr(confirmationReservation.rental_amount) ?? 'montant non renseigné'} a été accepté.
+                      {t('public.votre_paiement_de_amount_a_ete_accepte', { amount: formatCurrencyFr(confirmationReservation.rental_amount) ?? t('public.montant_non_renseigne') })}
                     </p>
-                    <p className="mt-2 text-sm font-medium text-slate-700">Référence : {confirmationReservation.reference}</p>
+                    <p className="mt-2 text-sm font-medium text-slate-700">{t('public.reference_ref', { ref: confirmationReservation.reference })}</p>
                     <p className="mt-6 max-w-md text-sm leading-6 text-slate-600">
-                      La caution restera en attente jusqu'au contrôle du véhicule après sa restitution.
+                      {t('public.la_caution_restera_en_attente_jusqu_au_controle_du_vehicule_apres')}
                     </p>
 
                     <div className="mt-7 flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
                       <Button className="bg-[#7C3AED] hover:bg-[#6D28D9] focus-visible:ring-[#7C3AED]" onClick={() => navigate(`/client/reservations?highlight=${confirmationReservation.id}`)}>
-                        Voir ma réservation
+                        {t('public.voir_ma_reservation')}
                       </Button>
                       <Button variant="secondary" onClick={() => navigate('/')}>
-                        Retour à l'accueil
+                        {t('public.retour_a_l_accueil')}
                       </Button>
                     </div>
                   </div>
@@ -2136,19 +2141,19 @@ export default function VehicleDetailPage() {
                   <div className="space-y-5">
                     <Alert
                       variant="danger"
-                      title="Paiement échoué"
-                      message="Paiement échoué. Veuillez recommencer votre réservation."
+                      title={t('public.paiement_echoue')}
+                      message={t('public.paiement_echoue_veuillez_recommencer_votre_reservation')}
                     />
                     <div className="flex justify-center">
-                      <Button onClick={() => window.location.assign(`/vehicles/${id}`)}>Recommencer ma réservation</Button>
+                      <Button onClick={() => window.location.assign(`/vehicles/${id}`)}>{t('public.recommencer_ma_reservation')}</Button>
                     </div>
                   </div>
                 ) : currentStep >= 4 && hasConfirmationTimedOut ? (
                   <div className="space-y-5">
                     <Alert
                       variant="warning"
-                      title="La confirmation prend plus de temps que prévu."
-                      message="Votre paiement a bien été transmis. Vérifiez à nouveau le statut de la réservation sans relancer le paiement."
+                      title={t('public.la_confirmation_prend_plus_de_temps_que_prevu')}
+                      message={t('public.votre_paiement_a_bien_ete_transmis_verifiez_a_nouveau_le_statut')}
                     />
 
                     <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
@@ -2159,29 +2164,29 @@ export default function VehicleDetailPage() {
                           void handleRefreshReservationStatus()
                         }}
                       >
-                        {isRefreshingReservationStatus ? 'Actualisation...' : 'Actualiser le statut'}
+                        {isRefreshingReservationStatus ? t('public.actualisation') : t('public.actualiser_le_statut')}
                       </Button>
                       <Button variant="secondary" onClick={() => navigate('/client/reservations')}>
-                        Retour à mes réservations
+                        {t('public.retour_a_mes_reservations')}
                       </Button>
                     </div>
                   </div>
                 ) : currentStep >= 4 && isConfirmingPayment ? (
                   <div className="flex min-h-[32vh] flex-col items-center justify-center px-4 py-10 text-center sm:min-h-[36vh] sm:px-6 sm:py-12">
-                    <LoadingSpinner size="lg" aria-label="Confirmation du paiement en cours" />
-                    <h3 className="mt-5 text-2xl font-semibold tracking-tight text-[#1F2937] sm:text-3xl">Veuillez patienter</h3>
+                    <LoadingSpinner size="lg" aria-label={t('public.confirmation_du_paiement_en_cours')} />
+                    <h3 className="mt-5 text-2xl font-semibold tracking-tight text-[#1F2937] sm:text-3xl">{t('public.veuillez_patienter')}</h3>
                     <p className="mt-3 max-w-xl text-sm leading-6 text-slate-600 sm:text-base">
                       {confirmedPaymentIntentStatus === 'processing'
-                        ? 'Votre paiement est en cours de traitement par Stripe. La confirmation de votre réservation arrivera dès validation du backend.'
-                        : 'Nous procédons à la confirmation de votre paiement.'}
+                        ? t('public.votre_paiement_est_en_cours_de_traitement_par_stripe_la_confirmation')
+                        : t('public.nous_procedons_a_la_confirmation_de_votre_paiement')}
                     </p>
-                    <p className="mt-3 text-sm font-semibold text-slate-500 sm:text-base">Ne fermez pas cette page.</p>
+                    <p className="mt-3 text-sm font-semibold text-slate-500 sm:text-base">{t('public.ne_fermez_pas_cette_page')}</p>
                   </div>
                 ) : (
                   <div className="flex min-h-[32vh] flex-col items-center justify-center px-4 py-10 text-center sm:min-h-[36vh] sm:px-6 sm:py-12">
-                    <h3 className="text-2xl font-semibold tracking-tight text-[#1F2937] sm:text-3xl">Confirmation</h3>
+                    <h3 className="text-2xl font-semibold tracking-tight text-[#1F2937] sm:text-3xl">{t('public.confirmation')}</h3>
                     <p className="mt-3 max-w-xl text-sm leading-6 text-slate-600 sm:text-base">
-                      La confirmation finale de votre réservation s&apos;affichera ici après validation du paiement.
+                      {t('public.la_confirmation_finale_de_votre_reservation_s_apos_affichera_ici_apres')}
                     </p>
                   </div>
                 )}

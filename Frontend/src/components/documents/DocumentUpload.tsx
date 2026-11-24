@@ -1,3 +1,5 @@
+import { clientDisplay } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -52,11 +54,12 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function DocumentUpload({ documentType, existingDocument, onSuccess }: DocumentUploadProps) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [isOpen, setIsOpen] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null)
-  const title = toDocumentTitle(documentType)
+  const title = clientDisplay(t, toDocumentTitle(documentType))
 
   const {
     register,
@@ -138,25 +141,25 @@ export default function DocumentUpload({ documentType, existingDocument, onSucce
             </h2>
 
             {serverError ? (
-              <Alert className="mb-4" variant="danger" title="Envoi impossible" message={serverError} />
+              <Alert className="mb-4" variant="danger" title={clientDisplay(t, 'Envoi impossible')} message={clientDisplay(t, serverError)} />
             ) : null}
 
             <form className="space-y-4" onSubmit={handleSubmit(submit)} noValidate>
               <Input
-                label={toDocumentNumberLabel(documentType)}
-                placeholder={toDocumentNumberLabel(documentType)}
-                error={errors.document_number?.message}
+                label={clientDisplay(t, toDocumentNumberLabel(documentType))}
+                placeholder={clientDisplay(t, toDocumentNumberLabel(documentType))}
+                error={errors.document_number?.message && clientDisplay(t, errors.document_number?.message)}
                 {...register('document_number')}
               />
               <Input
-                label="Date d’expiration"
+                label={t('client.date_dexpiration')}
                 type="date"
-                error={errors.expiration_date?.message}
+                error={errors.expiration_date?.message && clientDisplay(t, errors.expiration_date?.message)}
                 {...register('expiration_date')}
               />
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-[#1F2937]" htmlFor={`${documentType}-replacement-file`}>
-                  Fichier du document
+                  {t('client.fichier_du_document')}
                 </label>
                 <input
                   id={`${documentType}-replacement-file`}
@@ -172,7 +175,7 @@ export default function DocumentUpload({ documentType, existingDocument, onSucce
                 {selectedFileName ? (
                   <p className="text-sm text-slate-500">Fichier sélectionné : {selectedFileName}</p>
                 ) : null}
-                {errors.file?.message ? <p className="text-sm text-red-600">{errors.file.message}</p> : null}
+                {errors.file?.message ? <p className="text-sm text-red-600">{clientDisplay(t, errors.file.message)}</p> : null}
               </div>
               <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
                 <Button
@@ -181,12 +184,12 @@ export default function DocumentUpload({ documentType, existingDocument, onSucce
                   disabled={createMutation.isPending}
                   onClick={closeForm}
                 >
-                  Annuler
+                  {t('client.annuler')}
                 </Button>
                 <Button type="submit" disabled={createMutation.isPending}>
                   {createMutation.isPending ? (
                     <>
-                      <LoadingSpinner size="sm" aria-label="Envoi du document" />
+                      <LoadingSpinner size="sm" aria-label={t('client.envoi_du_document')} />
                       Envoi en cours...
                     </>
                   ) : (

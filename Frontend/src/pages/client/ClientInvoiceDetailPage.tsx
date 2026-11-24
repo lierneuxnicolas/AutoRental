@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { clientDisplay, clientLocale } from '../../i18n/clientDisplay'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import axios from 'axios'
@@ -17,7 +19,7 @@ function formatDate(value: string): string {
     return value
   }
 
-  return parsed.toLocaleDateString('fr-FR', {
+  return parsed.toLocaleDateString(clientLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -31,7 +33,7 @@ function formatDateTime(value: string): string {
     return value
   }
 
-  return parsed.toLocaleString('fr-FR', {
+  return parsed.toLocaleString(clientLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
@@ -45,7 +47,7 @@ function formatMoney(amount: string, currency: string): string {
   }
 
   try {
-    return new Intl.NumberFormat('fr-FR', {
+    return new Intl.NumberFormat(clientLocale(), {
       style: 'currency',
       currency,
       minimumFractionDigits: 2,
@@ -99,6 +101,7 @@ function buildPdfFilename(invoice: InvoiceDetail): string {
 }
 
 export default function ClientInvoiceDetailPage() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const invoiceId = Number(id)
   const isValidInvoiceId = Number.isInteger(invoiceId) && invoiceId > 0
@@ -142,9 +145,9 @@ export default function ClientInvoiceDetailPage() {
   if (!isValidInvoiceId) {
     return (
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Facture invalide" message="L'identifiant de facture est invalide." className="mb-6" />
+        <Alert variant="danger" title={t('client.facture_invalide')} message={t('client.l_identifiant_de_facture_est_invalide')} className="mb-6" />
         <Link to="/client/invoices">
-          <Button variant="secondary">Retour a mes factures</Button>
+          <Button variant="secondary">{t('client.retour_a_mes_factures')}</Button>
         </Link>
       </section>
     )
@@ -153,7 +156,7 @@ export default function ClientInvoiceDetailPage() {
   if (invoiceQuery.isLoading) {
     return (
       <section className="mx-auto flex min-h-[60vh] max-w-6xl items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
-        <LoadingSpinner size="lg" aria-label="Chargement de la facture" />
+        <LoadingSpinner size="lg" aria-label={t('client.chargement_de_la_facture')} />
       </section>
     )
   }
@@ -163,16 +166,16 @@ export default function ClientInvoiceDetailPage() {
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message={toErrorMessage(invoiceQuery.error)}
+          title={t('client.chargement_impossible')}
+          message={clientDisplay(t, toErrorMessage(invoiceQuery.error))}
           className="mb-6"
         />
         <div className="flex flex-wrap gap-2">
           <Link to="/client/invoices">
-            <Button variant="secondary">Retour a mes factures</Button>
+            <Button variant="secondary">{t('client.retour_a_mes_factures')}</Button>
           </Link>
           <Button variant="secondary" onClick={() => void invoiceQuery.refetch()}>
-            Reessayer
+            {t('client.reessayer_alt')}
           </Button>
         </div>
       </section>
@@ -186,19 +189,19 @@ export default function ClientInvoiceDetailPage() {
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Mes factures</p>
-          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Detail de la facture</h1>
+          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">{t('client.mes_factures')}</p>
+          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">{t('client.detail_de_la_facture')}</h1>
         </div>
         <Link to="/client/invoices">
-          <Button variant="secondary">Retour a mes factures</Button>
+          <Button variant="secondary">{t('client.retour_a_mes_factures')}</Button>
         </Link>
       </div>
 
       {downloadMutation.isError ? (
         <Alert
           variant="danger"
-          title="Telechargement impossible"
-          message={toErrorMessage(downloadMutation.error)}
+          title={t('client.telechargement_impossible_alt')}
+          message={clientDisplay(t, toErrorMessage(downloadMutation.error))}
           className="mb-6"
         />
       ) : null}
@@ -208,20 +211,20 @@ export default function ClientInvoiceDetailPage() {
         header={
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Facture</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{t('client.facture')}</p>
               <p className="text-base font-semibold text-[#0F172A]">{invoice.number}</p>
             </div>
-            <StatusBadge variant={status.variant} label={status.label} />
+            <StatusBadge variant={status.variant} label={clientDisplay(t, status.label)} />
           </div>
         }
       >
         <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 lg:grid-cols-3">
           <div>
-            <p className="font-medium text-[#1F2937]">Numero facture</p>
+            <p className="font-medium text-[#1F2937]">{t('client.numero_facture')}</p>
             <p className="mt-1">{invoice.number}</p>
           </div>
           <div>
-            <p className="font-medium text-[#1F2937]">Reservation</p>
+            <p className="font-medium text-[#1F2937]">{t('client.reservation')}</p>
             <p className="mt-1">#{invoice.reservation_id}</p>
           </div>
           <div>
@@ -229,23 +232,23 @@ export default function ClientInvoiceDetailPage() {
             <p className="mt-1">{formatDate(invoice.issue_date)}</p>
           </div>
           <div>
-            <p className="font-medium text-[#1F2937]">Client</p>
+            <p className="font-medium text-[#1F2937]">{t('client.client')}</p>
             <p className="mt-1">#{invoice.client_id}</p>
           </div>
           <div>
-            <p className="font-medium text-[#1F2937]">Nom de facturation</p>
+            <p className="font-medium text-[#1F2937]">{t('client.nom_de_facturation')}</p>
             <p className="mt-1">{invoice.billing_name}</p>
           </div>
           <div>
-            <p className="font-medium text-[#1F2937]">Adresse de facturation</p>
+            <p className="font-medium text-[#1F2937]">{t('client.adresse_de_facturation')}</p>
             <p className="mt-1 whitespace-pre-line">{invoice.billing_address}</p>
           </div>
           <div>
-            <p className="font-medium text-[#1F2937]">Statut</p>
-            <p className="mt-1">{status.label}</p>
+            <p className="font-medium text-[#1F2937]">{t('client.statut')}</p>
+            <p className="mt-1">{clientDisplay(t, status.label)}</p>
           </div>
           <div>
-            <p className="font-medium text-[#1F2937]">Creee le</p>
+            <p className="font-medium text-[#1F2937]">{t('client.creee_le')}</p>
             <p className="mt-1">{formatDateTime(invoice.created_at)}</p>
           </div>
         </div>
@@ -254,29 +257,29 @@ export default function ClientInvoiceDetailPage() {
           <Button onClick={() => void handleDownload()} disabled={downloadMutation.isPending}>
             {downloadMutation.isPending ? (
               <span className="flex items-center gap-2">
-                <LoadingSpinner size="sm" aria-label="Telechargement du PDF" />
-                Telechargement...
+                <LoadingSpinner size="sm" aria-label={t('client.telechargement_du_pdf')} />
+                {t('client.telechargement_alt')}
               </span>
             ) : (
-              'Telecharger la facture PDF'
+              t('client.telecharger_la_facture_pdf')
             )}
           </Button>
         </div>
       </Card>
 
-      <Card className="mb-6" header={<h2 className="text-lg font-semibold text-[#1F2937]">Lignes de facture</h2>}>
+      <Card className="mb-6" header={<h2 className="text-lg font-semibold text-[#1F2937]">{t('client.lignes_de_facture')}</h2>}>
         {invoice.lines.length === 0 ? (
-          <EmptyState title="Aucune ligne" description="Aucune ligne de facture n'a ete retournee par l'API." />
+          <EmptyState title={t('client.aucune_ligne')} description={t('client.aucune_ligne_de_facture_n_a_ete_retournee_par_l_api')} />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-[#E5E7EB] text-xs uppercase tracking-wide text-slate-500">
-                  <th className="px-2 py-2 font-semibold">Description</th>
+                  <th className="px-2 py-2 font-semibold">{t('client.description')}</th>
                   <th className="px-2 py-2 font-semibold">Type</th>
-                  <th className="px-2 py-2 font-semibold">Quantite</th>
-                  <th className="px-2 py-2 font-semibold">Prix unitaire</th>
-                  <th className="px-2 py-2 font-semibold">Total</th>
+                  <th className="px-2 py-2 font-semibold">{t('client.quantite')}</th>
+                  <th className="px-2 py-2 font-semibold">{t('client.prix_unitaire')}</th>
+                  <th className="px-2 py-2 font-semibold">{t('public.total')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -295,18 +298,18 @@ export default function ClientInvoiceDetailPage() {
         )}
       </Card>
 
-      <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Montants</h2>}>
+      <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t('client.montants')}</h2>}>
         <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-3">
           <div>
-            <p className="font-medium text-[#1F2937]">Sous-total</p>
+            <p className="font-medium text-[#1F2937]">{t('client.sous_total')}</p>
             <p className="mt-1">{formatMoney(invoice.subtotal, invoice.currency)}</p>
           </div>
           <div>
-            <p className="font-medium text-[#1F2937]">Taxes</p>
+            <p className="font-medium text-[#1F2937]">{t('client.taxes')}</p>
             <p className="mt-1">{formatMoney(invoice.tax_amount, invoice.currency)}</p>
           </div>
           <div>
-            <p className="font-medium text-[#1F2937]">Total</p>
+            <p className="font-medium text-[#1F2937]">{t('public.total')}</p>
             <p className="mt-1 font-semibold text-[#0F172A]">{formatMoney(invoice.total_amount, invoice.currency)}</p>
           </div>
         </div>

@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -61,7 +64,7 @@ function formatDateTime(value: unknown): string | null {
   if (Number.isNaN(date.getTime())) {
     return null
   }
-  return new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(date)
+  return new Intl.DateTimeFormat(clientLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(date)
 }
 
 
@@ -160,6 +163,7 @@ function extractCompleteErrorMessage(error: unknown): string {
 }
 
 export default function MechanicInterventionDetailPage() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
@@ -246,7 +250,7 @@ export default function MechanicInterventionDetailPage() {
   if (!interventionId) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Intervention invalide" message="L'identifiant de l'intervention est invalide." />
+        <Alert variant="danger" title={t("professional.intervention_invalide")} message={t("professional.l_identifiant_de_l_intervention_est_invalide")} />
       </div>
     )
   }
@@ -254,7 +258,7 @@ export default function MechanicInterventionDetailPage() {
   if (interventionQuery.isLoading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
-        <LoadingSpinner size="lg" aria-label="Chargement de l'intervention" />
+        <LoadingSpinner size="lg" aria-label={t("professional.chargement_de_l_intervention")} />
       </div>
     )
   }
@@ -264,8 +268,8 @@ export default function MechanicInterventionDetailPage() {
       <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-8 sm:px-6 lg:px-8">
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message={interventionQuery.error instanceof Error ? interventionQuery.error.message : 'Une erreur est survenue.'}
+          title={t("client.chargement_impossible")}
+          message={interventionQuery.error instanceof Error ? interventionQuery.error.message : t("professional.une_erreur_est_survenue")}
         />
         <div className="flex flex-col gap-3 sm:flex-row">
           <button
@@ -273,14 +277,12 @@ export default function MechanicInterventionDetailPage() {
             onClick={() => void interventionQuery.refetch()}
             className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB]"
           >
-            Réessayer
-          </button>
+            {t("client.reessayer_alt")}</button>
           <Link
             to="/mechanic/interventions"
             className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB]"
           >
-            Retour à mes interventions
-          </Link>
+            {t("professional.retour_a_mes_interventions")}</Link>
         </div>
       </div>
     )
@@ -307,7 +309,7 @@ export default function MechanicInterventionDetailPage() {
     return (
       <div className="mx-auto max-w-6xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
         <div className="flex justify-end">
-          <Link to="/mechanic/interventions"><Button variant="secondary">Retour à mes interventions</Button></Link>
+          <Link to="/mechanic/interventions"><Button variant="secondary">{t("professional.retour_a_mes_interventions")}</Button></Link>
         </div>
         <PersonnelInterventionReport intervention={intervention} heading="h1" />
       </div>
@@ -336,11 +338,11 @@ export default function MechanicInterventionDetailPage() {
           </div>
           <p className="mt-1 text-sm font-medium text-slate-700">{intervention.vehicle.registration_number}</p>
           <p className="text-sm text-slate-600">
-            {intervention.vehicle.parking_name ?? 'Parking non renseigné'} / {intervention.vehicle.parking_space_number ?? '—'}
+            {intervention.vehicle.parking_name ?? t("professional.parking_non_renseigne")} / {intervention.vehicle.parking_space_number ?? '—'}
           </p>
           {intervention.planned_start_at && intervention.planned_end_at ? (
             <p className="mt-2 text-sm font-medium text-slate-700">
-              Prévue : {formatDateTime(intervention.planned_start_at)} → {formatDateTime(intervention.planned_end_at)}
+              {t("professional.prevue")}{formatDateTime(intervention.planned_start_at)} → {formatDateTime(intervention.planned_end_at)}
             </p>
           ) : null}
         </div>
@@ -354,24 +356,24 @@ export default function MechanicInterventionDetailPage() {
                 void statusMutation.mutateAsync(intervention.status === 'EN_COURS' ? 'pause' : 'resume')
               }}
             >
-              {intervention.status === 'EN_COURS' ? 'Mettre en pause' : 'Reprendre l’intervention'}
+              {intervention.status === 'EN_COURS' ? t("professional.mettre_en_pause") : t("professional.reprendre_l_intervention")}
             </Button>
           ) : null}
-          <Link to="/mechanic/interventions"><Button variant="secondary">Retour à mes interventions</Button></Link>
+          <Link to="/mechanic/interventions"><Button variant="secondary">{t("professional.retour_a_mes_interventions")}</Button></Link>
         </div>
       </div>
 
       <Card className="border-slate-200">
         <div className="space-y-6">
-          <StatusBadge label={statusBadge.label} variant={statusBadge.variant} />
+          <StatusBadge label={professionalDisplay(t, statusBadge.label)} variant={statusBadge.variant} />
 
           <InterventionWorkflowProgress activeStep={activeStep} steps={stepItems} />
 
-          {checkInError ? <Alert variant="danger" title="Check-in impossible" message={checkInError} className="mt-5" /> : null}
-          {completeError ? <Alert variant="danger" title="Clôture impossible" message={completeError} className="mt-5" /> : null}
-          {activeStep !== 'checkout' && completeSuccessMessage ? <Alert variant="success" title="Succès" message={completeSuccessMessage} className="mt-5" /> : null}
-          {workError ? <Alert variant="danger" title="Enregistrement impossible" message={workError} className="mt-5" /> : null}
-          {statusActionError ? <Alert variant="danger" title="Mise à jour impossible" message={statusActionError} className="mt-5" /> : null}
+          {checkInError ? <Alert variant="danger" title={t("professional.check_in_impossible")} message={professionalDisplay(t, checkInError)} className="mt-5" /> : null}
+          {completeError ? <Alert variant="danger" title={t("professional.cloture_impossible")} message={professionalDisplay(t, completeError)} className="mt-5" /> : null}
+          {activeStep !== 'checkout' && completeSuccessMessage ? <Alert variant="success" title={t("client.succes")} message={professionalDisplay(t, completeSuccessMessage)} className="mt-5" /> : null}
+          {workError ? <Alert variant="danger" title={t("professional.enregistrement_impossible")} message={professionalDisplay(t, workError)} className="mt-5" /> : null}
+          {statusActionError ? <Alert variant="danger" title={t("professional.mise_a_jour_impossible")} message={professionalDisplay(t, statusActionError)} className="mt-5" /> : null}
 
           {activeStep === 'checkin' ? (
             <div>
@@ -414,8 +416,8 @@ export default function MechanicInterventionDetailPage() {
             intervention.status === 'EN_PAUSE' ? (
               <Alert
                 variant="warning"
-                title="Intervention en pause"
-                message="Reprenez l’intervention avant d’effectuer le check-out."
+                title={t("professional.intervention_en_pause")}
+                message={t("professional.reprenez_l_intervention_avant_d_effectuer_le_check_out")}
               />
             ) : (
               <div>

@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -41,7 +44,7 @@ function mapStatusToBadge(status: InterventionStatus): { label: string; variant:
 }
 
 function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(clientLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -86,6 +89,7 @@ function toGeneralError(payload: BackendValidationErrorPayload | undefined): str
 }
 
 export default function ManagerInterventionsPage() {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [assignFormOpenForId, setAssignFormOpenForId] = useState<number | null>(null)
   const [assignUserId, setAssignUserId] = useState('')
@@ -174,34 +178,34 @@ export default function ManagerInterventionsPage() {
 
   return (
     <section className="mx-auto max-w-7xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
-      <h1 className="text-3xl font-semibold text-[#0F172A]">Liste des interventions</h1>
+      <h1 className="text-3xl font-semibold text-[#0F172A]">{t("professional.liste_des_interventions")}</h1>
 
       {assignSuccessMessage ? (
-        <Alert variant="success" title="Intervention assignée" message={assignSuccessMessage} />
+        <Alert variant="success" title={t("professional.intervention_assignee")} message={professionalDisplay(t, assignSuccessMessage)} />
       ) : null}
 
       {assignError ? (
-        <Alert variant="danger" title="Assignation impossible" message={assignError} />
+        <Alert variant="danger" title={t("professional.assignation_impossible")} message={professionalDisplay(t, assignError)} />
       ) : null}
 
       {interventionsQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
-          <LoadingSpinner size="lg" aria-label="Chargement des interventions" />
+          <LoadingSpinner size="lg" aria-label={t("professional.chargement_des_interventions")} />
         </div>
       ) : null}
 
       {interventionsQuery.isError ? (
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message="Les interventions n'ont pas pu être récupérées. Veuillez réessayer."
+          title={t("client.chargement_impossible")}
+          message={t("professional.les_interventions_n_ont_pas_pu_etre_recuperees_veuillez_reessayer")}
         />
       ) : null}
 
       {!interventionsQuery.isLoading && !interventionsQuery.isError && interventions.length === 0 ? (
         <EmptyState
-          title="Aucune intervention"
-          description="Aucune intervention n’est actuellement enregistrée."
+          title={t("professional.aucune_intervention")}
+          description={t("professional.aucune_intervention_n_est_actuellement_enregistree")}
         />
       ) : null}
 
@@ -218,11 +222,11 @@ export default function ManagerInterventionsPage() {
                   header={
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Référence</p>
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{t("client.reference_alt")}</p>
                         <p className="text-base font-semibold text-[#0F172A]">{intervention.reference}</p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <StatusBadge variant={status.variant} label={status.label} />
+                        <StatusBadge variant={status.variant} label={professionalDisplay(t, status.label)} />
                         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
                           {intervention.intervention_type}
                         </span>
@@ -232,30 +236,30 @@ export default function ManagerInterventionsPage() {
                 >
                   <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 xl:grid-cols-3">
                     <div>
-                      <p className="font-medium text-[#1F2937]">Description</p>
+                      <p className="font-medium text-[#1F2937]">{t("client.description")}</p>
                       <p className="mt-1 whitespace-pre-line">{intervention.description || 'Aucune description fournie.'}</p>
                     </div>
                     <div>
-                      <p className="font-medium text-[#1F2937]">Véhicule</p>
+                      <p className="font-medium text-[#1F2937]">{t("client.vehicule_alt")}</p>
                       <p className="mt-1">
                         {intervention.vehicle.brand} {intervention.vehicle.model_name}
                       </p>
                       <p className="text-slate-500">{intervention.vehicle.registration_number}</p>
                     </div>
                     <div>
-                      <p className="font-medium text-[#1F2937]">Réservation</p>
-                      <p className="mt-1">{intervention.reservation ? intervention.reservation.reference : 'Aucune réservation liée'}</p>
+                      <p className="font-medium text-[#1F2937]">{t("client.reservation")}</p>
+                      <p className="mt-1">{intervention.reservation ? intervention.reservation.reference : t("professional.aucune_reservation_liee")}</p>
                     </div>
                     <div>
-                      <p className="font-medium text-[#1F2937]">Personne affectée</p>
+                      <p className="font-medium text-[#1F2937]">{t("professional.personne_affectee")}</p>
                       <p className="mt-1">{assignedTo ?? 'Non affectée'}</p>
                     </div>
                     <div>
-                      <p className="font-medium text-[#1F2937]">Créé par</p>
+                      <p className="font-medium text-[#1F2937]">{t("professional.cree_par")}</p>
                       <p className="mt-1">{createdBy ?? '—'}</p>
                     </div>
                     <div>
-                      <p className="font-medium text-[#1F2937]">Créé le</p>
+                      <p className="font-medium text-[#1F2937]">{t("professional.cree_le")}</p>
                       <p className="mt-1">{formatDateTime(intervention.created_at)}</p>
                     </div>
                   </div>
@@ -276,18 +280,16 @@ export default function ManagerInterventionsPage() {
                                 required
                                 value={assignUserId}
                                 onChange={(event) => setAssignUserId(event.target.value)}
-                                placeholder="ID utilisateur autorisé"
+                                placeholder={t("professional.id_utilisateur_autorise")}
                               />
                               <p className="mt-2 text-sm text-slate-500">
-                                Saisissez l’ID d’un utilisateur autorisé. Aucune liste d’utilisateurs n’est disponible dans cette vue.
-                              </p>
+                                {t("professional.saisissez_l_id_d_un_utilisateur_autorise_aucune_liste_d_utilisateurs_n")}</p>
                             </div>
                             <div className="flex gap-2">
                               <Button type="button" variant="secondary" size="sm" onClick={() => setAssignFormOpenForId(null)}>
-                                Annuler
-                              </Button>
+                                {t("client.annuler")}</Button>
                               <Button type="submit" variant="primary" size="sm" disabled={assignMutation.isPending}>
-                                {assignMutation.isPending ? 'Assignation...' : 'Confirmer'}
+                                {assignMutation.isPending ? t("professional.assignation") : t("professional.confirmer")}
                               </Button>
                             </div>
                           </form>
@@ -297,8 +299,7 @@ export default function ManagerInterventionsPage() {
                             setAssignUserId('')
                             setAssignError(null)
                           }}>
-                            Assigner
-                          </Button>
+                            {t("professional.assigner")}</Button>
                         )}
                       </>
                     ) : null}
@@ -310,8 +311,7 @@ export default function ManagerInterventionsPage() {
                         aria-controls={reportOpenForId === intervention.id ? 'intervention-report-' + intervention.id : undefined}
                         onClick={() => setReportOpenForId((current) => current === intervention.id ? null : intervention.id)}
                       >
-                        Voir le rapport
-                      </Button>
+                        {t("professional.voir_le_rapport")}</Button>
                     ) : null}
                   </div>
 
@@ -321,7 +321,7 @@ export default function ManagerInterventionsPage() {
                     {intervention.final_report ? (
                       <PersonnelInterventionReport intervention={intervention} heading="h2" />
                     ) : (
-                      <p className="text-sm text-slate-600">Aucun rapport final disponible.</p>
+                      <p className="text-sm text-slate-600">{t("professional.aucun_rapport_final_disponible")}</p>
                     )}
                   </div>
                 ) : null}

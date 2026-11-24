@@ -1,3 +1,5 @@
+import { clientDisplay, clientLocale, stripeLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AxiosError } from 'axios'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -64,7 +66,7 @@ function formatDateTimeLabel(value: string): string {
     return value
   }
 
-  return parsedValue.toLocaleString('fr-FR', {
+  return parsedValue.toLocaleString(clientLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
@@ -77,7 +79,7 @@ function formatCurrency(value: string | number): string {
     return `${value} EUR`
   }
 
-  return `${parsedValue.toFixed(2)} EUR`
+  return new Intl.NumberFormat(clientLocale(), { style: 'currency', currency: 'EUR' }).format(parsedValue)
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -111,12 +113,12 @@ function formatEuroAmount(value: string | number): string {
     return `${value} €`
   }
 
-  return `${new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(parsedValue)} €`
+  return `${new Intl.NumberFormat(clientLocale(), { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(parsedValue)} €`
 }
 
 function formatDurationLabel(value: string | number, billedDays?: number): string {
   if (typeof billedDays === 'number' && billedDays > 0) {
-    return `${billedDays} jour${billedDays > 1 ? 's' : ''}`
+    return new Intl.NumberFormat(clientLocale(), { style: 'unit', unit: 'day', unitDisplay: 'long' }).format(billedDays)
   }
 
   const parsedHours = toFiniteNumber(value)
@@ -326,6 +328,7 @@ interface ReservationStripePaymentFormProps {
 }
 
 function ReservationStripePaymentForm({ isSubmitting, onBack, onSubmit }: ReservationStripePaymentFormProps) {
+  const { t } = useTranslation()
   const stripe = useStripe()
   const elements = useElements()
   const [paymentError, setPaymentError] = useState<string | null>(null)
@@ -371,18 +374,16 @@ function ReservationStripePaymentForm({ isSubmitting, onBack, onSubmit }: Reserv
         />
       </div>
 
-      {paymentError ? <Alert variant="danger" title="Paiement refuse" message={paymentError} /> : null}
+      {paymentError ? <Alert variant="danger" title={t("client.paiement_refuse")} message={clientDisplay(t, paymentError)} /> : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         <Button variant="secondary" onClick={onBack} disabled={isSubmitting || isConfirming}>
-          Retour
-        </Button>
+          {t("public.retour")}</Button>
         <Button variant="danger" disabled={!stripe || isSubmitting || isConfirming} onClick={handleSubmit}>
           {isSubmitting || isConfirming ? (
             <span className="flex items-center justify-center gap-2">
-              <LoadingSpinner size="sm" aria-label="Paiement en cours" />
-              Paiement en cours...
-            </span>
+              <LoadingSpinner size="sm" aria-label={t("client.paiement_en_cours")} />
+              {t("public.paiement_en_cours")}</span>
           ) : (
             'Procéder au paiement'
           )}
@@ -393,6 +394,7 @@ function ReservationStripePaymentForm({ isSubmitting, onBack, onSubmit }: Reserv
 }
 
 export default function ReservationPage() {
+  const { t } = useTranslation()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const location = useLocation()
@@ -712,13 +714,12 @@ export default function ReservationPage() {
       <section className="py-8 sm:py-10" aria-labelledby="reservation-page-title">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
           <h1 id="reservation-page-title" className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
-            Reservation
-          </h1>
+            {t("client.reservation")}</h1>
           <div className="mt-6">
             <Alert
               variant="danger"
-              title="Parametres invalides"
-              message="Les parametres vehicleId, start, end, insurance, insurancePrice et estimatedTotal sont requis et doivent etre valides."
+              title={t("professional.parametres_invalides")}
+              message={t("professional.les_parametres_vehicleid_start_end_insurance_insuranceprice_et_estimatedtotal_sont_requis_et")}
             />
           </div>
         </div>
@@ -760,22 +761,20 @@ export default function ReservationPage() {
       <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
         <header className="max-w-3xl">
           <h1 id="reservation-page-title" className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
-            Reservation
-          </h1>
+            {t("client.reservation")}</h1>
           <p className="mt-3 text-base leading-7 text-slate-600 sm:text-lg">
-            Completez votre reservation en plusieurs étapes, sans quitter la page.
-          </p>
+            {t("professional.completez_votre_reservation_en_plusieurs_etapes_sans_quitter_la_page")}</p>
         </header>
 
         {isLoadingData ? (
           <div className="mt-8 flex justify-center">
-            <LoadingSpinner aria-label="Chargement des informations de reservation" size="lg" />
+            <LoadingSpinner aria-label={t("professional.chargement_des_informations_de_reservation")} size="lg" />
           </div>
         ) : null}
 
         {!isLoadingData && dataError ? (
           <div className="mt-6">
-            <Alert variant="danger" title="Impossible de preparer la reservation" message={toErrorMessage(dataError)} />
+            <Alert variant="danger" title={t("professional.impossible_de_preparer_la_reservation")} message={clientDisplay(t, toErrorMessage(dataError))} />
           </div>
         ) : null}
 
@@ -787,7 +786,7 @@ export default function ReservationPage() {
               }}
               className="scroll-mt-24"
             >
-              <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Étape 1 · Choix de l’assurance</h2>}>
+              <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t("professional.etape_1_choix_de_l_assurance")}</h2>}>
                 <div className="space-y-4">
                   <div className="grid gap-3 sm:grid-cols-2">
                     {insuranceOptions.map((option) => {
@@ -805,8 +804,8 @@ export default function ReservationPage() {
                               : 'border-slate-200 bg-white hover:border-orange-300 hover:bg-orange-50/40',
                           ].join(' ')}
                         >
-                          <span className="block text-base font-semibold text-[#1F2937]">{option.label}</span>
-                          <span className="mt-2 block text-sm text-slate-600">{option.description}</span>
+                          <span className="block text-base font-semibold text-[#1F2937]">{clientDisplay(t, option.label)}</span>
+                          <span className="mt-2 block text-sm text-slate-600">{clientDisplay(t, option.description)}</span>
                           <span className="mt-3 block text-sm font-medium text-[#EA580C]">
                             {formatCurrency(insuranceDays !== null ? insuranceDays * INSURANCE_DAILY_PRICE[option.key] : 0)}
                           </span>
@@ -821,8 +820,7 @@ export default function ReservationPage() {
                       onClick={() => advanceToStep(2)}
                       disabled={selectedInsurance === null}
                     >
-                      Valider l’assurance
-                    </Button>
+                      {t("professional.valider_l_assurance")}</Button>
                   </div>
                 </div>
               </Card>
@@ -835,18 +833,18 @@ export default function ReservationPage() {
                 }}
                 className="scroll-mt-24"
               >
-                <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Étape 2 · Récapitulatif</h2>}>
+                <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t("professional.etape_2_recapitulatif")}</h2>}>
                   <div className="space-y-4">
                     <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-2">
                       <div>
-                        <p className="text-sm font-medium uppercase tracking-wide text-slate-500">Véhicule</p>
+                        <p className="text-sm font-medium uppercase tracking-wide text-slate-500">{t("client.vehicule_alt")}</p>
                         <p className="mt-1 text-lg font-semibold text-[#1F2937]">
                           {vehicleQuery.data.brand} {vehicleQuery.data.model_name}
                         </p>
                         <p className="text-sm text-slate-600">{vehicleQuery.data.category}</p>
                       </div>
                       <div>
-                        <p className="text-sm font-medium uppercase tracking-wide text-slate-500">Période</p>
+                        <p className="text-sm font-medium uppercase tracking-wide text-slate-500">{t("client.periode")}</p>
                         <p className="mt-1 text-sm text-slate-700">{formatDateTimeLabel(reservationPayload.start_at)}</p>
                         <p className="text-sm text-slate-700">{formatDateTimeLabel(reservationPayload.end_at)}</p>
                       </div>
@@ -854,25 +852,25 @@ export default function ReservationPage() {
 
                     <div className="rounded-2xl border border-slate-200 p-4">
                       <div className="flex items-center justify-between py-2">
-                        <span className="text-sm text-slate-600">Location</span>
+                        <span className="text-sm text-slate-600">{t("public.location")}</span>
                         <span className="font-semibold text-[#1F2937]">{formatCurrency(simulationQuery.data.rental_amount)}</span>
                       </div>
                       <div className="flex items-center justify-between py-2">
-                        <span className="text-sm text-slate-600">Assurance</span>
+                        <span className="text-sm text-slate-600">{t("public.assurance")}</span>
                         <span className="font-semibold text-[#1F2937]">{selectedInsuranceLabel}</span>
                       </div>
                       <div className="flex items-center justify-between py-2">
-                        <span className="text-sm text-slate-600">Prix assurance</span>
+                        <span className="text-sm text-slate-600">{t("professional.prix_assurance")}</span>
                         <span className="font-semibold text-[#1F2937]">
-                          {computedInsuranceAmount !== null ? formatCurrency(computedInsuranceAmount) : 'Tarif indisponible'}
+                          {computedInsuranceAmount !== null ? formatCurrency(computedInsuranceAmount) : t("public.tarif_indisponible")}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-2">
-                        <span className="text-sm text-slate-600">Caution</span>
+                        <span className="text-sm text-slate-600">{t("public.caution")}</span>
                         <span className="font-semibold text-[#1F2937]">{formatCurrency(simulationQuery.data.deposit_amount)}</span>
                       </div>
                       <div className="mt-2 flex items-center justify-between border-t border-slate-200 pt-3">
-                        <span className="text-base font-semibold text-[#1F2937]">Total estimé</span>
+                        <span className="text-base font-semibold text-[#1F2937]">{t("professional.total_estime")}</span>
                         <span className="text-xl font-semibold text-[#2563EB]">
                           {computedTotalAmount !== null ? formatCurrency(computedTotalAmount) : formatCurrency(simulationQuery.data.total_amount)}
                         </span>
@@ -881,8 +879,7 @@ export default function ReservationPage() {
 
                     <div className="flex justify-end">
                       <Button variant="secondary" onClick={() => advanceToStep(3)}>
-                        Valider le récapitulatif
-                      </Button>
+                        {t("professional.valider_le_recapitulatif")}</Button>
                     </div>
                   </div>
                 </Card>
@@ -896,52 +893,50 @@ export default function ReservationPage() {
                 }}
                 className="scroll-mt-24"
               >
-                <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Étape 3 · Confirmation</h2>}>
+                <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t("professional.etape_3_confirmation")}</h2>}>
                   <div className="space-y-4">
                     {!isAuthenticated && !isAuthLoading ? (
                       <Alert
                         variant="info"
-                        title="Connexion requise"
-                        message="Vous devez vous connecter avant de finaliser la réservation."
+                        title={t("professional.connexion_requise")}
+                        message={t("professional.vous_devez_vous_connecter_avant_de_finaliser_la_reservation")}
                       />
                     ) : null}
 
                     {isAuthenticated && isLoadingEligibility ? (
                       <Alert
                         variant="info"
-                        title="Vérification du profil"
-                        message="Vérification de votre éligibilité à la réservation en cours..."
+                        title={t("professional.verification_du_profil")}
+                        message={t("professional.verification_de_votre_eligibilite_a_la_reservation_en_cours")}
                       />
                     ) : null}
 
                     {eligibilityError ? (
                       <Alert
                         variant="danger"
-                        title="Vérification du profil impossible"
-                        message={toErrorMessage(eligibilityError)}
+                        title={t("professional.verification_du_profil_impossible")}
+                        message={clientDisplay(t, toErrorMessage(eligibilityError))}
                       />
                     ) : null}
 
                     {isAuthenticated && !isLoadingEligibility && !eligibilityError && profileEligibility && !profileEligibility.canReserve ? (
                       <Alert
                         variant="warning"
-                        title="Profil client incomplet ou non valide"
+                        title={t("professional.profil_client_incomplet_ou_non_valide")}
                         message={(
                           <div className="space-y-3">
-                            <p>Votre profil ne permet pas encore de confirmer cette réservation.</p>
+                            <p>{t("professional.votre_profil_ne_permet_pas_encore_de_confirmer_cette_reservation")}</p>
                             <ul className="list-disc space-y-1 pl-5">
                               {profileEligibility.reasons.map((reason) => (
-                                <li key={reason.key}>{reason.label}</li>
+                                <li key={reason.key}>{clientDisplay(t, reason.label)}</li>
                               ))}
                             </ul>
                             <div className="flex flex-wrap gap-2 pt-1">
                               <Button variant="secondary" onClick={() => navigate('/client/profile')}>
-                                Compléter mon profil
-                              </Button>
+                                {t("professional.completer_mon_profil")}</Button>
                               {profileEligibility.shouldShowDocumentsCta ? (
                                 <Button variant="secondary" onClick={() => navigate('/client/profile')}>
-                                  Ajouter mes documents
-                                </Button>
+                                  {t("professional.ajouter_mes_documents")}</Button>
                               ) : null}
                             </div>
                           </div>
@@ -957,39 +952,39 @@ export default function ReservationPage() {
                             ? 'Véhicule incompatible avec votre permis'
                             : 'Vérification de la transmission requise'
                         }
-                        message={transmissionCompatibilityError}
+                        message={clientDisplay(t, transmissionCompatibilityError)}
                       />
                     ) : null}
 
                     {isAuthenticated && !isLoadingEligibility && !eligibilityError && profileEligibility?.canReserve ? (
                       <Alert
                         variant="success"
-                        title="Profil valide"
-                        message="Votre profil est valide. Vous pouvez passer à la dernière étape."
+                        title={t("professional.profil_valide")}
+                        message={t("professional.votre_profil_est_valide_vous_pouvez_passer_a_la_derniere_etape")}
                       />
                     ) : null}
 
                     {isAuthenticated && !isLoadingData && !dataError && !hasInsurancePricing ? (
                       <Alert
                         variant="warning"
-                        title="Durée indisponible"
-                        message="Impossible de calculer le prix de l'assurance à partir de la durée retournée par la simulation."
+                        title={t("professional.duree_indisponible")}
+                        message={t("professional.impossible_de_calculer_le_prix_de_l_assurance_a_partir_de_la")}
                       />
                     ) : null}
 
                     {isAuthenticated && !isLoadingData && !dataError && hasInsurancePricing && !totalsMatchSimulationStep ? (
                       <Alert
                         variant="warning"
-                        title="Contrôle de cohérence échoué"
-                        message="Les montants transmis depuis la simulation ne correspondent pas au recalcul actuel. Revenez à la simulation et recommencez."
+                        title={t("professional.controle_de_coherence_echoue")}
+                        message={t("professional.les_montants_transmis_depuis_la_simulation_ne_correspondent_pas_au_recalcul_actuel")}
                       />
                     ) : null}
 
                     {createReservationMutation.isError ? (
                       <Alert
                         variant="danger"
-                        title="Réservation impossible"
-                        message={toErrorMessage(createReservationMutation.error)}
+                        title={t("public.reservation_impossible")}
+                        message={clientDisplay(t, toErrorMessage(createReservationMutation.error))}
                       />
                     ) : null}
 
@@ -1008,8 +1003,7 @@ export default function ReservationPage() {
                           ))
                         }
                       >
-                        Valider la confirmation
-                      </Button>
+                        {t("professional.valider_la_confirmation")}</Button>
                     </div>
                   </div>
                 </Card>
@@ -1023,50 +1017,50 @@ export default function ReservationPage() {
                 }}
                 className="scroll-mt-24"
               >
-                <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Étape 4 · Paiement</h2>}>
+                <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t("professional.etape_4_paiement")}</h2>}>
                   <div className="space-y-4">
                     <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
                       <div className="space-y-4">
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
-                          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">1. Votre réservation</p>
+                          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{t("professional.1_votre_reservation")}</p>
                           <div className="mt-4 grid gap-4 sm:grid-cols-2">
                             <div>
-                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Véhicule</p>
+                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{t("client.vehicule_alt")}</p>
                               <p className="mt-1 text-base font-semibold text-[#1F2937]">{paymentVehicleLabel}</p>
                             </div>
                             <div>
-                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Assurance</p>
+                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{t("public.assurance")}</p>
                               <p className="mt-1 text-base font-semibold text-[#1F2937]">{paymentInsuranceLabel}</p>
                             </div>
                             <div>
-                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Début</p>
+                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{t("public.debut")}</p>
                               <p className="mt-1 text-sm text-slate-700">{formatDateTimeLabel(reservationPayload.start_at)}</p>
                             </div>
                             <div>
-                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Fin</p>
+                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{t("public.fin")}</p>
                               <p className="mt-1 text-sm text-slate-700">{formatDateTimeLabel(reservationPayload.end_at)}</p>
                             </div>
                             <div className="sm:col-span-2">
-                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Durée</p>
+                              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{t("public.duree")}</p>
                               <p className="mt-1 text-sm text-slate-700">{paymentDurationLabel}</p>
                             </div>
                           </div>
                         </div>
 
                         <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-                          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">2. À payer</p>
+                          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{t("professional.2_a_payer")}</p>
                           <div className="mt-4 space-y-3">
                             <div className="flex items-center justify-between gap-3 text-sm text-slate-700">
-                              <span>Location</span>
+                              <span>{t("public.location")}</span>
                               <span className="font-semibold text-[#1F2937]">{paymentRentalAmount}</span>
                             </div>
                             <div className="flex items-center justify-between gap-3 text-sm text-slate-700">
-                              <span>Assurance</span>
+                              <span>{t("public.assurance")}</span>
                               <span className="font-semibold text-[#1F2937]">{paymentInsuranceAmount}</span>
                             </div>
                             <div className="border-t border-slate-200 pt-3" />
                             <div className="flex items-center justify-between gap-3 text-base font-semibold text-[#1F2937]">
-                              <span>Total à payer</span>
+                              <span>{t("public.total_a_payer")}</span>
                               <span className="text-xl text-[#2563EB]">{paymentTotalAmount}</span>
                             </div>
                           </div>
@@ -1075,20 +1069,18 @@ export default function ReservationPage() {
 
                       <div className="space-y-4">
                         <div className="rounded-2xl border border-orange-200 bg-orange-50/60 p-4 sm:p-5">
-                          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">3. Caution</p>
-                          <p className="mt-3 text-xl font-semibold text-[#1F2937]">Caution : {paymentDepositAmount}</p>
+                          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{t("professional.3_caution")}</p>
+                          <p className="mt-3 text-xl font-semibold text-[#1F2937]">{t("client.caution")} {paymentDepositAmount}</p>
                           <p className="mt-3 text-sm leading-6 text-slate-700">
-                            Une préautorisation de {paymentDepositAmount} sera effectuée séparément. Cette somme n'est pas comprise dans le prix de la location et n'est pas débitée comme un paiement de location.
-                          </p>
+                            {t("professional.une_preautorisation_de")}{paymentDepositAmount} {t("professional.sera_effectuee_separement_cette_somme_n_est_pas_comprise_dans_le_prix")}</p>
                           <p className="mt-3 text-sm leading-6 text-slate-700">
-                            Après la restitution, le véhicule et les photos de l'état des lieux seront contrôlés par un gestionnaire. Si le retour est conforme, la caution sera libérée.
-                          </p>
+                            {t("professional.apres_la_restitution_le_vehicule_et_les_photos_de_l_etat_des")}</p>
                         </div>
 
                         <Alert
                           variant="success"
-                          title="4. Éligibilité"
-                          message="Votre profil est conforme. Vous pouvez procéder au paiement."
+                          title={t("professional.4_eligibilite")}
+                          message={t("professional.votre_profil_est_conforme_vous_pouvez_proceder_au_paiement")}
                         />
                       </div>
                     </div>
@@ -1097,57 +1089,55 @@ export default function ReservationPage() {
                       <>
                         <Alert
                           variant="info"
-                          title="Connexion ou inscription requise"
-                          message="Pour finaliser votre réservation, connectez-vous ou créez un compte."
+                          title={t("professional.connexion_ou_inscription_requise")}
+                          message={t("professional.pour_finaliser_votre_reservation_connectez_vous_ou_creez_un_compte")}
                         />
                         <div className="flex flex-wrap gap-3">
                           <Button variant="danger" onClick={() => navigate('/login', { state: { from: `${location.pathname}${location.search}` } })}>
-                            Se connecter
-                          </Button>
+                            {t("auth.login")}</Button>
                           <Button variant="secondary" onClick={() => navigate('/register', { state: { from: `${location.pathname}${location.search}` } })}>
-                            Créer un compte
-                          </Button>
+                            {t("auth.register")}</Button>
                         </div>
                       </>
                     ) : !stripePromise || !stripePublishableKey ? (
                       <Alert
                         variant="danger"
-                        title="Configuration Stripe manquante"
-                        message="La variable VITE_STRIPE_PUBLISHABLE_KEY doit etre definie pour activer le paiement Stripe Test."
+                        title={t("professional.configuration_stripe_manquante")}
+                        message={t("client.la_variable_vite_stripe_publishable_key_doit_etre_definie_pour_activer")}
                       />
                     ) : isPreparingPayment ? (
                       <Alert
                         variant="info"
-                        title="Préparation du paiement"
-                        message="Le backend autorise la caution de 500 EUR puis prépare le PaymentIntent de location."
+                        title={t("client.preparation_du_paiement")}
+                        message={t("professional.le_backend_autorise_la_caution_de_500_eur_puis_prepare_le_paymentintent")}
                       />
                     ) : paymentWorkflowError ? (
-                      <Alert variant="danger" title="Paiement impossible" message={paymentWorkflowError} />
+                      <Alert variant="danger" title={t("public.paiement_impossible")} message={clientDisplay(t, paymentWorkflowError)} />
                     ) : !rentalTermsAccepted ? (
                       <RentalTermsCheckbox checked={false} onChange={(checked) => setAcceptedRentalTermsKey(checked ? rentalTermsKey : null)} />
                     ) : !createdReservation || !paymentClientSecret ? (
                       <Alert
                         variant="info"
-                        title="Préparation en cours"
-                        message="La réservation est en cours de création puis le paiement Stripe Test est préparé par le backend."
+                        title={t("professional.preparation_en_cours")}
+                        message={t("professional.la_reservation_est_en_cours_de_creation_puis_le_paiement_stripe_test")}
                       />
                     ) : (
                       <>
                         {paymentSetupMessage ? (
-                          <Alert variant="success" title="Paiement préparé" message={paymentSetupMessage} />
+                          <Alert variant="success" title={t("professional.paiement_prepare")} message={paymentSetupMessage} />
                         ) : null}
 
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">5. Actions</p>
+                          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{t("professional.5_actions")}</p>
                           <p className="mt-2 text-sm text-slate-600">
-                            Vérifiez ce récapitulatif. Le paiement Stripe Test de la location et de l'assurance sera confirmé ci-dessous, sans jamais ajouter la caution au total affiché.
-                          </p>
+                            {t("professional.verifiez_ce_recapitulatif_le_paiement_stripe_test_de_la_location_et_de")}</p>
                         </div>
 
                         <Elements
                           stripe={stripePromise}
                           options={{
                             clientSecret: paymentClientSecret,
+                            locale: stripeLocale(),
                             appearance: {
                               theme: 'stripe',
                               variables: {
@@ -1185,38 +1175,38 @@ export default function ReservationPage() {
                   }}
                   className="scroll-mt-24"
                 >
-                  <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Étape 5 · Confirmation</h2>}>
+                  <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t("professional.etape_5_confirmation")}</h2>}>
                     <div className="space-y-4">
                       <Alert
                         variant="success"
-                          title="Réservation confirmée"
+                          title={t("client.reservation_confirmee")}
                         message={(
                             <div className="space-y-2">
-                              <p><span className="font-semibold">Paiement :</span> réussi</p>
-                              <p><span className="font-semibold">Caution :</span> {formatEuroAmount(reservationDepositAmount)} préautorisés</p>
-                              <p>La caution restera en attente jusqu'au contrôle du véhicule après sa restitution.</p>
+                              <p><span className="font-semibold">{t("professional.paiement")}</span> {t("professional.reussi")}</p>
+                              <p><span className="font-semibold">{t("client.caution")}</span> {formatEuroAmount(reservationDepositAmount)} {t("professional.preautorises")}</p>
+                              <p>{t("public.la_caution_restera_en_attente_jusqu_au_controle_du_vehicule_apres")}</p>
                           </div>
                         )}
                       />
                         <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 sm:grid-cols-2">
                           <div>
-                            <p className="font-medium text-[#1F2937]">Numéro de réservation</p>
+                            <p className="font-medium text-[#1F2937]">{t("professional.numero_de_reservation")}</p>
                             <p className="mt-1">{confirmedReservation.reference}</p>
                           </div>
                           <div>
-                            <p className="font-medium text-[#1F2937]">Véhicule</p>
+                            <p className="font-medium text-[#1F2937]">{t("client.vehicule_alt")}</p>
                             <p className="mt-1">{confirmedReservation.vehicle.brand} {confirmedReservation.vehicle.model_name}</p>
                           </div>
                           <div>
-                            <p className="font-medium text-[#1F2937]">Date/heure début</p>
+                            <p className="font-medium text-[#1F2937]">{t("professional.date_heure_debut")}</p>
                             <p className="mt-1">{formatDateTimeLabel(confirmedReservation.start_at)}</p>
                           </div>
                           <div>
-                            <p className="font-medium text-[#1F2937]">Date/heure fin</p>
+                            <p className="font-medium text-[#1F2937]">{t("professional.date_heure_fin")}</p>
                             <p className="mt-1">{formatDateTimeLabel(confirmedReservation.end_at)}</p>
                           </div>
                           <div>
-                            <p className="font-medium text-[#1F2937]">Assurance</p>
+                            <p className="font-medium text-[#1F2937]">{t("public.assurance")}</p>
                             <p className="mt-1">{reservationInsuranceLabel}</p>
                           </div>
                           <div>
@@ -1224,18 +1214,16 @@ export default function ReservationPage() {
                             <p className="mt-1">{formatEuroAmount(reservationPaidAmount)}</p>
                           </div>
                           <div>
-                            <p className="font-medium text-[#1F2937]">Statut de réservation</p>
+                            <p className="font-medium text-[#1F2937]">{t("professional.statut_de_reservation")}</p>
                             <p className="mt-1">{confirmedReservation.status}</p>
                           </div>
                         </div>
 
                         <div className="flex flex-wrap gap-3">
                           <Button variant="primary" onClick={() => navigate(`/client/reservations?highlight=${confirmedReservation.id}`)}>
-                            Voir ma réservation
-                          </Button>
+                            {t("professional.voir_ma_reservation")}</Button>
                           <Button variant="secondary" onClick={() => navigate('/')}>
-                            Retour à l'accueil
-                          </Button>
+                            {t("public.retour_a_l_accueil")}</Button>
                         </div>
                     </div>
                   </Card>
@@ -1247,16 +1235,14 @@ export default function ReservationPage() {
                     }}
                     className="scroll-mt-24"
                   >
-                    <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Étape 5 · Confirmation</h2>}>
+                    <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t("professional.etape_5_confirmation")}</h2>}>
                       <div className="space-y-4">
                         <div className="flex flex-col items-center justify-center gap-4 py-8">
-                          <LoadingSpinner size="lg" aria-label="Confirmation de votre réservation en cours" />
+                          <LoadingSpinner size="lg" aria-label={t("professional.confirmation_de_votre_reservation_en_cours")} />
                           <p className="text-center text-lg font-medium text-[#1F2937]">
-                            Confirmation de votre réservation en cours…
-                          </p>
+                            {t("professional.confirmation_de_votre_reservation_en_cours_2")}</p>
                           <p className="text-center text-sm text-slate-600">
-                            Veuillez patienter quelques instants. Nous vérifions que votre paiement et votre réservation sont confirmés par le backend.
-                          </p>
+                            {t("professional.veuillez_patienter_quelques_instants_nous_verifions_que_votre_paiement_et_votre_reservation")}</p>
                         </div>
                       </div>
                     </Card>
@@ -1268,12 +1254,12 @@ export default function ReservationPage() {
                     }}
                     className="scroll-mt-24"
                   >
-                    <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Étape 5 · Confirmation</h2>}>
+                    <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t("professional.etape_5_confirmation")}</h2>}>
                       <div className="space-y-4">
                         <Alert
                           variant="warning"
-                          title="Confirmation en attente"
-                          message="La confirmation de votre réservation prend plus de temps que prévu. Votre paiement a été reçu en toute sécurité. Veuillez actualiser le statut ou réessayer dans quelques instants."
+                          title={t("professional.confirmation_en_attente")}
+                          message={t("professional.la_confirmation_de_votre_reservation_prend_plus_de_temps_que_prevu_votre")}
                         />
                         <div className="flex gap-3">
                           <Button
@@ -1286,8 +1272,7 @@ export default function ReservationPage() {
                               }
                             }}
                           >
-                            Actualiser le statut
-                          </Button>
+                            {t("professional.actualiser_le_statut")}</Button>
                         </div>
                       </div>
                     </Card>
@@ -1299,11 +1284,11 @@ export default function ReservationPage() {
                     }}
                     className="scroll-mt-24"
                   >
-                    <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Étape 5 · Confirmation</h2>}>
+                    <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t("professional.etape_5_confirmation")}</h2>}>
                       <Alert
                         variant="info"
-                        title="Confirmation en cours"
-                        message="Le backend finalise encore la confirmation de votre paiement et de la préautorisation."
+                        title={t("client.confirmation_en_cours")}
+                        message={t("professional.le_backend_finalise_encore_la_confirmation_de_votre_paiement_et_de_la")}
                       />
                     </Card>
                   </div>

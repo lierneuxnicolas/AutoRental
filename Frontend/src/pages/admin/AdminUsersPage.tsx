@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -51,7 +54,7 @@ function formatDateTime(value: string | null): string {
     return value
   }
 
-  return parsed.toLocaleString('fr-FR', {
+  return parsed.toLocaleString(clientLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
@@ -150,6 +153,7 @@ interface UserCardProps {
 }
 
 function UserCard({ user, currentUserId, onToggleStatus, isSubmitting, isSubmittingThisUser }: UserCardProps) {
+  const { t } = useTranslation()
   const accountStatus = mapAccountStatus(user)
   const emailVerification = mapEmailVerification(user)
   const roleVariant = mapRoleToVariant(user.role)
@@ -163,30 +167,30 @@ function UserCard({ user, currentUserId, onToggleStatus, isSubmitting, isSubmitt
             <p className="text-base font-semibold text-[#0F172A]">{formatUserLabel(user)}</p>
             <p className="text-sm text-slate-500">{user.email}</p>
           </div>
-          <StatusBadge variant={accountStatus.variant} label={accountStatus.label} />
+          <StatusBadge variant={accountStatus.variant} label={professionalDisplay(t, accountStatus.label)} />
         </div>
       }
     >
       <div className="space-y-4 text-sm text-slate-700">
         <div className="flex flex-wrap gap-2">
-          <StatusBadge variant={roleVariant} label={mapRoleToLabel(user.role)} />
-          <StatusBadge variant={emailVerification.variant} label={emailVerification.label} />
+          <StatusBadge variant={roleVariant} label={professionalDisplay(t, mapRoleToLabel(user.role))} />
+          <StatusBadge variant={emailVerification.variant} label={professionalDisplay(t, emailVerification.label)} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <p className="text-slate-500">Date d'inscription</p>
+            <p className="text-slate-500">{t("professional.date_d_inscription")}</p>
             <p className="mt-1 text-[#1F2937]">{formatDateTime(user.date_joined)}</p>
           </div>
           <div>
-            <p className="text-slate-500">Dernière connexion</p>
+            <p className="text-slate-500">{t("professional.derniere_connexion")}</p>
             <p className="mt-1 text-[#1F2937]">{formatDateTime(user.last_login)}</p>
           </div>
         </div>
 
         <div className="flex justify-end pt-1">
           {accountAction.disabled ? (
-            <StatusBadge variant={accountAction.variant} label={accountAction.label} />
+            <StatusBadge variant={accountAction.variant} label={professionalDisplay(t, accountAction.label)} />
           ) : (
             <Button
               variant={accountAction.variant === 'danger' ? 'danger' : 'success'}
@@ -199,7 +203,7 @@ function UserCard({ user, currentUserId, onToggleStatus, isSubmitting, isSubmitt
                 onToggleStatus(user, accountAction.targetActiveState)
               }}
             >
-              {isSubmittingThisUser ? 'Traitement...' : accountAction.label}
+              {isSubmittingThisUser ? t("client.traitement") : professionalDisplay(t, accountAction.label)}
             </Button>
           )}
         </div>
@@ -246,6 +250,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function AdminUsersPage() {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { user } = useAuth()
   const [page, setPage] = useState(1)
@@ -322,40 +327,37 @@ export default function AdminUsersPage() {
   return (
     <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Administration</p>
-        <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Utilisateurs</h1>
+        <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">{t("professional.administration")}</p>
+        <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">{t("navigation.users")}</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-          Gérez les comptes utilisateurs de la plateforme.
-        </p>
+          {t("professional.gerez_les_comptes_utilisateurs_de_la_plateforme")}</p>
       </div>
 
       {successMessage ? (
-        <Alert variant="success" title="Mise à jour réussie" message={successMessage} />
+        <Alert variant="success" title={t("professional.mise_a_jour_reussie")} message={successMessage} />
       ) : null}
 
       {actionError ? (
-        <Alert variant="danger" title="Mise à jour impossible" message={actionError} />
+        <Alert variant="danger" title={t("professional.mise_a_jour_impossible")} message={professionalDisplay(t, actionError)} />
       ) : null}
 
       <Card>
         <form className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end" onSubmit={handleSearchSubmit}>
           <Input
             type="search"
-            label="Recherche"
-            placeholder="E-mail, prénom ou nom"
+            label={t("professional.recherche")}
+            placeholder={t("professional.e_mail_prenom_ou_nom")}
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
           />
           <Button type="submit" className="w-full lg:w-auto">
-            Rechercher
-          </Button>
+            {t("public.rechercher")}</Button>
         </form>
 
         <div className="mt-4 grid gap-4 md:grid-cols-3 xl:grid-cols-4">
           <div className="space-y-2">
             <label className="block text-sm font-medium text-[#1F2937]" htmlFor="admin-user-role-filter">
-              Rôle
-            </label>
+              {t("professional.role")}</label>
             <select
               id="admin-user-role-filter"
               value={roleFilter}
@@ -367,7 +369,7 @@ export default function AdminUsersPage() {
             >
               {roleOptions.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {professionalDisplay(t, option.label)}
                 </option>
               ))}
             </select>
@@ -375,8 +377,7 @@ export default function AdminUsersPage() {
 
           <div className="space-y-2">
             <label className="block text-sm font-medium text-[#1F2937]" htmlFor="admin-user-account-filter">
-              Statut
-            </label>
+              {t("client.statut")}</label>
             <select
               id="admin-user-account-filter"
               value={accountStatusFilter}
@@ -388,7 +389,7 @@ export default function AdminUsersPage() {
             >
               {accountStatusOptions.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {professionalDisplay(t, option.label)}
                 </option>
               ))}
             </select>
@@ -396,8 +397,7 @@ export default function AdminUsersPage() {
 
           <div className="space-y-2">
             <label className="block text-sm font-medium text-[#1F2937]" htmlFor="admin-user-email-filter">
-              E-mail
-            </label>
+              {t("professional.e_mail")}</label>
             <select
               id="admin-user-email-filter"
               value={emailVerificationFilter}
@@ -409,7 +409,7 @@ export default function AdminUsersPage() {
             >
               {emailVerificationOptions.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {professionalDisplay(t, option.label)}
                 </option>
               ))}
             </select>
@@ -417,8 +417,7 @@ export default function AdminUsersPage() {
 
           <div className="space-y-2">
             <label className="block text-sm font-medium text-[#1F2937]" htmlFor="admin-user-ordering">
-              Tri
-            </label>
+              {t("professional.tri")}</label>
             <select
               id="admin-user-ordering"
               value={ordering}
@@ -428,12 +427,12 @@ export default function AdminUsersPage() {
               }}
               className="block h-12.5 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
             >
-              <option value="-date_joined">Date d'inscription la plus récente</option>
-              <option value="date_joined">Date d'inscription la plus ancienne</option>
-              <option value="email">E-mail A-Z</option>
-              <option value="-email">E-mail Z-A</option>
-              <option value="last_login">Dernière connexion la plus ancienne</option>
-              <option value="-last_login">Dernière connexion la plus récente</option>
+              <option value="-date_joined">{t("professional.date_d_inscription_la_plus_recente")}</option>
+              <option value="date_joined">{t("professional.date_d_inscription_la_plus_ancienne")}</option>
+              <option value="email">{t("professional.e_mail_a_z")}</option>
+              <option value="-email">{t("professional.e_mail_z_a")}</option>
+              <option value="last_login">{t("professional.derniere_connexion_la_plus_ancienne")}</option>
+              <option value="-last_login">{t("professional.derniere_connexion_la_plus_recente")}</option>
             </select>
           </div>
         </div>
@@ -441,14 +440,14 @@ export default function AdminUsersPage() {
 
       {usersQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
-          <LoadingSpinner size="lg" aria-label="Chargement des utilisateurs" />
+          <LoadingSpinner size="lg" aria-label={t("professional.chargement_des_utilisateurs")} />
         </div>
       ) : null}
 
       {usersQuery.isError ? (
         <Alert
           variant="danger"
-          title="Chargement impossible"
+          title={t("client.chargement_impossible")}
           message={getErrorMessage(usersQuery.error)}
           className="mb-6"
         />
@@ -456,12 +455,11 @@ export default function AdminUsersPage() {
 
       {!usersQuery.isLoading && !usersQuery.isError && !hasUsers ? (
         <EmptyState
-          title="Aucun utilisateur"
-          description="Aucun compte ne correspond aux critères sélectionnés."
+          title={t("professional.aucun_utilisateur")}
+          description={t("professional.aucun_compte_ne_correspond_aux_criteres_selectionnes")}
           action={
             <Button variant="secondary" size="sm" onClick={handleRetry}>
-              Réessayer
-            </Button>
+              {t("client.reessayer_alt")}</Button>
           }
         />
       ) : null}
@@ -489,14 +487,14 @@ export default function AdminUsersPage() {
             <table className="w-full border-collapse text-left">
               <thead className="border-b border-[#E5E7EB] bg-[#F8FAFC]">
                 <tr>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Utilisateur</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">E-mail</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Rôle</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Compte</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">E-mail vérifié</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Date d'inscription</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Dernière connexion</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Action</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("navigation.user")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.e_mail")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.role")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.compte")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("client.e_mail_verifie")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.date_d_inscription")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.derniere_connexion")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.action")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -514,19 +512,19 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="px-4 py-4 text-sm text-[#1F2937]">{targetUser.email}</td>
                       <td className="px-4 py-4">
-                        <StatusBadge variant={roleBadge.variant} label={roleBadge.label} />
+                        <StatusBadge variant={roleBadge.variant} label={professionalDisplay(t, roleBadge.label)} />
                       </td>
                       <td className="px-4 py-4">
-                        <StatusBadge variant={accountStatus.variant} label={accountStatus.label} />
+                        <StatusBadge variant={accountStatus.variant} label={professionalDisplay(t, accountStatus.label)} />
                       </td>
                       <td className="px-4 py-4">
-                        <StatusBadge variant={emailVerification.variant} label={emailVerification.label} />
+                        <StatusBadge variant={emailVerification.variant} label={professionalDisplay(t, emailVerification.label)} />
                       </td>
                       <td className="px-4 py-4 text-sm text-[#1F2937]">{formatDateTime(targetUser.date_joined)}</td>
                       <td className="px-4 py-4 text-sm text-[#1F2937]">{formatDateTime(targetUser.last_login)}</td>
                       <td className="px-4 py-4">
                         {accountAction.disabled ? (
-                          <StatusBadge variant="neutral" label={accountAction.label} />
+                          <StatusBadge variant="neutral" label={professionalDisplay(t, accountAction.label)} />
                         ) : (
                           <Button
                             variant={accountAction.variant === 'danger' ? 'danger' : 'success'}
@@ -539,7 +537,7 @@ export default function AdminUsersPage() {
                               handleToggleStatus(targetUser, accountAction.targetActiveState)
                             }}
                           >
-                            {isSubmittingThisUser ? 'Traitement...' : accountAction.label}
+                            {isSubmittingThisUser ? t("client.traitement") : professionalDisplay(t, accountAction.label)}
                           </Button>
                         )}
                       </td>
@@ -552,7 +550,7 @@ export default function AdminUsersPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
             <p className="text-sm text-slate-600">
-              Total: <span className="font-semibold text-[#1F2937]">{totalUsers}</span>
+              {t("client.total")}<span className="font-semibold text-[#1F2937]">{totalUsers}</span>
             </p>
             <div className="flex items-center gap-2">
               <Button
@@ -561,10 +559,9 @@ export default function AdminUsersPage() {
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
                 disabled={!usersQuery.data?.previous || page === 1}
               >
-                Précédent
-              </Button>
+                {t("client.precedent_alt")}</Button>
               <span className="px-2 text-sm font-medium text-slate-700">
-                Page {page} / {totalPages}
+                {t("client.page")}{page} / {totalPages}
               </span>
               <Button
                 variant="secondary"
@@ -572,8 +569,7 @@ export default function AdminUsersPage() {
                 onClick={() => setPage((current) => current + 1)}
                 disabled={!usersQuery.data?.next}
               >
-                Suivant
-              </Button>
+                {t("client.suivant")}</Button>
             </div>
           </div>
         </>

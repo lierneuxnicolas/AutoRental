@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { clientDisplay, clientLocale } from '../../i18n/clientDisplay'
 import { useMemo, type CSSProperties } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, Gauge } from 'lucide-react'
@@ -39,7 +41,7 @@ const nextReservationStatuses = new Set<ReservationStatus>([
 ])
 
 function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(clientLocale(), {
     day: '2-digit',
     month: 'long',
     year: 'numeric',
@@ -47,7 +49,7 @@ function formatDate(value: string): string {
 }
 
 function formatTime(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(clientLocale(), {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value))
@@ -201,6 +203,7 @@ function ReservationPanel({
   reservation: ReservationDetail | undefined
   emptyMessage: string
 }) {
+  const { t } = useTranslation()
   if (!reservation) {
     return (
       <Card className="h-full rounded-4xl border-none bg-white shadow-[0_22px_60px_rgba(15,23,42,0.08)]">
@@ -229,13 +232,13 @@ function ReservationPanel({
             <h2 className="mt-2 text-2xl font-semibold text-[#0F172A]">{title}</h2>
             <p className="mt-2 text-sm text-slate-600">Reference {reservation.reference}</p>
           </div>
-          <StatusBadge variant={reservationState.variant} label={reservationState.label} />
+          <StatusBadge variant={reservationState.variant} label={clientDisplay(t, reservationState.label)} />
         </div>
 
         <div className="rounded-[28px] bg-[linear-gradient(135deg,#0F172A_0%,#1E293B_100%)] p-5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm uppercase tracking-[0.22em] text-white/60">Vehicule</p>
+              <p className="text-sm uppercase tracking-[0.22em] text-white/60">{t('client.vehicule_alt')}</p>
               <p className="mt-2 text-2xl font-semibold">{getVehicleLabel(reservation)}</p>
               <p className="mt-2 text-sm text-white/70">{reservation.vehicle.category} • {reservation.vehicle.transmission.toLowerCase()} • {reservation.vehicle.fuel_type.toLowerCase()}</p>
             </div>
@@ -251,7 +254,7 @@ function ReservationPanel({
             <p className="mt-2 text-base font-semibold text-[#0F172A]">{formatDateTime(reservation.start_at)}</p>
           </div>
           <div className="rounded-2xl bg-[#F8FAFC] p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Retour</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t('public.retour')}</p>
             <p className="mt-2 text-base font-semibold text-[#0F172A]">{formatDateTime(reservation.end_at)}</p>
           </div>
         </div>
@@ -259,12 +262,12 @@ function ReservationPanel({
         <div className="flex flex-wrap gap-3">
           <Link to={`/client/reservations?highlight=${reservation.id}`}>
             <Button>
-              Voir le detail
+              {t('client.voir_le_detail')}
               <ChevronRight className="h-4 w-4" />
             </Button>
           </Link>
           <Link to="/client/reservations">
-            <Button variant="secondary">Toutes mes reservations</Button>
+            <Button variant="secondary">{t('client.toutes_mes_reservations')}</Button>
           </Link>
         </div>
       </div>
@@ -281,6 +284,7 @@ function CurrentReservationCard({
   vehicleImageUrl: string | null
   isVehicleLoading: boolean
 }) {
+  const { t } = useTranslation()
   const reservationState = getReservationState(reservation.status)
 
   return (
@@ -288,15 +292,15 @@ function CurrentReservationCard({
       <div className="flex flex-col gap-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="mt-1 text-[1.6rem] font-semibold tracking-tight text-[#0F172A]">Réservation en cours</h2>
+            <h2 className="mt-1 text-[1.6rem] font-semibold tracking-tight text-[#0F172A]">{t('client.reservation_en_cours')}</h2>
           </div>
-          <StatusBadge variant={reservationState.variant} label={reservationState.label} />
+          <StatusBadge variant={reservationState.variant} label={clientDisplay(t, reservationState.label)} />
         </div>
 
         <div className="overflow-hidden rounded-[26px] bg-[#F8FAFC]">
           {isVehicleLoading ? (
             <div className="flex h-44 items-center justify-center bg-[#F1F5F9]">
-              <LoadingSpinner size="md" aria-label="Chargement de la photo du véhicule" />
+              <LoadingSpinner size="md" aria-label={t('client.chargement_de_la_photo_du_vehicule')} />
             </div>
           ) : vehicleImageUrl ? (
             <img
@@ -306,7 +310,7 @@ function CurrentReservationCard({
             />
           ) : (
             <div className="flex h-44 items-center justify-center bg-[linear-gradient(135deg,#E2E8F0_0%,#F8FAFC_100%)] px-6 text-center text-sm text-slate-500">
-              Photo du véhicule indisponible
+              {t('public.photo_du_vehicule_indisponible')}
             </div>
           )}
 
@@ -318,18 +322,18 @@ function CurrentReservationCard({
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl bg-white p-3 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.85)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Date/heure de début</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t('client.date_heure_de_debut')}</p>
                 <p className="mt-1 text-base font-semibold text-[#0F172A]">{formatDateTime(reservation.start_at)}</p>
               </div>
               <div className="rounded-2xl bg-white p-3 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.85)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Date/heure de fin</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t('client.date_heure_de_fin')}</p>
                 <p className="mt-1 text-base font-semibold text-[#0F172A]">{formatDateTime(reservation.end_at)}</p>
               </div>
             </div>
 
             <Link to={`/client/reservations?highlight=${reservation.id}`}>
               <Button className={primaryButtonClassName}>
-                Voir les détails
+                {t('client.voir_les_details')}
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </Link>
@@ -349,6 +353,7 @@ function FutureReservationCard({
   vehicleImageUrl: string | null
   isVehicleLoading: boolean
 }) {
+  const { t } = useTranslation()
   const reservationState = getReservationState(reservation.status)
 
   return (
@@ -356,15 +361,15 @@ function FutureReservationCard({
       <div className="flex flex-col gap-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="mt-1 text-[1.6rem] font-semibold tracking-tight text-[#0F172A]">Prochaine réservation</h2>
+            <h2 className="mt-1 text-[1.6rem] font-semibold tracking-tight text-[#0F172A]">{t('client.prochaine_reservation')}</h2>
           </div>
-          <StatusBadge variant={reservationState.variant} label={reservationState.label} />
+          <StatusBadge variant={reservationState.variant} label={clientDisplay(t, reservationState.label)} />
         </div>
 
         <div className="overflow-hidden rounded-[26px] bg-[#F8FAFC]">
           {isVehicleLoading ? (
             <div className="flex h-44 items-center justify-center bg-[#F1F5F9]">
-              <LoadingSpinner size="md" aria-label="Chargement de la photo du véhicule" />
+              <LoadingSpinner size="md" aria-label={t('client.chargement_de_la_photo_du_vehicule')} />
             </div>
           ) : vehicleImageUrl ? (
             <img
@@ -374,7 +379,7 @@ function FutureReservationCard({
             />
           ) : (
             <div className="flex h-44 items-center justify-center bg-[linear-gradient(135deg,#E2E8F0_0%,#F8FAFC_100%)] px-6 text-center text-sm text-slate-500">
-              Photo du véhicule indisponible
+              {t('public.photo_du_vehicule_indisponible')}
             </div>
           )}
 
@@ -386,18 +391,18 @@ function FutureReservationCard({
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl bg-white p-3 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.85)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Date/heure de début</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t('client.date_heure_de_debut')}</p>
                 <p className="mt-1 text-base font-semibold text-[#0F172A]">{formatDateTime(reservation.start_at)}</p>
               </div>
               <div className="rounded-2xl bg-white p-3 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.85)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Date/heure de fin</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t('client.date_heure_de_fin')}</p>
                 <p className="mt-1 text-base font-semibold text-[#0F172A]">{formatDateTime(reservation.end_at)}</p>
               </div>
             </div>
 
             <Link to={`/client/reservations?highlight=${reservation.id}`}>
               <Button className={primaryButtonClassName}>
-                Voir les détails
+                {t('client.voir_les_details')}
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </Link>
@@ -409,6 +414,7 @@ function FutureReservationCard({
 }
 
 export default function ClientDashboardPage() {
+  const { t } = useTranslation()
   const profileQuery = useQuery({
     queryKey: ['client-profile-me'],
     queryFn: getClientProfileMe,
@@ -438,9 +444,9 @@ export default function ClientDashboardPage() {
   const nextVehicleId = nextReservation?.vehicle.id
   const reservationsUnavailable = reservationsQuery.isError && !reservationsQuery.data
   const failedSources = [
-    profileQuery.isError ? getDashboardFailureLabel('Profil', profileQuery.error) : null,
-    progressQuery.isError ? getDashboardFailureLabel('Progression du profil', progressQuery.error) : null,
-    reservationsQuery.isError ? getDashboardFailureLabel('Réservations', reservationsQuery.error) : null,
+    profileQuery.isError ? getDashboardFailureLabel(clientDisplay(t, 'Profil'), profileQuery.error) : null,
+    progressQuery.isError ? getDashboardFailureLabel(clientDisplay(t, 'Progression du profil'), progressQuery.error) : null,
+    reservationsQuery.isError ? getDashboardFailureLabel(clientDisplay(t, 'Réservations'), reservationsQuery.error) : null,
   ].filter((source): source is string => source !== null)
   const isRetryingDashboard = profileQuery.isFetching || progressQuery.isFetching || reservationsQuery.isFetching
 
@@ -491,7 +497,7 @@ export default function ClientDashboardPage() {
   if (isLoading) {
     return (
       <section className="mx-auto flex min-h-[60vh] max-w-6xl items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
-        <LoadingSpinner size="lg" aria-label="Chargement du tableau de bord client" />
+        <LoadingSpinner size="lg" aria-label={t('client.chargement_du_tableau_de_bord_client')} />
       </section>
     )
   }
@@ -501,20 +507,20 @@ export default function ClientDashboardPage() {
       <div className="mx-auto max-w-6xl px-4 pb-8 pt-4 sm:px-6 lg:px-8 lg:pb-10 lg:pt-6">
         <div className="flex flex-col gap-8">
             <div>
-              <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-[#0F172A]">Bonjour {firstName}</h1>
+              <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-[#0F172A]">{t('client.bonjour_firstname', { firstName })}</h1>
             </div>
 
             {failedSources.length > 0 ? (
               <Alert
                 variant="danger"
-                title="Certaines informations sont indisponibles"
+                title={t('client.certaines_informations_sont_indisponibles')}
                 message={(
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <p>
-                      Impossible de charger : {failedSources.join(', ')}. Vérifiez votre connexion puis réessayez.
+                      {t('professional.impossible_de_charger_sources_verifiez_votre_connexion_puis_reessayez', { sources: new Intl.ListFormat(clientLocale()).format(failedSources) })}
                     </p>
                     <Button size="sm" variant="secondary" disabled={isRetryingDashboard} onClick={retryDashboard}>
-                      {isRetryingDashboard ? 'Chargement...' : 'Réessayer'}
+                      {isRetryingDashboard ? t('client.chargement') : t('client.reessayer')}
                     </Button>
                   </div>
                 )}
@@ -525,27 +531,27 @@ export default function ClientDashboardPage() {
               <Card className="h-full rounded-4xl border-none bg-white shadow-[0_22px_60px_rgba(15,23,42,0.08)]">
                 <div className="flex flex-col gap-4">
                   <div>
-                    <h2 className="text-[1.85rem] font-semibold tracking-tight text-[#0F172A]">Progression de votre profil</h2>
+                    <h2 className="text-[1.85rem] font-semibold tracking-tight text-[#0F172A]">{t('client.progression_de_votre_profil')}</h2>
                   </div>
 
                   <div className="grid gap-x-10 gap-y-4 md:grid-cols-[192px_1fr] md:items-center">
                     <div className="relative mx-auto flex h-38 w-38 items-center justify-center rounded-full bg-[conic-gradient(#4F46E5_0deg,#4F46E5_calc(var(--progress)*3.6deg),#E2E8F0_calc(var(--progress)*3.6deg),#E2E8F0_360deg)]" style={progressCircleStyle}>
                       <div className="flex h-26 w-26 flex-col items-center justify-center rounded-full bg-white text-center shadow-[inset_0_1px_6px_rgba(15,23,42,0.08)]">
                         <span className="text-3xl font-semibold text-[#0F172A]">{completion}%</span>
-                        <span className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Complet</span>
+                        <span className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{t('client.complet')}</span>
                       </div>
                     </div>
 
                     <ul className="space-y-3">
                       {progressSteps.map((step) => (
-                        <li key={step.label} className="flex items-center gap-3 text-[0.92rem] font-semibold text-[#0F172A]">
+                        <li key={clientDisplay(t, step.label)} className="flex items-center gap-3 text-[0.92rem] font-semibold text-[#0F172A]">
                           <span
                             className={`flex h-5 w-5 items-center justify-center rounded-full border ${step.done ? 'border-[#16A34A] bg-[#DCFCE7] text-[#16A34A]' : 'border-slate-300 bg-slate-100 text-transparent'}`}
                             aria-hidden="true"
                           >
                             ✓
                           </span>
-                          <span>{step.label}</span>
+                          <span>{clientDisplay(t, step.label)}</span>
                         </li>
                       ))}
                     </ul>
@@ -553,15 +559,15 @@ export default function ClientDashboardPage() {
 
                   {profileIsFullyValidated ? (
                     <div className="w-full rounded-2xl border border-[#BBF7D0] bg-[#DCFCE7] px-4 py-2 text-sm font-medium text-[#166534]">
-                      ✓ Votre profil est complet. Vous pouvez réserver un véhicule.
+                      {t('client.votre_profil_est_complet_vous_pouvez_reserver_un_vehicule')}
                     </div>
                   ) : (
                     <div className="w-full rounded-2xl border border-[#FCD34D] bg-[#FFEDD5] px-4 py-2 text-sm text-[#9A3412]">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="font-medium">⚠ Votre profil doit être complété et vos documents validés avant de pouvoir réserver un véhicule.</p>
+                        <p className="font-medium">{t('client.votre_profil_doit_etre_complete_et_vos_documents_valides_avant_de')}</p>
                         <Link to="/client/profile?tab=documents" className="shrink-0">
                           <Button className="bg-[#F97316] text-white hover:bg-[#EA580C] focus-visible:ring-[#F97316]">
-                            Compléter mon profil
+                            {t('client.completer_mon_profil')}
                           </Button>
                         </Link>
                       </div>
@@ -580,10 +586,10 @@ export default function ClientDashboardPage() {
                   />
                 ) : (
                   <ReservationPanel
-                    title="Réservation en cours"
+                    title={t('client.reservation_en_cours')}
                     reservation={undefined}
                     emptyMessage={reservationsUnavailable
-                      ? 'Impossible de charger les réservations.'
+                      ? t('client.impossible_de_charger_les_reservations')
                       : 'Aucune réservation en cours'}
                   />
                 )}
@@ -600,10 +606,10 @@ export default function ClientDashboardPage() {
                 />
               ) : (
                 <ReservationPanel
-                  title="Prochaine réservation"
+                  title={t('client.prochaine_reservation')}
                   reservation={undefined}
                   emptyMessage={reservationsUnavailable
-                    ? 'Impossible de charger les réservations.'
+                    ? t('client.impossible_de_charger_les_reservations')
                     : 'Aucune réservation prévue'}
                 />
               )}

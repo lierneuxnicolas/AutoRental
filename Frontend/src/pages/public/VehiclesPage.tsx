@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert, EmptyState, LoadingSpinner } from '../../components/feedback'
@@ -8,13 +9,13 @@ import type { PublicVehicle } from '../../types/vehicle'
 import { buildRentalDateTime, getFollowingDate, getMinimumStartDate, getRentalClock, RETURN_CLOCK } from '../../utils/rentalPeriod'
 
 const SORT_OPTIONS = [
-  { value: 'popularity', label: 'Popularité' },
-  { value: 'price-asc', label: 'Prix croissant' },
-  { value: 'price-desc', label: 'Prix décroissant' },
-  { value: 'name-asc', label: 'Nom A-Z' },
+  { value: 'popularity', label: 'public.popularite' },
+  { value: 'price-asc', label: 'public.prix_croissant' },
+  { value: 'price-desc', label: 'public.prix_decroissant' },
+  { value: 'name-asc', label: 'public.nom_a_z' },
 ]
 
-const API_ERROR_MESSAGE = 'Impossible de charger les véhicules. Veuillez réessayer.'
+const API_ERROR_MESSAGE = 'public.impossible_de_charger_les_vehicules_veuillez_reessayer'
 
 function toSelectOptions(values: string[]) {
   return values.map((value) => ({ value, label: value }))
@@ -83,6 +84,7 @@ function toVehicleList(payload: Awaited<ReturnType<typeof getVehicles>>): Public
 }
 
 export default function VehiclesPage() {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const initialStartDate = splitDateTimeParam(searchParams.get('start'))
   const initialEndDate = splitDateTimeParam(searchParams.get('end'))
@@ -140,11 +142,11 @@ export default function VehiclesPage() {
     }
 
     if (startDate < getMinimumStartDate()) {
-      return 'La date de départ ne peut pas être dans le passé.'
+      return 'public.la_date_de_depart_ne_peut_pas_etre_dans_le_passe'
     }
 
     if (new Date(endDateTimeValue).getTime() <= new Date(startDateTimeValue).getTime()) {
-      return 'La date de retour doit être postérieure à la date de départ.'
+      return 'public.la_date_de_retour_doit_etre_posterieure_a_la_date_de'
     }
 
     return null
@@ -372,7 +374,7 @@ export default function VehiclesPage() {
   )
 
   const categoryFilterOptions = useMemo(
-    () => [{ value: '', label: 'Toutes les catégories' }, ...categoryOptions],
+    () => [{ value: '', label: 'public.toutes_les_categories' }, ...categoryOptions],
     [categoryOptions],
   )
 
@@ -401,7 +403,7 @@ export default function VehiclesPage() {
       <>
         <div className="space-y-3">
           <Input
-            label="Date de départ"
+            label={t('public.date_de_depart')}
             name="startDate"
             type="date"
             min={getMinimumStartDate()}
@@ -409,7 +411,7 @@ export default function VehiclesPage() {
             onChange={(event) => setStartDate(event.target.value)}
           />
           <Input
-            label="Date de retour"
+            label={t('public.date_de_retour')}
             name="endDate"
             type="date"
             min={startDate ? getFollowingDate(startDate) : getFollowingDate(getMinimumStartDate())}
@@ -419,50 +421,50 @@ export default function VehiclesPage() {
         </div>
 
         <Select
-          label="Catégorie"
+          label={t('public.categorie')}
           name="category"
           value={selectedCategory}
           onChange={(event) => setSelectedCategory(event.target.value)}
-          options={categoryFilterOptions}
+          options={categoryFilterOptions.map((option) => ({ ...option, label: t(option.label) }))}
         />
 
         {dateValidationMessage ? (
-          <p className="text-sm text-[#B91C1C]">{dateValidationMessage}</p>
+          <p className="text-sm text-[#B91C1C]">{t(dateValidationMessage)}</p>
         ) : null}
 
         {availabilityErrorMessage ? (
           <Alert variant="danger" className="rounded-2xl">
             <div className="space-y-3">
-              <p>{availabilityErrorMessage}</p>
+              <p>{t(availabilityErrorMessage)}</p>
               <button
                 type="button"
                 onClick={handleRetryAvailability}
                 className="inline-flex h-9 items-center justify-center rounded-xl border border-[#FCA5A5] bg-white px-3 text-xs font-medium text-[#B91C1C] transition hover:bg-[#FEF2F2]"
               >
-                Réessayer
+                {t('public.reessayer')}
               </button>
             </div>
           </Alert>
         ) : null}
 
         {isCheckingAvailability ? (
-          <p className="text-sm text-slate-600">Verification des disponibilites en cours...</p>
+          <p className="text-sm text-slate-600">{t('public.verification_des_disponibilites_en_cours')}</p>
         ) : null}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
           <Select
-            label="Transmission"
+            label={t('public.transmission')}
             name="transmission"
             value={selectedTransmission}
             onChange={(event) => setSelectedTransmission(event.target.value)}
-            options={transmissionFilterOptions}
+            options={transmissionFilterOptions.map((option) => ({ ...option, label: t(option.label) }))}
           />
           <Select
-            label="Carburant"
+            label={t('public.carburant')}
             name="fuelType"
             value={selectedFuelType}
             onChange={(event) => setSelectedFuelType(event.target.value)}
-            options={fuelFilterOptions}
+            options={fuelFilterOptions.map((option) => ({ ...option, label: t(option.label) }))}
           />
         </div>
 
@@ -472,7 +474,7 @@ export default function VehiclesPage() {
             onClick={handleResetFilters}
             className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl px-3 text-sm font-medium text-[#2563EB] transition hover:bg-blue-50"
           >
-            <span>Réinitialiser</span>
+            <span>{t('public.reinitialiser')}</span>
             <span aria-hidden="true">↻</span>
           </button>
         </div>
@@ -489,18 +491,18 @@ export default function VehiclesPage() {
   }
 
   return (
-    <section className="overflow-x-clip pt-0 pb-8 sm:pt-0 sm:pb-10" aria-label="Nos vehicules">
+    <section className="overflow-x-clip pt-0 pb-8 sm:pt-0 sm:pb-10" aria-label={t('public.nos_vehicules')}>
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         {errorMessage ? (
-          <Alert variant="danger" title="Erreur de chargement" className="mt-6">
+          <Alert variant="danger" title={t('public.erreur_de_chargement')} className="mt-6">
             <div className="space-y-3">
-              <p>{errorMessage}</p>
+              <p>{t(errorMessage)}</p>
               <button
                 type="button"
                 onClick={handleRetryVehicles}
                 className="inline-flex h-10 items-center justify-center rounded-2xl border border-[#FCA5A5] bg-white px-4 text-sm font-medium text-[#B91C1C] transition hover:bg-[#FEF2F2]"
               >
-                Réessayer
+                {t('public.reessayer')}
               </button>
             </div>
           </Alert>
@@ -508,15 +510,15 @@ export default function VehiclesPage() {
 
         {isLoading && vehicles.length === 0 ? (
           <div className="mt-10 flex justify-center">
-            <LoadingSpinner aria-label="Chargement des vehicules" />
+            <LoadingSpinner aria-label={t('public.chargement_des_vehicules')} />
           </div>
         ) : null}
 
         {!isLoading && !errorMessage && vehicles.length === 0 ? (
           <div className="mt-10">
             <EmptyState
-              title="Aucun vehicule disponible"
-              description="Le catalogue est temporairement vide. Revenez dans quelques instants."
+              title={t('public.aucun_vehicule_disponible_alt')}
+              description={t('public.le_catalogue_est_temporairement_vide_revenez_dans_quelques_instants')}
             />
           </div>
         ) : null}
@@ -531,7 +533,7 @@ export default function VehiclesPage() {
                 aria-expanded={isMobileFiltersOpen}
                 aria-controls="vehicles-filters-mobile"
               >
-                {isMobileFiltersOpen ? 'Masquer les filtres' : 'Filtres'}
+                {t(isMobileFiltersOpen ? 'public.masquer_les_filtres' : 'public.filtres')}
               </button>
             </div>
 
@@ -539,7 +541,7 @@ export default function VehiclesPage() {
               <aside id="vehicles-filters-mobile" className="lg:hidden">
                 <Card className="rounded-3xl border-slate-200 bg-[#F8FAFC] shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
                   <div>
-                    <h2 className="text-lg font-semibold text-[#1F2937]">Filtres</h2>
+                    <h2 className="text-lg font-semibold text-[#1F2937]">{t('public.filtres')}</h2>
                   </div>
 
                   <form className="mt-5 space-y-5">
@@ -553,7 +555,7 @@ export default function VehiclesPage() {
               <Card className="rounded-3xl border-slate-200 bg-[#F8FAFC] shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h2 className="text-xl font-semibold text-[#1F2937]">Filtres</h2>
+                    <h2 className="text-xl font-semibold text-[#1F2937]">{t('public.filtres')}</h2>
                   </div>
                 </div>
 
@@ -568,20 +570,20 @@ export default function VehiclesPage() {
                 <div>
                   {!isResultsLoading ? (
                     <h2 className="text-xl font-semibold text-[#1F2937] sm:text-2xl">
-                      {cards.length} véhicules
+                      {t('public.count_vehicule', { count: cards.length })}
                     </h2>
                   ) : null}
                 </div>
 
                 <div className="w-full md:w-auto md:shrink-0">
                   <div className="flex items-center gap-2 md:whitespace-nowrap">
-                    <span className="text-sm font-medium text-slate-600">Trier par :</span>
+                    <span className="text-sm font-medium text-slate-600">{t('public.trier_par')}</span>
                     <div className="min-w-0 flex-1 md:w-44">
                       <Select
                         name="sort"
                         value={sortOption}
                         onChange={(event) => setSortOption(event.target.value)}
-                        options={SORT_OPTIONS}
+                        options={SORT_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
                       />
                     </div>
                   </div>
@@ -590,7 +592,7 @@ export default function VehiclesPage() {
 
               {isResultsLoading ? (
                 <div className="mt-6 flex justify-center">
-                  <LoadingSpinner aria-label="Chargement des résultats" />
+                  <LoadingSpinner aria-label={t('public.chargement_des_resultats')} />
                 </div>
               ) : cards.length > 0 ? (
                 <div className="mt-6 space-y-6">
@@ -601,15 +603,15 @@ export default function VehiclesPage() {
               ) : (
                 <div className="mt-6">
                   <EmptyState
-                    title="Aucun véhicule disponible pour ces critères."
-                    description="Modifiez vos filtres ou relancez une recherche plus large."
+                    title={t('public.aucun_vehicule_disponible_pour_ces_criteres')}
+                    description={t('public.modifiez_vos_filtres_ou_relancez_une_recherche_plus_large')}
                     action={
                       <button
                         type="button"
                         onClick={handleResetFilters}
                         className="inline-flex h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                       >
-                        Réinitialiser les filtres
+                        {t('public.reinitialiser_les_filtres')}
                       </button>
                     }
                   />

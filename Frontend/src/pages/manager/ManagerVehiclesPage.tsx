@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -103,7 +106,7 @@ function formatOperationalDateTime(value: unknown, includeAt = false): string | 
   if (!Number.isFinite(date.getTime())) {
     return null
   }
-  const formatted = new Intl.DateTimeFormat('fr-FR', {
+  const formatted = new Intl.DateTimeFormat(clientLocale(), {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
@@ -247,9 +250,10 @@ interface VehicleCardProps {
 }
 
 function OperationalStateDisplay({ state, compact = false }: { state: OperationalState; compact?: boolean }) {
+  const { t } = useTranslation()
   return (
     <div className="space-y-1">
-      <StatusBadge variant={state.variant} label={state.label} />
+      <StatusBadge variant={state.variant} label={professionalDisplay(t, state.label)} />
       {state.detail ? <p className={`text-xs leading-5 text-slate-500${compact ? ' whitespace-nowrap' : ''}`}>{state.detail}</p> : null}
     </div>
   )
@@ -293,7 +297,7 @@ function formatDateTime(value: unknown): string | null {
     return value
   }
 
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(clientLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -421,6 +425,7 @@ function ReportSection({ title, children }: { title: string; children: React.Rea
 }
 
 function InterventionReport({ intervention }: { intervention: ManagementInterventionResponse }) {
+  const { t } = useTranslation()
   const finalReport = asRecord(intervention.final_report)
   const vehicle = asRecord(finalReport.vehicle)
   const checkIn = asRecord(finalReport.check_in)
@@ -439,50 +444,51 @@ function InterventionReport({ intervention }: { intervention: ManagementInterven
   const hasFinalReport = Object.keys(finalReport).length > 0
 
   if (!hasFinalReport) {
-    return <p className="text-sm text-slate-600">Aucun rapport final disponible.</p>
+    return <p className="text-sm text-slate-600">{t("professional.aucun_rapport_final_disponible")}</p>
   }
 
   return (
     <div className="grid gap-3 xl:grid-cols-2">
-      <ReportSection title="Résumé intervention">
-        <ReportField label="Véhicule" value={`${asText(vehicle.brand) ?? intervention.vehicle.brand} ${asText(vehicle.model_name) ?? intervention.vehicle.model_name}`} />
-        <ReportField label="Immatriculation" value={asText(vehicle.registration_number) ?? intervention.vehicle.registration_number} />
-        <ReportField label="Intervenant" value={assigneeLabel} />
-        <ReportField label="Type d'intervention" value={formatInterventionType(finalReport.intervention_type ?? intervention.intervention_type)} />
-        <ReportField label="Motif / consigne" value={asText(finalReport.description) ?? intervention.description} />
-        <ReportField label="Date début" value={formatDateTime(finalReport.started_at)} />
-        <ReportField label="Date fin" value={formatDateTime(finalReport.completed_at)} />
-        <ReportField label="Parking / place" value={parkingLabel} />
+      <ReportSection title={t("professional.resume_intervention")}>
+        <ReportField label={t("client.vehicule_alt")} value={`${asText(vehicle.brand) ?? intervention.vehicle.brand} ${asText(vehicle.model_name) ?? intervention.vehicle.model_name}`} />
+        <ReportField label={t("professional.immatriculation")} value={asText(vehicle.registration_number) ?? intervention.vehicle.registration_number} />
+        <ReportField label={t("professional.intervenant")} value={assigneeLabel} />
+        <ReportField label={t("professional.type_d_intervention")} value={formatInterventionType(finalReport.intervention_type ?? intervention.intervention_type)} />
+        <ReportField label={t("professional.motif_consigne")} value={asText(finalReport.description) ?? intervention.description} />
+        <ReportField label={t("professional.date_debut")} value={formatDateTime(finalReport.started_at)} />
+        <ReportField label={t("professional.date_fin")} value={formatDateTime(finalReport.completed_at)} />
+        <ReportField label={t("professional.parking_place")} value={parkingLabel} />
       </ReportSection>
 
-      <ReportSection title="Check-in">
-        <ReportField label="Kilométrage initial" value={checkIn.mileage} />
-        <ReportField label="Observations" value={checkIn.observations} />
-        <ReportPhotos title="Photos avant intervention" photos={beforePhotos} />
+      <ReportSection title={t("professional.check_in")}>
+        <ReportField label={t("professional.kilometrage_initial")} value={checkIn.mileage} />
+        <ReportField label={t("professional.observations")} value={checkIn.observations} />
+        <ReportPhotos title={t("professional.photos_avant_intervention")} photos={beforePhotos} />
       </ReportSection>
 
-      <ReportSection title="Travail effectué">
-        <ReportField label="Travail effectué" value={work.cleaning_work ?? work.diagnostic ?? work.repairs_done} />
-        <ReportField label="Anomalie éventuelle" value={formatAnomalyType(work.anomaly_type)} />
-        <ReportField label="Commentaire anomalie" value={work.anomaly_comment} />
-        <ReportField label="Coût éventuel" value={estimatedCost ? `${estimatedCost} EUR` : null} />
-        <ReportPhotos title="Photos pendant intervention" photos={duringPhotos} />
+      <ReportSection title={t("professional.travail_effectue")}>
+        <ReportField label={t("professional.travail_effectue")} value={work.cleaning_work ?? work.diagnostic ?? work.repairs_done} />
+        <ReportField label={t("professional.anomalie_eventuelle")} value={formatAnomalyType(work.anomaly_type)} />
+        <ReportField label={t("professional.commentaire_anomalie")} value={work.anomaly_comment} />
+        <ReportField label={t("professional.cout_eventuel")} value={estimatedCost ? `${estimatedCost} EUR` : null} />
+        <ReportPhotos title={t("professional.photos_pendant_intervention")} photos={duringPhotos} />
       </ReportSection>
 
-      <ReportSection title="Check-out">
-        <ReportField label="Kilométrage final" value={checkOut.mileage} />
-        <ReportField label="État final" value={checkOut.final_vehicle_state ?? checkOut.observations} />
-        <ReportField label="Véhicule opérationnel" value={asBooleanLabel(checkOut.vehicle_operational)} />
-        <ReportField label="Véhicule propre" value={asBooleanLabel(checkOut.vehicle_clean)} />
-        <ReportField label="Nouvelle intervention nécessaire" value={asBooleanLabel(checkOut.new_intervention_needed)} />
-        <ReportField label="Observations finales" value={finalObservations} />
-        <ReportPhotos title="Photos après intervention" photos={checkOutPhotos} />
+      <ReportSection title={t("professional.check_out")}>
+        <ReportField label={t("professional.kilometrage_final")} value={checkOut.mileage} />
+        <ReportField label={t("professional.etat_final")} value={checkOut.final_vehicle_state ?? checkOut.observations} />
+        <ReportField label={t("professional.vehicule_operationnel")} value={asBooleanLabel(checkOut.vehicle_operational)} />
+        <ReportField label={t("professional.vehicule_propre")} value={asBooleanLabel(checkOut.vehicle_clean)} />
+        <ReportField label={t("professional.nouvelle_intervention_necessaire")} value={asBooleanLabel(checkOut.new_intervention_needed)} />
+        <ReportField label={t("professional.observations_finales")} value={finalObservations} />
+        <ReportPhotos title={t("professional.photos_apres_intervention")} photos={checkOutPhotos} />
       </ReportSection>
     </div>
   )
 }
 
 function VehicleMobileCard({ vehicle, operationalState, onPlanIntervention, onToggleActive, basePath, statusForm, validationPanel }: VehicleCardProps) {
+  const { t } = useTranslation()
   const planningEnabled = canPlanIntervention(vehicle, operationalState)
   const registrationNumber = getRegistrationNumber(vehicle)
   const mainPhotoUrl = resolveMediaUrl(vehicle.main_photo?.file)
@@ -500,8 +506,7 @@ function VehicleMobileCard({ vehicle, operationalState, onPlanIntervention, onTo
             />
           ) : (
             <div className="flex h-20 w-28 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-xs font-medium text-slate-500">
-              Pas de photo
-            </div>
+              {t("professional.pas_de_photo")}</div>
           )}
 
           <div className="min-w-0 flex-1">
@@ -516,18 +521,18 @@ function VehicleMobileCard({ vehicle, operationalState, onPlanIntervention, onTo
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-sm text-[#1F2937]">
-          <p className="col-span-2"><span className="text-slate-500">Parking / place :</span> {getParkingLabel(vehicle)}</p>
+          <p className="col-span-2"><span className="text-slate-500">{t("professional.parking_place_2")}</span> {getParkingLabel(vehicle)}</p>
           {registrationNumber ? (
-            <p className="col-span-2"><span className="text-slate-500">Immatriculation :</span> {registrationNumber}</p>
+            <p className="col-span-2"><span className="text-slate-500">{t("professional.immatriculation_2")}</span> {registrationNumber}</p>
           ) : null}
         </div>
 
         <div className="flex flex-wrap gap-2">
           <Link to={`${basePath}/vehicles/${vehicle.id}/edit`}>
-            <Button variant="secondary" size="sm">Modifier</Button>
+            <Button variant="secondary" size="sm">{t("professional.modifier")}</Button>
           </Link>
-          <Button variant="secondary" size="sm" disabled={!planningEnabled} onClick={() => onPlanIntervention(vehicle)}>Planifier une intervention</Button>
-          <Button variant={vehicle.is_active ? 'danger' : 'success'} className={vehicle.is_active ? 'min-w-[10.5rem] whitespace-nowrap border border-[#EF4444] bg-[#FCA5A5] text-[#111111] hover:bg-[#F87171]' : 'min-w-[10.5rem] whitespace-nowrap border border-[#22C55E] bg-[#86EFAC] text-[#111111] hover:bg-[#4ADE80]'} size="sm" onClick={() => onToggleActive(vehicle)}>{vehicle.is_active ? 'Retirer du service' : 'Réactiver'}</Button>
+          <Button variant="secondary" size="sm" disabled={!planningEnabled} onClick={() => onPlanIntervention(vehicle)}>{t("professional.planifier_une_intervention")}</Button>
+          <Button variant={vehicle.is_active ? 'danger' : 'success'} className={vehicle.is_active ? 'min-w-[10.5rem] whitespace-nowrap border border-[#EF4444] bg-[#FCA5A5] text-[#111111] hover:bg-[#F87171]' : 'min-w-[10.5rem] whitespace-nowrap border border-[#22C55E] bg-[#86EFAC] text-[#111111] hover:bg-[#4ADE80]'} size="sm" onClick={() => onToggleActive(vehicle)}>{vehicle.is_active ? t("professional.retirer_du_service") : t("professional.reactiver")}</Button>
         </div>
         {statusForm ? <div className="pt-2">{statusForm}</div> : null}
         {validationPanel ? <div className="pt-2">{validationPanel}</div> : null}
@@ -537,6 +542,7 @@ function VehicleMobileCard({ vehicle, operationalState, onPlanIntervention, onTo
 }
 
 function VehicleDesktopRow({ vehicle, operationalState, onPlanIntervention, onToggleActive, basePath, statusForm, validationPanel }: VehicleCardProps) {
+  const { t } = useTranslation()
   const planningEnabled = canPlanIntervention(vehicle, operationalState)
   const registrationNumber = getRegistrationNumber(vehicle)
   const mainPhotoUrl = resolveMediaUrl(vehicle.main_photo?.file)
@@ -554,8 +560,7 @@ function VehicleDesktopRow({ vehicle, operationalState, onPlanIntervention, onTo
           />
         ) : (
           <div className="flex h-14 w-20 items-center justify-center rounded-xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-xs text-slate-500">
-            Sans photo
-          </div>
+            {t("professional.sans_photo")}</div>
         )}
       </td>
       <td className="max-w-48 px-4 py-3 text-sm text-[#1F2937]">
@@ -572,10 +577,10 @@ function VehicleDesktopRow({ vehicle, operationalState, onPlanIntervention, onTo
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-2">
           <Link className="shrink-0" to={`${basePath}/vehicles/${vehicle.id}/edit`}>
-            <Button variant="secondary" size="sm">Modifier</Button>
+            <Button variant="secondary" size="sm">{t("professional.modifier")}</Button>
           </Link>
-          <Button variant="secondary" className="h-auto min-h-9 max-w-52 whitespace-normal py-2 text-center leading-4" size="sm" disabled={!planningEnabled} onClick={() => onPlanIntervention(vehicle)}>Planifier une intervention</Button>
-          <Button variant={vehicle.is_active ? 'danger' : 'success'} className={vehicle.is_active ? 'h-auto min-h-9 min-w-[8.5rem] max-w-36 whitespace-normal border border-[#EF4444] bg-[#FCA5A5] py-2 text-center leading-4 text-[#111111] hover:bg-[#F87171]' : 'h-auto min-h-9 min-w-[8.5rem] max-w-36 whitespace-normal border border-[#22C55E] bg-[#86EFAC] py-2 text-center leading-4 text-[#111111] hover:bg-[#4ADE80]'} size="sm" onClick={() => onToggleActive(vehicle)}>{vehicle.is_active ? 'Retirer du service' : 'Réactiver'}</Button>
+          <Button variant="secondary" className="h-auto min-h-9 max-w-52 whitespace-normal py-2 text-center leading-4" size="sm" disabled={!planningEnabled} onClick={() => onPlanIntervention(vehicle)}>{t("professional.planifier_une_intervention")}</Button>
+          <Button variant={vehicle.is_active ? 'danger' : 'success'} className={vehicle.is_active ? 'h-auto min-h-9 min-w-[8.5rem] max-w-36 whitespace-normal border border-[#EF4444] bg-[#FCA5A5] py-2 text-center leading-4 text-[#111111] hover:bg-[#F87171]' : 'h-auto min-h-9 min-w-[8.5rem] max-w-36 whitespace-normal border border-[#22C55E] bg-[#86EFAC] py-2 text-center leading-4 text-[#111111] hover:bg-[#4ADE80]'} size="sm" onClick={() => onToggleActive(vehicle)}>{vehicle.is_active ? t("professional.retirer_du_service") : t("professional.reactiver")}</Button>
         </div>
       </td>
     </tr>
@@ -632,6 +637,7 @@ function getStatusSubmitError(error: unknown): string {
 }
 
 export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVehiclesPageProps) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
@@ -832,7 +838,7 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
           const conflict = data.intervention as { planned_start_at?: string; planned_end_at?: string; reference?: string }
           setStatusApiError(
             `${data.detail ?? 'Créneau indisponible'}${conflict.reference ? ` (${conflict.reference})` : ''}`
-              + (typeof conflict.planned_start_at === 'string' && typeof conflict.planned_end_at === 'string' ? ` ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflict.planned_start_at))} → ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflict.planned_end_at))}` : ''),
+              + (typeof conflict.planned_start_at === 'string' && typeof conflict.planned_end_at === 'string' ? ` ${new Intl.DateTimeFormat(clientLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflict.planned_start_at))} → ${new Intl.DateTimeFormat(clientLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(conflict.planned_end_at))}` : ''),
           )
           return
         }
@@ -941,41 +947,39 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
       <div className="space-y-4 rounded-2xl border border-[#DCE8FF] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-sm font-semibold text-[#0F172A]">Rapport intervention</p>
+            <p className="text-sm font-semibold text-[#0F172A]">{t("professional.rapport_intervention")}</p>
             <p className="mt-1 text-xs text-slate-500">{selectedValidation.validation.label}</p>
           </div>
           <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedValidation(null)}>
-            Fermer
-          </Button>
+            {t("client.fermer")}</Button>
         </div>
 
         <InterventionReport intervention={selectedValidation.validation.intervention} />
 
-        {validationError ? <Alert variant="danger" title="Validation impossible" message={validationError} /> : null}
+        {validationError ? <Alert variant="danger" title={t("professional.validation_impossible")} message={professionalDisplay(t, validationError)} /> : null}
 
         <form className="space-y-4 border-t border-[#E5E7EB] pt-4" onSubmit={handleSubmitValidationDecision}>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <label className="block text-sm font-medium text-[#1F2937]" htmlFor={`manager-validation-decision-${vehicle.id}`}>
-                Décision du gestionnaire
-              </label>
+                {t("professional.decision_du_gestionnaire")}</label>
               <select
                 id={`manager-validation-decision-${vehicle.id}`}
                 value={validationDecision}
                 onChange={(event) => setValidationDecision(event.target.value as ManagerDecision)}
                 className="block h-12 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
               >
-                <option value="DISPONIBLE">Remettre disponible</option>
-                <option value="A_CONTROLER">À contrôler</option>
-                <option value="INDISPONIBLE">Indisponible</option>
-                <option value="RELANCER">{selectedValidation.validation.interventionType === 'MECANIQUE' ? 'Relancer une maintenance' : 'Relancer un nettoyage'}</option>
+                <option value="DISPONIBLE">{t("professional.remettre_disponible")}</option>
+                <option value="A_CONTROLER">{t("client.a_controler_alt")}</option>
+                <option value="INDISPONIBLE">{t("public.indisponible")}</option>
+                <option value="RELANCER">{selectedValidation.validation.interventionType === 'MECANIQUE' ? t("professional.relancer_une_maintenance") : t("professional.relancer_un_nettoyage")}</option>
               </select>
             </div>
 
             {validationDecision === 'RELANCER' ? (
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-[#1F2937]" htmlFor={`manager-validation-assignee-${vehicle.id}`}>
-                  {selectedValidation.validation.interventionType === 'MECANIQUE' ? 'Mécanicien affecté' : 'Agent de nettoyage affecté'}
+                  {selectedValidation.validation.interventionType === 'MECANIQUE' ? t("professional.mecanicien_affecte") : t("professional.agent_de_nettoyage_affecte")}
                 </label>
                 <select
                   id={`manager-validation-assignee-${vehicle.id}`}
@@ -983,7 +987,7 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
                   onChange={(event) => setValidationAssigneeId(event.target.value)}
                   className="block h-12 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
                 >
-                  <option value="">Sélectionner</option>
+                  <option value="">{t("professional.selectionner")}</option>
                   {validationAssignees.map((assignee) => (
                     <option key={assignee.id} value={assignee.id}>
                       {`${assignee.first_name} ${assignee.last_name}`.trim() || assignee.email}
@@ -996,20 +1000,18 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
 
           {validationDecision === 'RELANCER' ? (
             <Input
-              label="Motif"
+              label={t("professional.motif")}
               value={validationReason}
               onChange={(event) => setValidationReason(event.target.value)}
-              placeholder={selectedValidation.validation.interventionType === 'MECANIQUE' ? 'Motif de la nouvelle maintenance' : 'Motif du nouveau nettoyage'}
+              placeholder={selectedValidation.validation.interventionType === 'MECANIQUE' ? t("professional.motif_de_la_nouvelle_maintenance") : t("professional.motif_du_nouveau_nettoyage")}
             />
           ) : null}
 
           <div className="flex flex-wrap justify-end gap-3">
             <Button type="button" variant="secondary" onClick={() => setSelectedValidation(null)}>
-              Annuler
-            </Button>
+              {t("client.annuler")}</Button>
             <Button type="submit" disabled={validationStatusMutation.isPending || relaunchInterventionMutation.isPending || relaunchAssignMutation.isPending}>
-              Confirmer la décision
-            </Button>
+              {t("professional.confirmer_la_decision")}</Button>
           </div>
         </form>
       </div>
@@ -1019,20 +1021,20 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
   return (
     <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <h1 className="text-3xl font-semibold text-[#0F172A]">Gestion des véhicules</h1>
+        <h1 className="text-3xl font-semibold text-[#0F172A]">{t("professional.gestion_des_vehicules")}</h1>
 
         <div className="flex flex-wrap items-center gap-3">
           <Link to={`${basePath}/vehicles/new`}>
-            <Button>Ajouter un véhicule</Button>
+            <Button>{t("professional.ajouter_un_vehicule")}</Button>
           </Link>
-          <Button variant="secondary" onClick={() => navigate('/')}>Retour</Button>
+          <Button variant="secondary" onClick={() => navigate('/')}>{t("public.retour")}</Button>
         </div>
       </div>
 
       {successMessage ? (
         <Alert
           variant="success"
-          title="Operation reussie"
+          title={t("professional.operation_reussie")}
           message={
             <div className="flex items-center justify-between gap-3">
               <span>{successMessage}</span>
@@ -1041,34 +1043,32 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
                 size="sm"
                 onClick={() => navigate(location.pathname, { replace: true, state: null })}
               >
-                Fermer
-              </Button>
+                {t("client.fermer")}</Button>
             </div>
           }
         />
       ) : null}
 
       {statusSuccessMessage ? (
-        <Alert variant="success" title="Statut mis a jour" message={statusSuccessMessage} />
+        <Alert variant="success" title={t("professional.statut_mis_a_jour")} message={professionalDisplay(t, statusSuccessMessage)} />
       ) : null}
 
       {vehiclesQuery.isLoading ? (
         <div className="flex min-h-[35vh] items-center justify-center">
-          <LoadingSpinner size="lg" aria-label="Chargement des véhicules" />
+          <LoadingSpinner size="lg" aria-label={t("professional.chargement_des_vehicules")} />
         </div>
       ) : null}
 
       {vehiclesQuery.isError ? (
         <Alert
           variant="danger"
-          title="Erreur de chargement"
+          title={t("public.erreur_de_chargement")}
           message={
             <div className="flex flex-col gap-3">
-              <span>Impossible de charger la liste des véhicules.</span>
+              <span>{t("professional.impossible_de_charger_la_liste_des_vehicules")}</span>
               <div>
                 <Button variant="danger" size="sm" onClick={() => void vehiclesQuery.refetch()}>
-                  Réessayer
-                </Button>
+                  {t("client.reessayer_alt")}</Button>
               </div>
             </div>
           }
@@ -1077,12 +1077,11 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
 
       {!vehiclesQuery.isLoading && !vehiclesQuery.isError && vehicles.length === 0 ? (
         <EmptyState
-          title="Aucun véhicule"
-          description="Aucun véhicule n’est actuellement enregistré dans la flotte."
+          title={t("professional.aucun_vehicule")}
+          description={t("professional.aucun_vehicule_n_est_actuellement_enregistre_dans_la_flotte")}
           action={
             <Button variant="secondary" size="sm" onClick={() => void vehiclesQuery.refetch()}>
-              Réessayer
-            </Button>
+              {t("client.reessayer_alt")}</Button>
           }
         />
       ) : null}
@@ -1114,12 +1113,12 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
             <table className="w-full min-w-[1120px] border-collapse text-left">
               <thead className="border-b border-[#E5E7EB] bg-[#F8FAFC]">
                 <tr>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Photo</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Véhicule</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Immatriculation</th>
-                  <th className="min-w-[8.5rem] whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">État actuel</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Parking / place</th>
-                  <th className="w-[30rem] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.photo")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("client.vehicule_alt")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.immatriculation")}</th>
+                  <th className="min-w-[8.5rem] whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.etat_actuel")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.parking_place")}</th>
+                  <th className="w-[30rem] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1147,7 +1146,7 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
             <p className="text-sm text-slate-600">
-              Total: <span className="font-semibold text-[#1F2937]">{vehiclesQuery.data?.count ?? 0}</span>
+              {t("client.total")}<span className="font-semibold text-[#1F2937]">{vehiclesQuery.data?.count ?? 0}</span>
             </p>
 
             <div className="flex items-center gap-2">
@@ -1157,17 +1156,15 @@ export default function ManagerVehiclesPage({ basePath = '/manager' }: ManagerVe
                 disabled={!vehiclesQuery.data?.previous || page <= 1}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
               >
-                Précédent
-              </Button>
-              <span className="text-sm font-medium text-slate-700">Page {page} / {totalPages}</span>
+                {t("client.precedent_alt")}</Button>
+              <span className="text-sm font-medium text-slate-700">{t("client.page")} {page} / {totalPages}</span>
               <Button
                 variant="secondary"
                 size="sm"
                 disabled={!vehiclesQuery.data?.next}
                 onClick={() => setPage((current) => current + 1)}
               >
-                Suivant
-              </Button>
+                {t("client.suivant")}</Button>
             </div>
           </div>
         </>

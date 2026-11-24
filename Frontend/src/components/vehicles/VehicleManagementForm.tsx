@@ -1,3 +1,5 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm, useWatch } from 'react-hook-form'
@@ -160,6 +162,7 @@ export default function VehicleManagementForm({
   selectedPhotos,
   onPhotosChange,
 }: VehicleManagementFormProps) {
+  const { t } = useTranslation()
   const {
     register,
     handleSubmit,
@@ -331,63 +334,63 @@ export default function VehicleManagementForm({
 
   return (
     <div className="space-y-6">
-      {displayedApiError ? <Alert variant="danger" title="Enregistrement impossible" message={displayedApiError} /> : null}
+      {displayedApiError ? <Alert variant="danger" title={t("professional.enregistrement_impossible")} message={professionalDisplay(t, displayedApiError)} /> : null}
 
       <form onSubmit={handleSubmit(onValidSubmit)} noValidate className="space-y-6">
-        <VehicleFormSection title="Informations internes">
+        <VehicleFormSection title={t("professional.informations_internes")}>
           <div className="grid gap-5 md:grid-cols-2">
-            <Input label="Immatriculation" placeholder="GAC-ABC-001" maxLength={30} error={errors.registration_number?.message} {...register('registration_number')} />
+            <Input label={t("professional.immatriculation")} placeholder="GAC-ABC-001" maxLength={30} error={errors.registration_number?.message} {...register('registration_number')} />
             <div className="space-y-2">
               <Select
-                label="Parking / place"
-                placeholder={isLoadingOptions ? 'Chargement...' : parkingSpaceOptions.length > 0 ? 'Sélectionner une place' : 'Aucune place disponible'}
+                label={t("professional.parking_place")}
+                placeholder={isLoadingOptions ? t("client.chargement") : parkingSpaceOptions.length > 0 ? t("professional.selectionner_une_place") : t("professional.aucune_place_disponible")}
                 options={parkingSpaceOptions}
                 error={errors.parking_space?.message}
                 disabled={disabled || isLoadingOptions || parkingSpaceOptions.length === 0}
                 {...register('parking_space')}
               />
             </div>
-            <Select label="Actif / inactif" options={[...isActiveOptions]} error={errors.is_active?.message} disabled={disabled} {...register('is_active')} />
-            <Select label="Marque" placeholder="Sélectionner une marque" options={brandOptions} error={errors.brand?.message} disabled={disabled || isLoadingOptions} {...register('brand')} />
-            <Select label="Catégorie" placeholder="Sélectionner une catégorie" options={categoryOptions} error={errors.category?.message} disabled={disabled || isLoadingOptions} {...register('category')} />
-            <Input label="Modèle" placeholder="Rafale" maxLength={150} error={errors.model_name?.message} {...register('model_name')} />
-            <Input type="text" label="Année" placeholder={String(new Date().getFullYear())} inputMode="numeric" error={errors.year?.message} {...register('year')} />
+            <Select label={t("professional.actif_inactif")} options={[...isActiveOptions]} error={errors.is_active?.message} disabled={disabled} {...register('is_active')} />
+            <Select label={t("professional.marque")} placeholder={t("professional.selectionner_une_marque")} options={brandOptions} error={errors.brand?.message} disabled={disabled || isLoadingOptions} {...register('brand')} />
+            <Select label={t("professional.categorie")} placeholder={t("professional.selectionner_une_categorie")} options={categoryOptions} error={errors.category?.message} disabled={disabled || isLoadingOptions} {...register('category')} />
+            <Input label={t("professional.modele")} placeholder={t("professional.rafale")} maxLength={150} error={errors.model_name?.message} {...register('model_name')} />
+            <Input type="text" label={t("professional.annee")} placeholder={String(new Date().getFullYear())} inputMode="numeric" error={errors.year?.message} {...register('year')} />
           </div>
         </VehicleFormSection>
 
-        <VehicleFormSection title="Fiche visible par le client">
+        <VehicleFormSection title={t("professional.fiche_visible_par_le_client")}>
 
           <div className="grid grid-cols-1 gap-6 rounded-3xl border border-[#E5E7EB] bg-white p-5 lg:grid-cols-[1.55fr_0.95fr]">
             <div>
               {photoPreviews[0] ? (
-                <img src={photoPreviews[0].url} alt="Aperçu principal" className="h-72 w-full rounded-[1.25rem] object-cover sm:h-[26rem]" />
+                <img src={photoPreviews[0].url} alt={t("professional.apercu_principal")} className="h-72 w-full rounded-[1.25rem] object-cover sm:h-[26rem]" />
               ) : (
                 <div className="flex h-72 w-full items-center justify-center rounded-[1.25rem] bg-gradient-to-br from-slate-100 to-slate-200 sm:h-[26rem]">
-                  <p className="rounded-full bg-white/90 px-4 py-2 text-sm font-medium text-slate-600">Aucune photo principale disponible</p>
+                  <p className="rounded-full bg-white/90 px-4 py-2 text-sm font-medium text-slate-600">{t("professional.aucune_photo_principale_disponible")}</p>
                 </div>
               )}
             </div>
             <div className="space-y-5">
               <div>
-                <p className="text-sm font-medium text-slate-500">Nom du véhicule</p>
+                <p className="text-sm font-medium text-slate-500">{t("professional.nom_du_vehicule")}</p>
                 <p className="mt-1 text-2xl font-semibold text-[#1F2937]">{vehicleName}</p>
               </div>
-              <Input label="Usage conseillé" placeholder="Famille, confortable et polyvalente" error={errors.recommended_use?.message} {...register('recommended_use')} />
+              <Input label={t("professional.usage_conseille")} placeholder={t("professional.famille_confortable_et_polyvalente")} error={errors.recommended_use?.message} {...register('recommended_use')} />
               <div className="space-y-2">
-                <p className="text-sm font-medium text-[#1F2937]">Tarif journalier</p>
+                <p className="text-sm font-medium text-[#1F2937]">{t("professional.tarif_journalier")}</p>
                 <div className="flex h-12 items-center rounded-2xl border border-[#E5E7EB] bg-[#EFF6FF] px-4 text-sm font-semibold text-[#1F2937]">
-                  {selectedCategoryRate ? `${selectedCategoryRate} EUR / jour` : 'Sélectionnez une catégorie'}
+                  {selectedCategoryRate ? `${selectedCategoryRate} EUR / jour` : t("professional.selectionnez_une_categorie")}
                 </div>
-                <p className="text-xs text-slate-500">Tarif défini par la catégorie sélectionnée.</p>
+                <p className="text-xs text-slate-500">{t("professional.tarif_defini_par_la_categorie_selectionnee")}</p>
               </div>
-              <Input label="Description" placeholder="Description visible par les clients" error={errors.description?.message} {...register('description')} />
+              <Input label={t("client.description")} placeholder={t("professional.description_visible_par_les_clients")} error={errors.description?.message} {...register('description')} />
             </div>
           </div>
 
           {enablePhotoUpload ? (
             <div className="space-y-4 rounded-2xl border border-[#E5E7EB] bg-white p-4">
               <div className="space-y-2">
-                <label htmlFor="vehicle-photos" className="block text-sm font-medium text-[#1F2937]">Photos</label>
+                <label htmlFor="vehicle-photos" className="block text-sm font-medium text-[#1F2937]">{t("professional.photos")}</label>
                 <input
                   id="vehicle-photos"
                   type="file"
@@ -397,7 +400,7 @@ export default function VehicleManagementForm({
                   onChange={handlePhotoInputChange}
                   className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937] shadow-sm file:mr-3 file:rounded-xl file:border-0 file:bg-[#F5F5F5] file:px-3 file:py-2 file:text-sm file:font-medium hover:file:bg-[#E5E7EB]"
                 />
-                <p className="text-xs text-slate-500">La première image sera la photo principale.</p>
+                <p className="text-xs text-slate-500">{t("professional.la_premiere_image_sera_la_photo_principale")}</p>
               </div>
 
               {photoPreviews.length > 0 ? (
@@ -417,15 +420,15 @@ export default function VehicleManagementForm({
           <VehicleFormTabs activeTab={activeTab} onTabChange={setActiveTab}>
             {activeTab === 'features' ? (
               <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-                <Input type="text" inputMode="numeric" label="Nombre de places" placeholder="5" error={errors.seats?.message} {...register('seats')} />
-                <Input type="text" inputMode="numeric" label="Nombre de portes" placeholder="5" error={errors.doors?.message} {...register('doors')} />
-                <Input label="Motorisation" placeholder="Hybride essence" error={errors.fuel_type?.message} {...register('fuel_type')} />
-                <Input label="Boîte de vitesses" placeholder="Automatique" error={errors.transmission?.message} {...register('transmission')} />
-                <Input type="text" inputMode="numeric" label="Puissance (ch)" placeholder="130" error={errors.power_hp?.message} {...register('power_hp')} />
-                <Input type="text" inputMode="decimal" label="Consommation (L/100km)" placeholder="5.5" error={errors.consumption?.message} {...register('consumption')} />
-                <Input type="text" inputMode="numeric" label="Coffre / volume (L)" placeholder="400" error={errors.trunk_volume?.message} {...register('trunk_volume')} />
-                <Input label="Norme Euro" placeholder="Euro 6" error={errors.euro_standard?.message} {...register('euro_standard')} />
-                <Input label="Couleur" placeholder="Noir" error={errors.color?.message} {...register('color')} />
+                <Input type="text" inputMode="numeric" label={t("professional.nombre_de_places")} placeholder="5" error={errors.seats?.message} {...register('seats')} />
+                <Input type="text" inputMode="numeric" label={t("professional.nombre_de_portes")} placeholder="5" error={errors.doors?.message} {...register('doors')} />
+                <Input label={t("professional.motorisation")} placeholder={t("professional.hybride_essence")} error={errors.fuel_type?.message} {...register('fuel_type')} />
+                <Input label={t("professional.boite_de_vitesses")} placeholder={t("public.automatique")} error={errors.transmission?.message} {...register('transmission')} />
+                <Input type="text" inputMode="numeric" label={t("professional.puissance_ch")} placeholder="130" error={errors.power_hp?.message} {...register('power_hp')} />
+                <Input type="text" inputMode="decimal" label={t("professional.consommation_l_100km")} placeholder="5.5" error={errors.consumption?.message} {...register('consumption')} />
+                <Input type="text" inputMode="numeric" label={t("professional.coffre_volume_l")} placeholder="400" error={errors.trunk_volume?.message} {...register('trunk_volume')} />
+                <Input label={t("professional.norme_euro")} placeholder="Euro 6" error={errors.euro_standard?.message} {...register('euro_standard')} />
+                <Input label={t("professional.couleur")} placeholder={t("professional.noir")} error={errors.color?.message} {...register('color')} />
               </div>
             ) : null}
 
@@ -450,28 +453,28 @@ export default function VehicleManagementForm({
                     </label>
                   ))}
                 </div>
-              ) : <p className="text-sm text-slate-500">Aucun équipement disponible dans le catalogue.</p>
+              ) : <p className="text-sm text-slate-500">{t("professional.aucun_equipement_disponible_dans_le_catalogue")}</p>
             ) : null}
 
             {activeTab === 'conditions' ? (
               <div className="grid gap-5 md:grid-cols-2">
-                <Input type="text" inputMode="numeric" label="Kilométrage inclus / jour" placeholder="200" error={errors.included_km_per_day?.message} {...register('included_km_per_day')} />
-                <Input type="text" inputMode="decimal" label="Prix du kilomètre supplémentaire" placeholder="0.25" error={errors.extra_km_price?.message} {...register('extra_km_price')} />
-                <Input type="text" inputMode="numeric" label="Âge minimum" placeholder="21" error={errors.minimum_age?.message} {...register('minimum_age')} />
-                <Input label="Permis requis" placeholder="Permis B" error={errors.required_license?.message} {...register('required_license')} />
+                <Input type="text" inputMode="numeric" label={t("professional.kilometrage_inclus_jour")} placeholder="200" error={errors.included_km_per_day?.message} {...register('included_km_per_day')} />
+                <Input type="text" inputMode="decimal" label={t("professional.prix_du_kilometre_supplementaire")} placeholder="0.25" error={errors.extra_km_price?.message} {...register('extra_km_price')} />
+                <Input type="text" inputMode="numeric" label={t("professional.age_minimum")} placeholder="21" error={errors.minimum_age?.message} {...register('minimum_age')} />
+                <Input label={t("professional.permis_requis")} placeholder={t("professional.permis_b")} error={errors.required_license?.message} {...register('required_license')} />
               </div>
             ) : null}
           </VehicleFormTabs>
         </VehicleFormSection>
 
-        <VehicleFormSection title="État initial du véhicule">
-          {initialStateError ? <Alert variant="danger" title="État initial incomplet" message={initialStateError} /> : null}
+        <VehicleFormSection title={t("professional.etat_initial_du_vehicule")}>
+          {initialStateError ? <Alert variant="danger" title={t("professional.etat_initial_incomplet")} message={professionalDisplay(t, initialStateError)} /> : null}
           <div className="grid gap-5 lg:grid-cols-[0.8fr_1.8fr_1fr]">
             <section className="space-y-4 rounded-2xl border border-[#E5E7EB] bg-white p-4">
-              <h3 className="text-base font-semibold text-[#0F172A]">Métriques initiales</h3>
+              <h3 className="text-base font-semibold text-[#0F172A]">{t("professional.metriques_initiales")}</h3>
               <Input
                 type="text"
-                label="Kilométrage initial"
+                label={t("professional.kilometrage_initial")}
                 placeholder="0"
                 inputMode="numeric"
                 error={errors.mileage?.message}
@@ -480,7 +483,7 @@ export default function VehicleManagementForm({
               />
               <Input
                 type="text"
-                label="Carburant / énergie (%)"
+                label={t("professional.carburant_energie_2")}
                 placeholder="100"
                 inputMode="numeric"
                 value={initialEnergyLevel}
@@ -491,7 +494,7 @@ export default function VehicleManagementForm({
 
             <section className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-semibold text-[#0F172A]">Photos</h3>
+                <h3 className="text-base font-semibold text-[#0F172A]">{t("professional.photos")}</h3>
                 <span className="text-sm text-slate-500">{Object.values(referencePhotos).filter((selection) => selection.file).length}/8</span>
               </div>
               <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -499,11 +502,11 @@ export default function VehicleManagementForm({
                   const selection = referencePhotos[slot.key]
                   return (
                     <label key={slot.key} className="group cursor-pointer">
-                      <span className="mb-2 block text-sm font-medium text-[#1F2937]">{slot.label}</span>
+                      <span className="mb-2 block text-sm font-medium text-[#1F2937]">{professionalDisplay(t, slot.label)}</span>
                       <span className="flex aspect-4/3 items-center justify-center overflow-hidden rounded-xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-center text-xs text-slate-500 transition group-hover:border-[#2563EB]">
                         {selection.previewUrl ? (
                           <img src={selection.previewUrl} alt={`Aperçu ${slot.label}`} className="h-full w-full object-cover" />
-                        ) : 'Sélectionner'}
+                        ) : t("professional.selectionner")}
                       </span>
                       <input
                         type="file"
@@ -521,7 +524,7 @@ export default function VehicleManagementForm({
                           }))
                         }}
                       />
-                      <span className="mt-1 block text-xs font-medium text-[#2563EB]">{selection.file ? 'Remplacer' : 'Ajouter une photo'}</span>
+                      <span className="mt-1 block text-xs font-medium text-[#2563EB]">{selection.file ? t("client.remplacer") : t("client.ajouter_une_photo")}</span>
                     </label>
                   )
                 })}
@@ -529,10 +532,10 @@ export default function VehicleManagementForm({
             </section>
 
             <section className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
-              <h3 className="whitespace-nowrap text-base font-semibold text-[#0F172A]">Dommages existants (optionnel)</h3>
+              <h3 className="whitespace-nowrap text-base font-semibold text-[#0F172A]">{t("professional.dommages_existants_optionnel")}</h3>
               <div className="mt-4 space-y-4">
                 <div className="space-y-2">
-                  <label htmlFor="initial-damage-description" className="block text-sm font-medium text-[#1F2937]">Description</label>
+                  <label htmlFor="initial-damage-description" className="block text-sm font-medium text-[#1F2937]">{t("client.description")}</label>
                   <textarea
                     id="initial-damage-description"
                     rows={4}
@@ -543,8 +546,8 @@ export default function VehicleManagementForm({
                   />
                 </div>
                 <Select
-                  label="Gravité"
-                  placeholder="Sélectionner"
+                  label={t("professional.gravite")}
+                  placeholder={t("professional.selectionner")}
                   value={initialDamage.severity}
                   disabled={disabled}
                   options={[
@@ -557,8 +560,7 @@ export default function VehicleManagementForm({
                   }))}
                 />
                 <label className="block space-y-2 text-sm font-medium text-[#1F2937]">
-                  Photo de preuve
-                  <input
+                  {t("professional.photo_de_preuve")}<input
                     type="file"
                     accept="image/*"
                     disabled={disabled}
@@ -571,7 +573,7 @@ export default function VehicleManagementForm({
                   />
                 </label>
                 {initialDamagePreviewUrl ? (
-                  <img src={initialDamagePreviewUrl} alt="Aperçu du dommage" className="h-24 w-full rounded-lg object-cover" />
+                  <img src={initialDamagePreviewUrl} alt={t("professional.apercu_du_dommage")} className="h-24 w-full rounded-lg object-cover" />
                 ) : null}
               </div>
             </section>
@@ -580,7 +582,7 @@ export default function VehicleManagementForm({
 
         <div className="flex justify-end">
           <Button type="submit" disabled={disabled || isLoadingOptions || parkingSpaceOptions.length === 0} className="w-full sm:w-auto">
-            {disabled ? 'Enregistrement...' : submitLabel}
+            {disabled ? t("client.enregistrement") : submitLabel}
           </Button>
         </div>
       </form>

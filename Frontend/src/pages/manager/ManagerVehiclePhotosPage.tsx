@@ -1,3 +1,5 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { useTranslation } from 'react-i18next'
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -141,6 +143,7 @@ function toPhotoGallery(photos: PublicVehicle['photos']): VehiclePhotoPublic[] {
 }
 
 export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: ManagerVehiclePhotosPageProps) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { id } = useParams<{ id: string }>()
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -289,9 +292,9 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
   if (vehicleId === null) {
     return (
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Identifiant invalide" message="L\'identifiant du vehicule est invalide." />
+        <Alert variant="danger" title={t("professional.identifiant_invalide")} message={t("professional.l_identifiant_du_vehicule_est_invalide")} />
         <Link to={`${basePath}/vehicles`}>
-          <Button type="button" variant="secondary">Retour a la liste</Button>
+          <Button type="button" variant="secondary">{t("professional.retour_a_la_liste")}</Button>
         </Link>
       </section>
     )
@@ -300,7 +303,7 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
   if (vehicleQuery.isLoading) {
     return (
       <section className="mx-auto flex min-h-[60vh] max-w-7xl items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
-        <LoadingSpinner size="lg" aria-label="Chargement des photos du vehicule" />
+        <LoadingSpinner size="lg" aria-label={t("professional.chargement_des_photos_du_vehicule")} />
       </section>
     )
   }
@@ -312,7 +315,7 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <Alert variant={is404 ? 'warning' : 'danger'} title={title} message={message} />
         <Link to={`${basePath}/vehicles`}>
-          <Button type="button" variant="secondary">Retour a la liste</Button>
+          <Button type="button" variant="secondary">{t("professional.retour_a_la_liste")}</Button>
         </Link>
       </section>
     )
@@ -321,7 +324,7 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
   if (!vehicleQuery.data) {
     return (
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Erreur API" message="Aucune donnee vehicule disponible." />
+        <Alert variant="danger" title={t("professional.erreur_api")} message={t("professional.aucune_donnee_vehicule_disponible")} />
       </section>
     )
   }
@@ -336,8 +339,8 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
     <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Gestion vehicules</p>
-          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Photos du vehicule</h1>
+          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">{t("professional.gestion_vehicules")}</p>
+          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">{t("professional.photos_du_vehicule")}</h1>
           <p className="mt-2 text-sm text-slate-600">
             {vehicle.brand} {vehicle.model_name} - {vehicle.year}
           </p>
@@ -345,23 +348,23 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
 
         <div className="flex flex-wrap gap-3">
           <Link to={`${basePath}/vehicles/${vehicle.id}/edit`}>
-            <Button type="button" variant="secondary">Retour a la fiche</Button>
+            <Button type="button" variant="secondary">{t("professional.retour_a_la_fiche")}</Button>
           </Link>
           <Link to={`${basePath}/vehicles`}>
-            <Button type="button" variant="secondary">Retour a la liste</Button>
+            <Button type="button" variant="secondary">{t("professional.retour_a_la_liste")}</Button>
           </Link>
         </div>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Galerie existante</h2>}>
-          {deleteError ? <Alert variant="danger" title="Suppression impossible" message={deleteError} className="mb-4" /> : null}
-          {deleteSuccess ? <Alert variant="success" title="Suppression reussie" message={deleteSuccess} className="mb-4" /> : null}
+        <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t("professional.galerie_existante")}</h2>}>
+          {deleteError ? <Alert variant="danger" title={t("professional.suppression_impossible")} message={professionalDisplay(t, deleteError)} className="mb-4" /> : null}
+          {deleteSuccess ? <Alert variant="success" title={t("professional.suppression_reussie")} message={deleteSuccess} className="mb-4" /> : null}
 
           {mainPhotoUrl ? (
             <div className="space-y-4">
               <div>
-                <p className="mb-3 text-sm font-medium text-slate-600">Photo principale</p>
+                <p className="mb-3 text-sm font-medium text-slate-600">{t("professional.photo_principale")}</p>
                 <img
                   src={mainPhotoUrl}
                   alt={`${vehicle.brand} ${vehicle.model_name}`}
@@ -372,7 +375,7 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
 
               {vehicle.photos.length > 1 ? (
                 <div>
-                  <p className="mb-3 text-sm font-medium text-slate-600">Galerie</p>
+                  <p className="mb-3 text-sm font-medium text-slate-600">{t("professional.galerie")}</p>
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {gallery.map((photo) => {
                       const photoUrl = resolveMediaUrl(photo.file)
@@ -390,7 +393,7 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
                             loading="lazy"
                           />
                           <div className="text-sm text-slate-600">
-                            <p>Position: {photo.position}</p>
+                            <p>{t("professional.position")} {photo.position}</p>
                             <p>{photo.caption || 'Aucune legende'}</p>
                           </div>
                           <div className="flex justify-end">
@@ -401,7 +404,7 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
                               disabled={deleteMutation.isPending}
                               onClick={() => void handleDeletePhoto(photo.id)}
                             >
-                              {deleteMutation.isPending ? 'Suppression...' : 'Supprimer'}
+                              {deleteMutation.isPending ? t("professional.suppression") : t("professional.supprimer")}
                             </Button>
                           </div>
                         </div>
@@ -413,22 +416,21 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
             </div>
           ) : (
             <EmptyState
-              title="Aucune photo"
-              description="Ce vehicule ne possede encore aucune photo enregistree."
+              title={t("professional.aucune_photo")}
+              description={t("professional.ce_vehicule_ne_possede_encore_aucune_photo_enregistree")}
             />
           )}
         </Card>
 
-        <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Ajouter une photo</h2>}>
+        <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t("client.ajouter_une_photo")}</h2>}>
           <div className="space-y-4">
-            {uploadError ? <Alert variant="danger" title="Upload impossible" message={uploadError} /> : null}
-            {uploadSuccess ? <Alert variant="success" title="Upload reussi" message={uploadSuccess} /> : null}
+            {uploadError ? <Alert variant="danger" title={t("professional.upload_impossible")} message={professionalDisplay(t, uploadError)} /> : null}
+            {uploadSuccess ? <Alert variant="success" title={t("professional.upload_reussi")} message={uploadSuccess} /> : null}
 
             <form onSubmit={handleUploadSubmit} className="space-y-4" noValidate>
               <div className="space-y-2">
                 <label htmlFor="vehicle-photo-file" className="block text-sm font-medium text-[#1F2937]">
-                  Fichier image
-                </label>
+                  {t("professional.fichier_image")}</label>
                 <input
                   id="vehicle-photo-file"
                   type="file"
@@ -437,12 +439,12 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
                   onChange={handleFileChange}
                   className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937] shadow-sm outline-none transition file:mr-3 file:rounded-xl file:border-0 file:bg-[#F5F5F5] file:px-3 file:py-2 file:text-sm file:font-medium file:text-[#1F2937] hover:file:bg-[#E5E7EB] focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-[#F5F5F5]"
                 />
-                <p className="text-sm text-slate-500">Formats supportes: JPG, JPEG, PNG, WEBP.</p>
+                <p className="text-sm text-slate-500">{t("professional.formats_supportes_jpg_jpeg_png_webp")}</p>
               </div>
 
               <Input
-                label="Legende (optionnel)"
-                placeholder="Ex: Vue avant"
+                label={t("professional.legende_optionnel")}
+                placeholder={t("professional.ex_vue_avant")}
                 maxLength={255}
                 value={formState.caption}
                 onChange={handleCaptionChange}
@@ -451,8 +453,8 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
 
               <Input
                 type="number"
-                label="Position (optionnel)"
-                placeholder="Ex: 0"
+                label={t("professional.position_optionnel")}
+                placeholder={t("professional.ex_0")}
                 min={0}
                 value={formState.position}
                 onChange={handlePositionChange}
@@ -461,7 +463,7 @@ export default function ManagerVehiclePhotosPage({ basePath = '/manager' }: Mana
 
               <div className="flex justify-end">
                 <Button type="submit" disabled={uploadMutation.isPending} className="w-full sm:w-auto">
-                  {uploadMutation.isPending ? 'Upload en cours...' : 'Ajouter la photo'}
+                  {uploadMutation.isPending ? t("professional.upload_en_cours") : t("professional.ajouter_la_photo")}
                 </Button>
               </div>
             </form>

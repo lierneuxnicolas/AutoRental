@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -405,7 +408,7 @@ function formatCurrency(value: string | number | null | undefined): string {
     return 'Non renseigné'
   }
 
-  return new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(amount)
+  return new Intl.NumberFormat(clientLocale(), { style: 'currency', currency: 'EUR' }).format(amount)
 }
 
 function buildConditionDraft(
@@ -425,6 +428,7 @@ function buildConditionDraft(
 }
 
 export default function ManagerVehicleEditPage({ basePath = '/manager' }: ManagerVehicleEditPageProps) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { id } = useParams<{ id: string }>()
   const [apiError, setApiError] = useState<string | null>(null)
@@ -652,9 +656,9 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
   if (vehicleId === null) {
     return (
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Identifiant invalide" message="L'identifiant du vehicule est invalide." />
+        <Alert variant="danger" title={t("professional.identifiant_invalide")} message={t("professional.l_identifiant_du_vehicule_est_invalide")} />
         <Link to={`${basePath}/vehicles`}>
-          <Button type="button" variant="secondary">Retour</Button>
+          <Button type="button" variant="secondary">{t("public.retour")}</Button>
         </Link>
       </section>
     )
@@ -663,7 +667,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
   if (vehicleQuery.isLoading || !formState) {
     return (
       <section className="mx-auto flex min-h-[60vh] max-w-7xl items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
-        <LoadingSpinner size="lg" aria-label="Chargement du vehicule" />
+        <LoadingSpinner size="lg" aria-label={t("professional.chargement_du_vehicule")} />
       </section>
     )
   }
@@ -675,7 +679,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <Alert variant={is404 ? 'warning' : 'danger'} title={title} message={message} />
         <Link to={`${basePath}/vehicles`}>
-          <Button type="button" variant="secondary">Retour</Button>
+          <Button type="button" variant="secondary">{t("public.retour")}</Button>
         </Link>
       </section>
     )
@@ -701,27 +705,27 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
   return (
     <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-semibold text-[#0F172A]">Modifier un véhicule</h1>
+        <h1 className="text-3xl font-semibold text-[#0F172A]">{t("professional.modifier_un_vehicule")}</h1>
         <Link to={`${basePath}/vehicles`}>
-          <Button type="button" variant="secondary">Retour</Button>
+          <Button type="button" variant="secondary">{t("public.retour")}</Button>
         </Link>
       </div>
 
       <form onSubmit={handleSubmit} noValidate className="space-y-8">
-        {apiError ? <Alert variant="danger" title="Enregistrement impossible" message={apiError} /> : null}
-        {successMessage ? <Alert variant="success" title="Modifications enregistrées" message={successMessage} /> : null}
+        {apiError ? <Alert variant="danger" title={t("professional.enregistrement_impossible")} message={professionalDisplay(t, apiError)} /> : null}
+        {successMessage ? <Alert variant="success" title={t("professional.modifications_enregistrees")} message={successMessage} /> : null}
 
-        <VehicleFormSection title="Informations internes">
+        <VehicleFormSection title={t("professional.informations_internes")}>
           <div className="grid gap-5 md:grid-cols-2">
             <Input
-              label="Immatriculation"
+              label={t("professional.immatriculation")}
               maxLength={30}
               value={formState.registration_number}
               onChange={(event) => updateField('registration_number', event.target.value)}
               error={fieldErrors.registration_number}
             />
             <Select
-              label="Parking / place"
+              label={t("professional.parking_place")}
               options={parkingSpaceOptions}
               value={formState.parking_space}
               onChange={(event) => updateField('parking_space', event.target.value)}
@@ -731,20 +735,20 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
             <Input
               type="text"
               inputMode="numeric"
-              label="Kilométrage réel"
+              label={t("professional.kilometrage_reel")}
               value={formState.mileage}
               onChange={(event) => updateField('mileage', event.target.value)}
               error={fieldErrors.mileage}
             />
             <Select
-              label="Actif / inactif"
+              label={t("professional.actif_inactif")}
               options={[{ value: 'true', label: 'Actif' }, { value: 'false', label: 'Inactif' }]}
               value={formState.is_active ? 'true' : 'false'}
               onChange={(event) => updateField('is_active', event.target.value === 'true')}
               error={fieldErrors.is_active}
             />
             <Select
-              label="Marque"
+              label={t("professional.marque")}
               options={brandOptions}
               value={formState.brand}
               onChange={(event) => updateField('brand', event.target.value)}
@@ -752,7 +756,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
               disabled={brandsQuery.isLoading}
             />
             <Select
-              label="Catégorie"
+              label={t("professional.categorie")}
               options={categoryOptions}
               value={formState.category}
               onChange={(event) => updateField('category', event.target.value)}
@@ -760,7 +764,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
               disabled={categoriesQuery.isLoading}
             />
             <Input
-              label="Modèle"
+              label={t("professional.modele")}
               maxLength={150}
               value={formState.model_name}
               onChange={(event) => updateField('model_name', event.target.value)}
@@ -769,7 +773,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
             <Input
               type="text"
               inputMode="numeric"
-              label="Année"
+              label={t("professional.annee")}
               value={formState.year}
               onChange={(event) => updateField('year', event.target.value)}
               error={fieldErrors.year}
@@ -777,13 +781,13 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
           </div>
         </VehicleFormSection>
 
-        <VehicleFormSection title="Fiche visible par le client">
+        <VehicleFormSection title={t("professional.fiche_visible_par_le_client")}>
           <Card>
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.55fr_0.95fr]">
               <div>
                 {photosQuery.isLoading ? (
                   <div className="flex min-h-[20rem] items-center justify-center rounded-[1.25rem] bg-slate-100">
-                    <LoadingSpinner size="md" aria-label="Chargement des photos du vehicule" />
+                    <LoadingSpinner size="md" aria-label={t("professional.chargement_des_photos_du_vehicule")} />
                   </div>
                 ) : mainPhotoUrl && photoVehicle ? (
                   <img
@@ -794,8 +798,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                 ) : (
                   <div className="flex h-72 w-full items-center justify-center rounded-[1.25rem] bg-gradient-to-br from-slate-100 to-slate-200 sm:h-[26rem]">
                     <p className="rounded-full bg-white/90 px-4 py-2 text-sm font-medium text-slate-600">
-                      Aucune photo principale disponible
-                    </p>
+                      {t("professional.aucune_photo_principale_disponible")}</p>
                   </div>
                 )}
               </div>
@@ -806,30 +809,30 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                 </div>
 
                 <div>
-                  <p className="text-sm font-medium text-slate-500">Nom du véhicule</p>
+                  <p className="text-sm font-medium text-slate-500">{t("professional.nom_du_vehicule")}</p>
                   <p className="mt-1 text-2xl font-semibold text-[#1F2937]">{clientVehicleName}</p>
                 </div>
 
                 <Input
-                  label="Usage conseillé"
+                  label={t("professional.usage_conseille")}
                   value={formState.recommended_use}
                   onChange={(event) => updateField('recommended_use', event.target.value)}
                   error={fieldErrors.recommended_use}
-                  placeholder="Ex: Famille, confortable et polyvalente"
+                  placeholder={t("professional.ex_famille_confortable_et_polyvalente")}
                 />
 
                 <Input
-                  label="Tarif journalier"
+                  label={t("professional.tarif_journalier")}
                   value={formState.category_daily_rate}
                   onChange={(event) => updateField('category_daily_rate', event.target.value)}
                   error={fieldErrors.category_daily_rate}
-                  helperText="TVA 21 % comprise"
+                  helperText={t("professional.tva_21_comprise")}
                   className="bg-[#EFF6FF] font-semibold"
                 />
 
                 {vehicleId !== null ? (
                   <Link to={`/vehicles/${vehicleId}`} target="_blank" rel="noreferrer">
-                    <Button type="button" variant="secondary" className="w-full">Voir la fiche client</Button>
+                    <Button type="button" variant="secondary" className="w-full">{t("professional.voir_la_fiche_client")}</Button>
                   </Link>
                 ) : null}
               </div>
@@ -837,15 +840,15 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
           </Card>
 
           <div className="rounded-2xl border border-[#E5E7EB] bg-white px-3 py-2">
-            {photoDeleteError ? <Alert variant="danger" title="Suppression impossible" message={photoDeleteError} /> : null}
-            {photoUploadError ? <Alert variant="danger" title="Upload impossible" message={photoUploadError} /> : null}
+            {photoDeleteError ? <Alert variant="danger" title={t("professional.suppression_impossible")} message={professionalDisplay(t, photoDeleteError)} /> : null}
+            {photoUploadError ? <Alert variant="danger" title={t("professional.upload_impossible")} message={professionalDisplay(t, photoUploadError)} /> : null}
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-              <h3 className="shrink-0 text-sm font-semibold text-[#1F2937] lg:w-44">Photos visibles par le client</h3>
+              <h3 className="shrink-0 text-sm font-semibold text-[#1F2937] lg:w-44">{t("professional.photos_visibles_par_le_client")}</h3>
 
               <div className="flex shrink-0 items-center gap-2">
                 {photosQuery.isLoading ? (
-                  <LoadingSpinner size="sm" aria-label="Chargement des photos du vehicule" />
+                  <LoadingSpinner size="sm" aria-label={t("professional.chargement_des_photos_du_vehicule")} />
                 ) : mainPhotoUrl && mainPhoto && photoVehicle ? (
                   <div className="relative">
                     <img
@@ -855,13 +858,11 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                       loading="lazy"
                     />
                     <span className="absolute left-1 top-1 rounded-full bg-[#2563EB] px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                      Principale
-                    </span>
+                      {t("professional.principale")}</span>
                   </div>
                 ) : (
                   <div className="flex h-14 w-20 items-center justify-center rounded-lg border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-[11px] text-slate-500">
-                    Aucune
-                  </div>
+                    {t("professional.aucune")}</div>
                 )}
               </div>
 
@@ -872,7 +873,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                   htmlFor="vehicle-photo-file"
                   className="inline-flex h-8 w-24 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-[#2563EB] px-3 text-xs font-medium text-white transition hover:bg-[#1D4ED8]"
                 >
-                  {uploadPhotoMutation.isPending ? 'Upload...' : 'Modifier'}
+                  {uploadPhotoMutation.isPending ? t("professional.upload") : t("professional.modifier")}
                 </label>
                 <input
                   id="vehicle-photo-file"
@@ -892,7 +893,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                   }}
                   className="h-8 w-24 shrink-0 rounded-lg border border-red-200 px-3 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
                 >
-                  {deletePhotoMutation.isPending ? 'Suppression...' : 'Supprimer'}
+                  {deletePhotoMutation.isPending ? t("professional.suppression") : t("professional.supprimer")}
                 </button>
               </div>
             </div>
@@ -904,7 +905,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                   <Input
                     type="text"
                     inputMode="numeric"
-                    label="Nombre de places"
+                    label={t("professional.nombre_de_places")}
                     value={formState.seats}
                     onChange={(event) => updateField('seats', event.target.value)}
                     error={fieldErrors.seats}
@@ -912,19 +913,19 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                   <Input
                     type="text"
                     inputMode="numeric"
-                    label="Nombre de portes"
+                    label={t("professional.nombre_de_portes")}
                     value={formState.doors}
                     onChange={(event) => updateField('doors', event.target.value)}
                     error={fieldErrors.doors}
                   />
                   <Input
-                    label="Motorisation"
+                    label={t("professional.motorisation")}
                     value={formState.fuel_type}
                     onChange={(event) => updateField('fuel_type', event.target.value)}
                     error={fieldErrors.fuel_type}
                   />
                   <Input
-                    label="Boîte de vitesses"
+                    label={t("professional.boite_de_vitesses")}
                     maxLength={60}
                     value={formState.transmission}
                     onChange={(event) => updateField('transmission', event.target.value)}
@@ -933,8 +934,8 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                   <Input
                     type="text"
                     inputMode="numeric"
-                    label="Puissance (ch)"
-                    placeholder="Ex: 130"
+                    label={t("professional.puissance_ch")}
+                    placeholder={t("professional.ex_130")}
                     value={formState.power_hp}
                     onChange={(event) => updateField('power_hp', event.target.value)}
                     error={fieldErrors.power_hp}
@@ -942,8 +943,8 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                   <Input
                     type="text"
                     inputMode="decimal"
-                    label="Consommation (L/100km)"
-                    placeholder="Ex: 5.5"
+                    label={t("professional.consommation_l_100km")}
+                    placeholder={t("professional.ex_5_5")}
                     value={formState.consumption}
                     onChange={(event) => updateField('consumption', event.target.value)}
                     error={fieldErrors.consumption}
@@ -951,21 +952,21 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                   <Input
                     type="text"
                     inputMode="numeric"
-                    label="Coffre / volume (L)"
-                    placeholder="Ex: 400"
+                    label={t("professional.coffre_volume_l")}
+                    placeholder={t("professional.ex_400")}
                     value={formState.trunk_volume}
                     onChange={(event) => updateField('trunk_volume', event.target.value)}
                     error={fieldErrors.trunk_volume}
                   />
                   <Input
-                    label="Norme Euro"
-                    placeholder="Ex: Euro 6"
+                    label={t("professional.norme_euro")}
+                    placeholder={t("professional.ex_euro_6")}
                     value={formState.euro_standard}
                     onChange={(event) => updateField('euro_standard', event.target.value)}
                     error={fieldErrors.euro_standard}
                   />
                   <Input
-                    label="Couleur"
+                    label={t("professional.couleur")}
                     maxLength={60}
                     value={formState.color}
                     onChange={(event) => updateField('color', event.target.value)}
@@ -977,9 +978,9 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
               {activeClientTab === 'equipment' ? (
                 <div>
                   {equipmentCatalogQuery.isLoading ? (
-                    <LoadingSpinner size="sm" aria-label="Chargement des equipements" />
+                    <LoadingSpinner size="sm" aria-label={t("professional.chargement_des_equipements")} />
                   ) : equipmentCatalog.length === 0 ? (
-                    <p className="text-sm text-slate-500">Aucun équipement disponible dans le catalogue.</p>
+                    <p className="text-sm text-slate-500">{t("professional.aucun_equipement_disponible_dans_le_catalogue")}</p>
                   ) : (
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {equipmentCatalog.map((item) => (
@@ -1008,8 +1009,8 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                     <Input
                       type="text"
                       inputMode="numeric"
-                      label="Kilométrage inclus / jour"
-                      placeholder="Ex: 200"
+                      label={t("professional.kilometrage_inclus_jour")}
+                      placeholder={t("professional.ex_200")}
                       value={formState.included_km_per_day}
                       onChange={(event) => updateField('included_km_per_day', event.target.value)}
                       error={fieldErrors.included_km_per_day}
@@ -1017,8 +1018,8 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                     <Input
                       type="text"
                       inputMode="decimal"
-                      label="Prix du kilomètre supplémentaire"
-                      placeholder="Ex: 0.25"
+                      label={t("professional.prix_du_kilometre_supplementaire")}
+                      placeholder={t("professional.ex_0_25")}
                       value={formState.extra_km_price}
                       onChange={(event) => updateField('extra_km_price', event.target.value)}
                       error={fieldErrors.extra_km_price}
@@ -1026,15 +1027,15 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
                     <Input
                       type="text"
                       inputMode="numeric"
-                      label="Âge minimum"
-                      placeholder="Ex: 21"
+                      label={t("professional.age_minimum")}
+                      placeholder={t("professional.ex_21")}
                       value={formState.minimum_age}
                       onChange={(event) => updateField('minimum_age', event.target.value)}
                       error={fieldErrors.minimum_age}
                     />
                     <Input
-                      label="Permis requis"
-                      placeholder="Ex: Permis B"
+                      label={t("professional.permis_requis")}
+                      placeholder={t("professional.ex_permis_b")}
                       value={formState.required_license}
                       onChange={(event) => updateField('required_license', event.target.value)}
                       error={fieldErrors.required_license}
@@ -1043,32 +1044,32 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
 
                   <div className="grid gap-5 md:grid-cols-2">
                     <Input
-                      label="Caution"
+                      label={t("public.caution")}
                       value={conditionDraft.caution}
                       onChange={(event) => updateConditionDraft('caution', event.target.value)}
                     />
                     <Input
-                      label="Documents requis"
+                      label={t("professional.documents_requis")}
                       value={conditionDraft.documents}
                       onChange={(event) => updateConditionDraft('documents', event.target.value)}
                     />
                     <Input
-                      label="Carburant"
+                      label={t("public.carburant")}
                       value={conditionDraft.fuel}
                       onChange={(event) => updateConditionDraft('fuel', event.target.value)}
                     />
                     <Input
-                      label="Retard"
+                      label={t("professional.retard")}
                       value={conditionDraft.late}
                       onChange={(event) => updateConditionDraft('late', event.target.value)}
                     />
                     <Input
-                      label="Annulation"
+                      label={t("public.annulation")}
                       value={conditionDraft.cancellation}
                       onChange={(event) => updateConditionDraft('cancellation', event.target.value)}
                     />
                     <Input
-                      label="État des lieux"
+                      label={t("public.etat_des_lieux")}
                       value={conditionDraft.inspection}
                       onChange={(event) => updateConditionDraft('inspection', event.target.value)}
                     />
@@ -1080,7 +1081,7 @@ export default function ManagerVehicleEditPage({ basePath = '/manager' }: Manage
 
         <div className="flex justify-end">
           <Button type="submit" disabled={isSaving} className="w-full sm:w-auto">
-            {isSaving ? 'Enregistrement...' : 'Enregistrer les modifications'}
+            {isSaving ? t("client.enregistrement") : t("client.enregistrer_les_modifications")}
           </Button>
         </div>
       </form>

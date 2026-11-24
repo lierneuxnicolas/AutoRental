@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -44,7 +47,7 @@ function formatDateTime(value: string | null | undefined): string {
     return 'Non renseignée'
   }
 
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(clientLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -191,6 +194,7 @@ function extractCompleteErrorMessage(error: unknown): string {
 }
 
 export default function CleaningInterventionDetailPage() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
   const [checkInError, setCheckInError] = useState<string | null>(null)
@@ -284,7 +288,7 @@ export default function CleaningInterventionDetailPage() {
   if (!interventionId) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Intervention invalide" message="L'identifiant de l'intervention est invalide." />
+        <Alert variant="danger" title={t("professional.intervention_invalide")} message={t("professional.l_identifiant_de_l_intervention_est_invalide")} />
       </div>
     )
   }
@@ -292,7 +296,7 @@ export default function CleaningInterventionDetailPage() {
   if (interventionQuery.isLoading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
-        <LoadingSpinner size="lg" aria-label="Chargement de l'intervention" />
+        <LoadingSpinner size="lg" aria-label={t("professional.chargement_de_l_intervention")} />
       </div>
     )
   }
@@ -309,14 +313,12 @@ export default function CleaningInterventionDetailPage() {
             onClick={() => void interventionQuery.refetch()}
             className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB]"
           >
-            Réessayer
-          </button>
+            {t("client.reessayer_alt")}</button>
           <Link
             to="/cleaning/interventions"
             className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB]"
           >
-            Retour à mes interventions
-          </Link>
+            {t("professional.retour_a_mes_interventions")}</Link>
         </div>
       </div>
     )
@@ -359,16 +361,16 @@ export default function CleaningInterventionDetailPage() {
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         {activeStep === 'done' ? (
-          <div><h1 className="text-2xl font-semibold text-[#1F2937]">Rapport d’intervention</h1></div>
+          <div><h1 className="text-2xl font-semibold text-[#1F2937]">{t("professional.rapport_d_intervention")}</h1></div>
         ) : (
         <div>
           <h1 className="text-2xl font-semibold text-[#1F2937]">{intervention.vehicle.brand} {intervention.vehicle.model_name}</h1>
           <p className="text-sm text-slate-600">
-            {intervention.vehicle.registration_number} · {intervention.vehicle.parking_name ?? 'Parking non renseigné'} / {intervention.vehicle.parking_space_number ?? '—'}
+            {intervention.vehicle.registration_number} · {intervention.vehicle.parking_name ?? t("professional.parking_non_renseigne")} / {intervention.vehicle.parking_space_number ?? '—'}
           </p>
           {intervention.planned_start_at && intervention.planned_end_at ? (
             <p className="mt-2 text-sm font-medium text-slate-700">
-              Prévue : {formatDateTime(intervention.planned_start_at)} → {formatDateTime(intervention.planned_end_at)}
+              {t("professional.prevue")}{formatDateTime(intervention.planned_start_at)} → {formatDateTime(intervention.planned_end_at)}
             </p>
           ) : null}
         </div>
@@ -376,10 +378,10 @@ export default function CleaningInterventionDetailPage() {
         <div className="flex flex-col gap-2 sm:flex-row">
           {activeStep === 'work' && intervention.check_in && (intervention.status === 'EN_COURS' || intervention.status === 'EN_PAUSE') ? (
             <Button variant={intervention.status === 'EN_COURS' ? 'secondary' : 'primary'} disabled={statusMutation.isPending} onClick={() => void statusMutation.mutateAsync(intervention.status === 'EN_COURS' ? 'pause' : 'resume')}>
-              {intervention.status === 'EN_COURS' ? 'Mettre en pause' : 'Reprendre le nettoyage'}
+              {intervention.status === 'EN_COURS' ? t("professional.mettre_en_pause") : t("professional.reprendre_le_nettoyage")}
             </Button>
           ) : null}
-          <Link to="/cleaning/interventions"><Button variant="secondary">Retour à mes interventions</Button></Link>
+          <Link to="/cleaning/interventions"><Button variant="secondary">{t("professional.retour_a_mes_interventions")}</Button></Link>
         </div>
       </div>
 
@@ -387,21 +389,21 @@ export default function CleaningInterventionDetailPage() {
         <div className="space-y-6">
           {activeStep !== 'done' ? <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Mot / consigne du gestionnaire</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t("professional.mot_consigne_du_gestionnaire")}</p>
               <p className="mt-2 text-lg font-semibold leading-7 text-[#1F2937]">
-                {intervention.description?.trim() ? intervention.description : 'Aucune consigne fournie.'}
+                {intervention.description?.trim() ? intervention.description : t("professional.aucune_consigne_fournie")}
               </p>
             </div>
-            <StatusBadge label={statusBadge.label} variant={statusBadge.variant} />
+            <StatusBadge label={professionalDisplay(t, statusBadge.label)} variant={statusBadge.variant} />
           </div> : null}
 
           {activeStep !== 'done' ? <InterventionWorkflowProgress activeStep={activeStep} steps={stepItems} /> : null}
 
-          {checkInError ? <Alert variant="danger" title="Check-in impossible" message={checkInError} className="mt-5" /> : null}
-          {completeError ? <Alert variant="danger" title="Clôture impossible" message={completeError} className="mt-5" /> : null}
-          {workError ? <Alert variant="danger" title="Enregistrement impossible" message={workError} className="mt-5" /> : null}
-          {interruptError ? <Alert variant="danger" title="Interruption impossible" message={interruptError} className="mt-5" /> : null}
-          {statusActionError ? <Alert variant="danger" title="Mise à jour impossible" message={statusActionError} className="mt-5" /> : null}
+          {checkInError ? <Alert variant="danger" title={t("professional.check_in_impossible")} message={professionalDisplay(t, checkInError)} className="mt-5" /> : null}
+          {completeError ? <Alert variant="danger" title={t("professional.cloture_impossible")} message={professionalDisplay(t, completeError)} className="mt-5" /> : null}
+          {workError ? <Alert variant="danger" title={t("professional.enregistrement_impossible")} message={professionalDisplay(t, workError)} className="mt-5" /> : null}
+          {interruptError ? <Alert variant="danger" title={t("professional.interruption_impossible")} message={professionalDisplay(t, interruptError)} className="mt-5" /> : null}
+          {statusActionError ? <Alert variant="danger" title={t("professional.mise_a_jour_impossible")} message={professionalDisplay(t, statusActionError)} className="mt-5" /> : null}
 
           {activeStep === 'checkin' ? (
             <div>

@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import axios from 'axios'
 import { useQuery } from '@tanstack/react-query'
@@ -17,7 +20,7 @@ function formatDate(value: string): string {
     return value
   }
 
-  return parsed.toLocaleDateString('fr-FR', {
+  return parsed.toLocaleDateString(clientLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -32,7 +35,7 @@ function formatMoney(amount: string, currency: string): string {
   }
 
   try {
-    return new Intl.NumberFormat('fr-FR', {
+    return new Intl.NumberFormat(clientLocale(), {
       style: 'currency',
       currency,
       minimumFractionDigits: 2,
@@ -82,6 +85,7 @@ function statusPresentation(status: InvoiceStatus): { label: string; variant: St
 }
 
 export default function AdminInvoicesPage() {
+  const { t } = useTranslation()
   const [page, setPage] = useState(1)
 
   const invoicesQuery = useQuery({
@@ -94,32 +98,31 @@ export default function AdminInvoicesPage() {
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Administration</p>
-        <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Factures</h1>
+        <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">{t("professional.administration")}</p>
+        <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">{t("client.factures")}</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-          Consultez les factures exposees par l'API management.
-        </p>
+          {t("professional.consultez_les_factures_exposees_par_l_api_management")}</p>
       </div>
 
       {invoicesQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
-          <LoadingSpinner size="lg" aria-label="Chargement des factures" />
+          <LoadingSpinner size="lg" aria-label={t("client.chargement_des_factures")} />
         </div>
       ) : null}
 
       {invoicesQuery.isError ? (
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message={toErrorMessage(invoicesQuery.error)}
+          title={t("client.chargement_impossible")}
+          message={professionalDisplay(t, toErrorMessage(invoicesQuery.error))}
           className="mb-6"
         />
       ) : null}
 
       {!invoicesQuery.isLoading && !invoicesQuery.isError && pageInvoices.length === 0 ? (
         <EmptyState
-          title="Aucune facture"
-          description="Aucune facture n'est actuellement disponible dans l'API management."
+          title={t("client.aucune_facture")}
+          description={t("professional.aucune_facture_n_est_actuellement_disponible_dans_l_api_management")}
         />
       ) : null}
 
@@ -134,33 +137,33 @@ export default function AdminInvoicesPage() {
                 header={
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Facture</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{t("client.facture")}</p>
                       <p className="text-base font-semibold text-[#0F172A]">{invoice.number}</p>
                     </div>
-                    <StatusBadge variant={status.variant} label={status.label} />
+                    <StatusBadge variant={status.variant} label={professionalDisplay(t, status.label)} />
                   </div>
                 }
               >
                 <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 lg:grid-cols-5">
                   <div>
-                    <p className="font-medium text-[#1F2937]">Reference</p>
+                    <p className="font-medium text-[#1F2937]">{t("client.reference_alt")}</p>
                     <p className="mt-1">{invoice.number}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-[#1F2937]">Reservation</p>
+                    <p className="font-medium text-[#1F2937]">{t("client.reservation")}</p>
                     <p className="mt-1">#{invoice.reservation_id}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-[#1F2937]">Date</p>
+                    <p className="font-medium text-[#1F2937]">{t("professional.date")}</p>
                     <p className="mt-1">{formatDate(invoice.issue_date)}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-[#1F2937]">Montant</p>
+                    <p className="font-medium text-[#1F2937]">{t("client.montant")}</p>
                     <p className="mt-1">{formatMoney(invoice.total_amount, invoice.currency)}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-[#1F2937]">Statut</p>
-                    <p className="mt-1">{status.label}</p>
+                    <p className="font-medium text-[#1F2937]">{t("client.statut")}</p>
+                    <p className="mt-1">{professionalDisplay(t, status.label)}</p>
                   </div>
                 </div>
               </Card>
@@ -169,7 +172,7 @@ export default function AdminInvoicesPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
             <p className="text-sm text-slate-600">
-              Total: <span className="font-semibold text-[#1F2937]">{invoicesQuery.data?.count ?? 0}</span>
+              {t("client.total")}<span className="font-semibold text-[#1F2937]">{invoicesQuery.data?.count ?? 0}</span>
             </p>
             <div className="flex items-center gap-2">
               <Button
@@ -180,9 +183,8 @@ export default function AdminInvoicesPage() {
                 }}
                 disabled={!invoicesQuery.data?.previous}
               >
-                Precedent
-              </Button>
-              <span className="px-2 text-sm font-medium text-slate-700">Page {page}</span>
+                {t("client.precedent_alt")}</Button>
+              <span className="px-2 text-sm font-medium text-slate-700">{t("client.page")} {page}</span>
               <Button
                 variant="secondary"
                 size="sm"
@@ -191,8 +193,7 @@ export default function AdminInvoicesPage() {
                 }}
                 disabled={!invoicesQuery.data?.next}
               >
-                Suivant
-              </Button>
+                {t("client.suivant")}</Button>
             </div>
           </div>
         </div>

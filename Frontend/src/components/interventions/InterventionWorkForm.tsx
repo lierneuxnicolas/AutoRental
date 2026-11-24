@@ -1,3 +1,5 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { useTranslation } from 'react-i18next'
 import { useRef, useState, type FormEvent } from 'react'
 import Alert from '../feedback/Alert'
 import LoadingSpinner from '../feedback/LoadingSpinner'
@@ -57,6 +59,7 @@ export default function InterventionWorkForm({
   onSubmit,
   onPhotoUploadSuccess,
 }: InterventionWorkFormProps) {
+  const { t } = useTranslation()
   const initialData = initialWorkData ?? {}
   const [diagnostic, setDiagnostic] = useState(() => toText(initialData.diagnostic))
   const [estimatedCost, setEstimatedCost] = useState(() => initialEstimatedCost !== null && initialEstimatedCost !== undefined ? String(initialEstimatedCost) : '')
@@ -104,17 +107,17 @@ export default function InterventionWorkForm({
 
   const content = (
       <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-        {localError ? <Alert variant="danger" title="Saisie invalide" message={localError} /> : null}
+        {localError ? <Alert variant="danger" title={t("professional.saisie_invalide")} message={professionalDisplay(t, localError)} /> : null}
 
         {workRequest?.trim() ? (
           <div>
-            <p className="text-sm font-medium text-[#1F2937]">Travail demandé</p>
+            <p className="text-sm font-medium text-[#1F2937]">{t("professional.travail_demande")}</p>
             <p className="mt-1 text-sm leading-6 text-slate-600">{workRequest}</p>
           </div>
         ) : null}
 
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-[#1F2937]">Travail effectué</label>
+          <label className="block text-sm font-medium text-[#1F2937]">{t("professional.travail_effectue")}</label>
           <textarea
             value={role === 'mechanic' ? diagnostic : cleaningWork}
             onChange={(event) => role === 'mechanic' ? setDiagnostic(event.target.value) : setCleaningWork(event.target.value)}
@@ -123,41 +126,39 @@ export default function InterventionWorkForm({
             className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-[#F5F5F5]"
           />
         </div>
-        <Input label="Coût éventuel" value={estimatedCost} inputMode="decimal" onChange={(event) => setEstimatedCost(event.target.value)} disabled={disabled || isSubmitting} />
+        <Input label={t("professional.cout_eventuel")} value={estimatedCost} inputMode="decimal" onChange={(event) => setEstimatedCost(event.target.value)} disabled={disabled || isSubmitting} />
 
         <div className="grid gap-3 md:grid-cols-2">
           {role === 'cleaning' ? (
             <label className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm text-[#1F2937]">
               <input type="checkbox" checked={isWorkFinished} onChange={(event) => setIsWorkFinished(event.target.checked)} disabled={disabled || isSubmitting} className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-2 focus:ring-blue-100" />
-              Intervention terminée
-            </label>
+              {t("professional.intervention_terminee")}</label>
           ) : <div />}
           <label className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] px-4 py-3 text-sm text-[#1F2937]">
             <input type="checkbox" checked={Boolean(anomalyType)} onChange={(event) => setAnomalyType(event.target.checked ? 'autre' : '')} disabled={disabled || isSubmitting} className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-2 focus:ring-blue-100" />
-            Anomalie constatée
-          </label>
+            {t("professional.anomalie_constatee")}</label>
         </div>
 
         {anomalyType ? (
           <div className="grid gap-4 md:grid-cols-[220px_1fr] md:items-end">
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-[#1F2937]">Type d’anomalie</label>
+              <label className="block text-sm font-medium text-[#1F2937]">{t("professional.type_d_anomalie")}</label>
               <select value={anomalyType} onChange={(event) => setAnomalyType(event.target.value)} disabled={disabled || isSubmitting} className="block h-12 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100">
-                {anomalyOptions.filter((option) => option.value).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                {anomalyOptions.filter((option) => option.value).map((option) => <option key={option.value} value={option.value}>{professionalDisplay(t, option.label)}</option>)}
               </select>
             </div>
-            <Input label="Commentaire anomalie" value={anomalyComment} onChange={(event) => setAnomalyComment(event.target.value)} disabled={disabled || isSubmitting} />
+            <Input label={t("professional.commentaire_anomalie")} value={anomalyComment} onChange={(event) => setAnomalyComment(event.target.value)} disabled={disabled || isSubmitting} />
           </div>
         ) : null}
 
         <div className="w-full space-y-3">
-          <p className="text-sm font-medium text-[#1F2937]">{role === 'mechanic' ? 'Photos de l’intervention' : 'Photos du nettoyage'}</p>
+          <p className="text-sm font-medium text-[#1F2937]">{role === 'mechanic' ? t("professional.photos_de_l_intervention") : t("professional.photos_du_nettoyage")}</p>
           <InterventionPhotoUpload ref={photoUploadRef} interventionId={interventionId} role={role} showSubmitButton={false} onUploadSuccess={onPhotoUploadSuccess} />
         </div>
 
         <div className="flex justify-end">
           <Button type="submit" disabled={disabled || isSubmitting || isSaving}>
-            {isSubmitting || isSaving ? <span className="flex items-center justify-center gap-2"><LoadingSpinner size="sm" aria-label="Enregistrement du travail" />Enregistrement...</span> : 'Enregistrer le travail'}
+            {isSubmitting || isSaving ? <span className="flex items-center justify-center gap-2"><LoadingSpinner size="sm" aria-label={t("professional.enregistrement_du_travail")} />{t("client.enregistrement")}</span> : t("professional.enregistrer_le_travail")}
           </Button>
         </div>
       </form>
@@ -167,5 +168,5 @@ export default function InterventionWorkForm({
     return content
   }
 
-  return <Card className="border-slate-200" header={<p className="text-sm font-semibold text-[#2563EB]">Travail en cours</p>}>{content}</Card>
+  return <Card className="border-slate-200" header={<p className="text-sm font-semibold text-[#2563EB]">{t("professional.travail_en_cours")}</p>}>{content}</Card>
 }

@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { clientDisplay, clientLocale } from '../../i18n/clientDisplay'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AxiosError } from 'axios'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -259,7 +261,7 @@ function formatDateTime(value: string | null | undefined): string {
     return value
   }
 
-  return parsed.toLocaleString('fr-FR', {
+  return parsed.toLocaleString(clientLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
@@ -294,6 +296,7 @@ type ReservationInspectionWorkflowPageProps = {
 }
 
 export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView = 'exterior' }: ReservationInspectionWorkflowPageProps) {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const isReturnMode = mode === 'return'
@@ -374,7 +377,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
       }
 
       setGlobalError(null)
-      setGlobalSuccess(isReturnMode ? 'Etat des lieux de retour initialise. Completez les etapes Exterieur puis Interieur.' : null)
+      setGlobalSuccess(isReturnMode ? t('client.etat_des_lieux_de_retour_initialise_completez_les_etapes_exterieur_puis') : null)
     },
     onError: (error) => {
       const errorCode = toErrorCode(error)
@@ -527,7 +530,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
       setGlobalError(null)
       setGlobalSuccess(
         isReturnMode
-          ? 'Vehicule restitue.'
+          ? t('client.vehicule_restitue_alt')
           : 'Etat des lieux termine avec succes. La location peut demarrer.',
       )
       setBackendMissingFields([])
@@ -777,7 +780,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
   if (!isReservationIdValid) {
     return (
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+        <Alert variant="danger" title={t('client.reservation_invalide')} message={t('client.l_identifiant_de_reservation_est_invalide')} />
       </section>
     )
   }
@@ -796,13 +799,13 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
         <Card className="border border-[#D1FAE5] bg-linear-to-br from-[#ECFDF5] via-white to-[#DBEAFE]">
           <div className="space-y-6">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-[#047857]">Etat des lieux valide</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-[#047857]">{t('client.etat_des_lieux_valide')}</p>
               <h1 className="mt-2 text-3xl font-semibold text-[#065F46]">
-                {isReturnMode ? 'Vehicule restitue' : 'Location demarree !'}
+                {isReturnMode ? t('client.vehicule_restitue_alt_alt') : t('client.location_demarree_alt')}
               </h1>
               {isReturnMode ? (
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-[#166534]">
-                  Votre etat des lieux a ete enregistre. Le vehicule est maintenant verrouille et le retour est en attente de verification par GetACar.
+                  {t('client.votre_etat_des_lieux_a_ete_enregistre_le_vehicule_est_maintenant')}
                 </p>
               ) : null}
             </div>
@@ -820,32 +823,32 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
             <div className="grid gap-4 rounded-2xl border border-[#D1FAE5] bg-white p-4 text-sm text-slate-700 sm:grid-cols-2">
               <div>
                 <p className="font-medium text-[#1F2937]">Modele</p>
-                <p className="mt-1">{reservation ? `${reservation.vehicle.brand} ${reservation.vehicle.model_name}` : 'Non disponible'}</p>
+                <p className="mt-1">{reservation ? `${reservation.vehicle.brand} ${reservation.vehicle.model_name}` : t('client.non_disponible')}</p>
               </div>
               <div>
-                <p className="font-medium text-[#1F2937]">Reference reservation</p>
-                <p className="mt-1">{reservation?.reference ?? 'Non disponible'}</p>
+                <p className="font-medium text-[#1F2937]">{t('client.reference_reservation')}</p>
+                <p className="mt-1">{reservation?.reference ?? t('client.non_disponible')}</p>
               </div>
               <div>
-                <p className="font-medium text-[#1F2937]">{isReturnMode ? 'Fin reelle de location' : 'Debut reel de location'}</p>
+                <p className="font-medium text-[#1F2937]">{isReturnMode ? t('client.fin_reelle_de_location') : t('client.debut_reel_de_location')}</p>
                 <p className="mt-1">{formatDateTime(inspection.completed_at)}</p>
               </div>
               <div>
-                <p className="font-medium text-[#1F2937]">Fin prevue</p>
+                <p className="font-medium text-[#1F2937]">{t('client.fin_prevue')}</p>
                 <p className="mt-1">{formatDateTime(reservation?.end_at)}</p>
               </div>
               <div className="sm:col-span-2">
-                <p className="font-medium text-[#1F2937]">Lieu de restitution</p>
+                <p className="font-medium text-[#1F2937]">{t('client.lieu_de_restitution')}</p>
                 <p className="mt-1">{restitutionLocation}</p>
               </div>
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <Link to={`/client/reservations?highlight=${reservationId}`}>
-                <Button className="w-full sm:w-auto">{isReturnMode ? 'Voir ma reservation' : 'Voir ma location en cours'}</Button>
+                <Button className="w-full sm:w-auto">{isReturnMode ? t('client.voir_ma_reservation') : t('client.voir_ma_location_en_cours')}</Button>
               </Link>
               <Link to="/client">
-                <Button variant="secondary" className="w-full sm:w-auto">Retour au tableau de bord</Button>
+                <Button variant="secondary" className="w-full sm:w-auto">{t('client.retour_au_tableau_de_bord')}</Button>
               </Link>
             </div>
           </div>
@@ -863,34 +866,34 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="relative left-1/2 mb-6 w-[min(100vw-2rem,72rem)] -translate-x-1/2 sm:w-[min(100vw-3rem,72rem)] lg:w-[min(100vw-4rem,72rem)]">
         {isReturnMode ? (
-          <DepartureFlowProgress steps={departureFlowSteps} />
+          <DepartureFlowProgress steps={departureFlowSteps.map((step) => ({ ...step, label: clientDisplay(t, step.label) }))} />
         ) : (
           <ReservationProgressBanner
             className="mb-6 sm:mb-8"
             steps={departureFlowSteps.map((step) => ({
               order: step.index,
-              label: step.label,
+              label: clientDisplay(t, step.label),
               status: step.status,
             }))}
           />
         )}
       </div>
 
-      {globalSuccess ? <Alert className="mb-4" variant="success" title="Succes" message={globalSuccess} /> : null}
-      {showGlobalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError ?? ''} /> : null}
+      {globalSuccess ? <Alert className="mb-4" variant="success" title={t('client.succes')} message={clientDisplay(t, globalSuccess)} /> : null}
+      {showGlobalError ? <Alert className="mb-4" variant="danger" title={t('client.action_impossible')} message={clientDisplay(t, globalError ?? '')} /> : null}
 
       {!inspection ? (
         isReturnMode ? (
           <Card>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-slate-600">
-                Lancez l'inspection de retour pour obtenir les photos obligatoires et l'identifiant d'etat des lieux.
+                {t('client.lancez_l_inspection_de_retour_pour_obtenir_les_photos_obligatoires_et')}
               </p>
               <Button onClick={() => void startInspectionMutation.mutate()} disabled={startInspectionMutation.isPending}>
                 {startInspectionMutation.isPending ? (
                   <span className="flex items-center gap-2">
-                    <LoadingSpinner size="sm" aria-label="Initialisation" />
-                    Initialisation...
+                    <LoadingSpinner size="sm" aria-label={t('client.initialisation')} />
+                    {t('client.initialisation_alt')}
                   </span>
                 ) : (
                   "Commencer l'etat des lieux de retour"
@@ -903,15 +906,15 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
             <div className="space-y-4">
               {isAutoInitializing ? (
                 <div className="flex items-center gap-3 text-sm text-slate-600">
-                  <LoadingSpinner size="sm" aria-label="Initialisation automatique" />
-                  <p>Initialisation automatique de l'etat des lieux...</p>
+                  <LoadingSpinner size="sm" aria-label={t('client.initialisation_automatique')} />
+                  <p>{t('client.initialisation_automatique_de_l_etat_des_lieux')}</p>
                 </div>
               ) : null}
 
               {hasAutoInitFailed ? (
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-slate-700">
-                    L'etat des lieux n'a pas pu etre initialise automatiquement. Verifiez votre connexion puis reessayez.
+                    {t('client.l_etat_des_lieux_n_a_pas_pu_etre_initialise_automatiquement')}
                   </p>
                   <Button
                     onClick={() => {
@@ -921,7 +924,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                     }}
                     disabled={startInspectionMutation.isPending}
                   >
-                    Reessayer l'initialisation
+                    {t('client.reessayer_l_initialisation')}
                   </Button>
                 </div>
               ) : null}
@@ -936,16 +939,16 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                 header={
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inspection</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{t('client.inspection')}</p>
                       <p className="text-base font-semibold text-[#0F172A]">#{inspection.id}</p>
                     </div>
-                    <StatusBadge variant={inspectionStatusToBadge(inspection.status).variant} label={inspectionStatusToBadge(inspection.status).label} />
+                    <StatusBadge variant={inspectionStatusToBadge(inspection.status).variant} label={clientDisplay(t, inspectionStatusToBadge(inspection.status).label)} />
                   </div>
                 }
               >
                 <div className="space-y-4">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium text-[#1F2937]">Progression</p>
+                    <p className="text-sm font-medium text-[#1F2937]">{t('client.progression')}</p>
                     <p className="text-sm font-semibold text-[#0F172A]">{progress}%</p>
                   </div>
                   <div className="h-3 overflow-hidden rounded-full bg-[#E5E7EB]">
@@ -955,7 +958,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                   {backendMissingFields.length > 0 ? (
                     <Alert
                       variant="info"
-                      title="Champs signales par le backend"
+                      title={t('client.champs_signales_par_le_backend')}
                       message={
                         <ul className="list-disc pl-5">
                           {backendMissingFields.map((item) => (
@@ -968,23 +971,23 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                 </div>
               </Card>
 
-              <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Champs backend requis avant cloture</h2>}>
+              <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t('client.champs_backend_requis_avant_cloture')}</h2>}>
                 <ul className="space-y-2 text-sm text-slate-700">
-                  <li>Kilometrage: requis</li>
-                  <li>Niveau carburant/energie: requis</li>
-                  <li>Commentaire: optionnel</li>
+                  <li>{t('client.kilometrage_requis')}</li>
+                  <li>{t('client.niveau_carburant_energie_requis')}</li>
+                  <li>{t('client.commentaire_optionnel')}</li>
                   <li>Presence d'un dommage: optionnel (via signalement dommage)</li>
-                  <li>Anomalie critique: optionnelle a la saisie, mais bloque la cloture si active</li>
-                  <li>Photos obligatoires: requises</li>
+                  <li>{t('client.anomalie_critique_optionnelle_a_la_saisie_mais_bloque_la_cloture_si')}</li>
+                  <li>{t('client.photos_obligatoires_requises')}</li>
                 </ul>
 
                 <div className="mt-4">
                   {missingDataSummary.length === 0 ? (
-                    <Alert variant="success" title="Donnees manquantes" message="Aucune" />
+                    <Alert variant="success" title={t('client.donnees_manquantes')} message="Aucune" />
                   ) : (
                     <Alert
                       variant="warning"
-                      title="Donnees manquantes"
+                      title={t('client.donnees_manquantes')}
                       message={
                         <ul className="list-disc pl-5">
                           {missingDataSummary.map((item) => (
@@ -1008,12 +1011,12 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
           {shouldShowExteriorStep ? (
             <Card
               header={isReturnMode ? (
-                <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat des lieux - Exterieur</h2>
+                <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">{t('client.etat_des_lieux_exterieur')}</h2>
               ) : (
                 <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat des lieux - Exterieur</h2>
+                  <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">{t('client.etat_des_lieux_exterieur')}</h2>
                   <Link to={`/client/reservations?highlight=${reservationId}`}>
-                    <Button variant="secondary">Retour a la reservation</Button>
+                    <Button variant="secondary">{t('client.retour_a_la_reservation')}</Button>
                   </Link>
                 </div>
               )}
@@ -1032,7 +1035,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                   <InspectionPhotoSlot
                     key={slotConfig.key}
                     photoType={slotConfig.photoType}
-                    label={slotConfig.label}
+                    label={clientDisplay(t, slotConfig.label)}
                     previewUrl={slot.previewUrl}
                     uploadedUrl={slot.uploadedPhoto?.file ?? null}
                     isUploading={isSlotUploading(slotConfig.key)}
@@ -1062,7 +1065,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                     navigate(`/client/reservations/${reservationId}/departure-inspection/interior`)
                   }}
                 >
-                  Continuer
+                  {t('public.continuer')}
                 </Button>
               </div>
             </Card>
@@ -1071,12 +1074,12 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
           {shouldShowInteriorStep ? (
             <Card
               header={isReturnMode ? (
-                <h2 className="text-lg font-semibold text-[#1F2937]">Etat des lieux - Interieur</h2>
+                <h2 className="text-lg font-semibold text-[#1F2937]">{t('client.etat_des_lieux_interieur')}</h2>
               ) : (
                 <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat des lieux - Interieur</h2>
+                  <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">{t('client.etat_des_lieux_interieur')}</h2>
                   <Link to={`/client/reservations?highlight=${reservationId}`}>
-                    <Button variant="secondary">Retour a la reservation</Button>
+                    <Button variant="secondary">{t('client.retour_a_la_reservation')}</Button>
                   </Link>
                 </div>
               )}
@@ -1095,7 +1098,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                     <InspectionPhotoSlot
                       key={slotConfig.key}
                       photoType={slotConfig.photoType}
-                      label={slotConfig.label}
+                      label={clientDisplay(t, slotConfig.label)}
                       previewUrl={slot.previewUrl}
                       uploadedUrl={slot.uploadedPhoto?.file ?? null}
                       isUploading={isSlotUploading(slotConfig.key)}
@@ -1125,14 +1128,14 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                     navigate(`/client/reservations/${reservationId}/departure-inspection/vehicle-state`)
                   }}
                 >
-                  Continuer
+                  {t('public.continuer')}
                 </Button>
               </div>
             </Card>
           ) : null}
 
           {isInteriorStepCompleted ? (
-          <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Champs requis</h2>}>
+          <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t('client.champs_requis')}</h2>}>
             <div className="space-y-4">
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 <input
@@ -1141,13 +1144,13 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                   onChange={(event) => setHasDeclaredDamage(event.target.checked)}
                   className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB]"
                 />
-                Dommages declares
+                {t('client.dommages_declares')}
               </label>
 
               {isReturnMode ? (
                 <>
                   <div className="space-y-2">
-                    <p className="text-sm font-medium text-[#1F2937]">Dommage constate</p>
+                    <p className="text-sm font-medium text-[#1F2937]">{t('client.dommage_constate')}</p>
                     <div className="flex flex-wrap gap-3">
                       <label className="flex items-center gap-2 text-sm text-slate-700">
                         <input
@@ -1156,7 +1159,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                           checked={hasReturnDamage === true}
                           onChange={() => setHasReturnDamage(true)}
                         />
-                        Oui
+                        {t('public.oui')}
                       </label>
                       <label className="flex items-center gap-2 text-sm text-slate-700">
                         <input
@@ -1165,7 +1168,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                           checked={hasReturnDamage === false}
                           onChange={() => setHasReturnDamage(false)}
                         />
-                        Non
+                        {t('public.non')}
                       </label>
                     </div>
                   </div>
@@ -1173,7 +1176,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                   {hasReturnDamage ? (
                     <div className="space-y-2">
                       <label htmlFor="return-damage-description" className="block text-sm font-medium text-[#1F2937]">
-                        Description du dommage <span className="text-red-500">*</span>
+                        {t('client.description_du_dommage')} <span className="text-red-500">*</span>
                       </label>
                       <textarea
                         id="return-damage-description"
@@ -1181,13 +1184,13 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                         onChange={(event) => setReturnDamageDescription(event.target.value)}
                         rows={3}
                         className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                        placeholder="Decrivez le dommage constate"
+                        placeholder={t('client.decrivez_le_dommage_constate')}
                       />
                     </div>
                   ) : null}
 
                   <div className="space-y-2">
-                    <p className="text-sm font-medium text-[#1F2937]">Anomalie critique</p>
+                    <p className="text-sm font-medium text-[#1F2937]">{t('client.anomalie_critique')}</p>
                     <div className="flex flex-wrap gap-3">
                       <label className="flex items-center gap-2 text-sm text-slate-700">
                         <input
@@ -1196,7 +1199,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                           checked={hasCriticalIssue === true}
                           onChange={() => setHasCriticalIssue(true)}
                         />
-                        Oui
+                        {t('public.oui')}
                       </label>
                       <label className="flex items-center gap-2 text-sm text-slate-700">
                         <input
@@ -1205,7 +1208,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                           checked={hasCriticalIssue === false}
                           onChange={() => setHasCriticalIssue(false)}
                         />
-                        Non
+                        {t('public.non')}
                       </label>
                     </div>
                   </div>
@@ -1213,7 +1216,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                   {hasCriticalIssue ? (
                     <div className="space-y-2">
                       <label htmlFor="critical-issue-description" className="block text-sm font-medium text-[#1F2937]">
-                        Description anomalie critique <span className="text-red-500">*</span>
+                        {t('client.description_anomalie_critique')} <span className="text-red-500">*</span>
                       </label>
                       <textarea
                         id="critical-issue-description"
@@ -1221,7 +1224,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                         onChange={(event) => setCriticalIssueDescription(event.target.value)}
                         rows={3}
                         className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                        placeholder="Decrivez l'anomalie critique"
+                        placeholder={t('client.decrivez_l_anomalie_critique')}
                       />
                     </div>
                   ) : null}
@@ -1230,7 +1233,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
 
               <div className="space-y-2">
                 <label htmlFor="inspection-comments" className="block text-sm font-medium text-[#1F2937]">
-                  Commentaires
+                  {t('client.commentaires')}
                 </label>
                 <textarea
                   id="inspection-comments"
@@ -1238,14 +1241,14 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                   onChange={(event) => setCommentsInput(event.target.value)}
                   rows={4}
                   className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-[#1F2937] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                  placeholder="Observations eventuelles"
+                  placeholder={t('client.observations_eventuelles')}
                 />
               </div>
 
               {localMissingFields.length > 0 ? (
                 <Alert
                   variant="warning"
-                  title="Cloture impossible pour le moment"
+                  title={t('client.cloture_impossible_pour_le_moment')}
                   message={
                     <ul className="list-disc pl-5">
                       {localMissingFields.length > 0 ? <li>Champs manquants: {localMissingFields.join(', ')}</li> : null}
@@ -1265,14 +1268,14 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                   setIsRequiredFieldsStepCompleted(true)
                 }}
               >
-                {isReturnMode ? 'Continuer vers la confirmation' : 'Continuer'}
+                {isReturnMode ? t('client.continuer_vers_la_confirmation') : t('client.continuer')}
               </Button>
             </div>
           </Card>
           ) : null}
 
           {isRequiredFieldsStepCompleted ? (
-          <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{isReturnMode ? 'Confirmation du retour' : 'Confirmation'}</h2>}>
+          <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{isReturnMode ? t('client.confirmation_du_retour') : t('client.confirmation')}</h2>}>
             <div className="space-y-4">
               <ul className="space-y-2 text-sm text-slate-700">
                 {isReturnMode ? (
@@ -1297,7 +1300,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
               {isReturnMode && localMissingFields.length > 0 ? (
                 <Alert
                   variant="warning"
-                  title="Confirmation impossible"
+                  title={t('client.confirmation_impossible')}
                   message={`Veuillez finaliser les champs requis: ${localMissingFields.join(', ')}`}
                 />
               ) : null}
@@ -1310,7 +1313,7 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                     disabled={isReturnConfirmationSubmitting || completeInspectionMutation.isPending}
                     onClick={() => setIsRequiredFieldsStepCompleted(false)}
                   >
-                    Retour
+                    {t('public.retour')}
                   </Button>
 
                   <Button
@@ -1360,8 +1363,8 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                   >
                     {isReturnConfirmationSubmitting || completeInspectionMutation.isPending ? (
                       <span className="flex items-center gap-2">
-                        <LoadingSpinner size="sm" aria-label="Confirmation en cours" />
-                        Confirmation en cours...
+                        <LoadingSpinner size="sm" aria-label={t('client.confirmation_en_cours')} />
+                        {t('client.confirmation_en_cours_alt')}
                       </span>
                     ) : (
                       'Confirmer la restitution'
@@ -1393,8 +1396,8 @@ export function ReservationInspectionWorkflowPage({ mode = 'departure', stepView
                 >
                   {completeInspectionMutation.isPending ? (
                     <span className="flex items-center gap-2">
-                      <LoadingSpinner size="sm" aria-label="Cloture en cours" />
-                      Cloture en cours...
+                      <LoadingSpinner size="sm" aria-label={t('client.cloture_en_cours')} />
+                      {t('client.cloture_en_cours_alt')}
                     </span>
                   ) : (
                     "Valider l'etat des lieux et demarrer la location"

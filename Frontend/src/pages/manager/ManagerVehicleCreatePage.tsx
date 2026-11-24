@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -110,6 +111,7 @@ function mapBackendFieldErrors(payload: BackendValidationErrorPayload | undefine
 }
 
 export default function ManagerVehicleCreatePage({ basePath = '/manager' }: ManagerVehicleCreatePageProps) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [apiError, setApiError] = useState<string | null>(null)
@@ -193,11 +195,11 @@ export default function ManagerVehicleCreatePage({ basePath = '/manager' }: Mana
     <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold text-[#0F172A]">Ajouter un véhicule</h1>
-          <p className="mt-2 text-sm text-slate-500">Le véhicule sera créé avec le statut Disponible.</p>
+          <h1 className="text-3xl font-semibold text-[#0F172A]">{t("professional.ajouter_un_vehicule")}</h1>
+          <p className="mt-2 text-sm text-slate-500">{t("professional.le_vehicule_sera_cree_avec_le_statut_disponible")}</p>
         </div>
         <Link to={`${basePath}/vehicles`}>
-          <Button type="button" variant="secondary">Annuler</Button>
+          <Button type="button" variant="secondary">{t("client.annuler")}</Button>
         </Link>
       </div>
 

@@ -1,3 +1,5 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import Alert from '../feedback/Alert'
 import LoadingSpinner from '../feedback/LoadingSpinner'
@@ -35,6 +37,7 @@ export default function InterventionCheckInForm({
   onSubmit,
   onInterrupt,
 }: InterventionCheckInFormProps) {
+  const { t } = useTranslation()
   const [mileage, setMileage] = useState(initialMileage !== null && initialMileage !== undefined ? String(initialMileage) : '')
   const [energyLevel, setEnergyLevel] = useState('')
   const [anomalyPresent, setAnomalyPresent] = useState<boolean | null>(null)
@@ -113,15 +116,15 @@ export default function InterventionCheckInForm({
 
   const content = (
       <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-        {localError ? <Alert variant="danger" title="Check-in incomplet" message={localError} /> : null}
+        {localError ? <Alert variant="danger" title={t("professional.check_in_incomplet")} message={professionalDisplay(t, localError)} /> : null}
 
         {!isUnlocked ? (
           <div className="rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] p-5">
-            <p className="text-sm font-semibold text-[#1F2937]">Déverrouillage du véhicule</p>
+            <p className="text-sm font-semibold text-[#1F2937]">{t("professional.deverrouillage_du_vehicule")}</p>
             <div className="mt-4 flex justify-end">
               <Button type="button" onClick={() => {
                 setIsUnlocked(true)
-              }}>Déverrouiller le véhicule</Button>
+              }}>{t("client.deverrouiller_le_vehicule")}</Button>
             </div>
           </div>
         ) : null}
@@ -133,27 +136,25 @@ export default function InterventionCheckInForm({
               className="text-sm font-medium text-slate-500 transition hover:text-red-600"
               onClick={() => setIsInterruptOpen((current) => !current)}
             >
-              Annuler l’intervention
-            </button>
+              {t("professional.annuler_l_intervention")}</button>
             {isInterruptOpen ? (
               <div className="mt-3 grid gap-3 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] p-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <label className="block text-sm font-medium text-[#1F2937]">Motif obligatoire</label>
+                  <label className="block text-sm font-medium text-[#1F2937]">{t("professional.motif_obligatoire")}</label>
                   <select value={interruptReasonType} onChange={(event) => setInterruptReasonType(event.target.value as WorkerInterventionInterruptValues['reason_type'])} className="block h-12 w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 text-sm text-[#1F2937]">
-                    <option value="vehicule_accidente">Véhicule accidenté</option>
-                    <option value="probleme_securite">Problème de sécurité</option>
-                    <option value="vehicule_inaccessible">Véhicule inaccessible</option>
-                    <option value="vehicule_non_deplacable">Véhicule non déplaçable</option>
-                    <option value="mauvais_vehicule">Mauvais véhicule</option>
-                    <option value="autre">Autre</option>
+                    <option value="vehicule_accidente">{t("professional.vehicule_accidente")}</option>
+                    <option value="probleme_securite">{t("professional.probleme_de_securite")}</option>
+                    <option value="vehicule_inaccessible">{t("professional.vehicule_inaccessible")}</option>
+                    <option value="vehicule_non_deplacable">{t("professional.vehicule_non_deplacable")}</option>
+                    <option value="mauvais_vehicule">{t("professional.mauvais_vehicule")}</option>
+                    <option value="autre">{t("professional.autre")}</option>
                   </select>
                 </div>
-                <Input label="Précision" value={interruptReasonDetail} onChange={(event) => setInterruptReasonDetail(event.target.value)} />
+                <Input label={t("professional.precision")} value={interruptReasonDetail} onChange={(event) => setInterruptReasonDetail(event.target.value)} />
                 <input type="file" accept="image/*" onChange={(event) => setInterruptPhoto(event.target.files?.[0] ?? null)} className="text-sm" />
                 <div className="flex justify-end md:col-span-2">
                   <Button type="button" variant="danger" onClick={() => onInterrupt({ reason_type: interruptReasonType, reason_detail: interruptReasonDetail.trim() || undefined, photo: interruptPhoto })}>
-                    Confirmer l’annulation
-                  </Button>
+                    {t("professional.confirmer_l_annulation")}</Button>
                 </div>
               </div>
             ) : null}
@@ -194,7 +195,7 @@ export default function InterventionCheckInForm({
           />
 
           <StandardInspectionPhotoGrid
-            title="Photos de check-in"
+            title={t("professional.photos_de_check_in")}
             photoState={photoState}
             disabled={disabled || isSubmitting}
             onFileChange={setSlotFile}
@@ -207,9 +208,8 @@ export default function InterventionCheckInForm({
           <Button type="submit" disabled={disabled || isSubmitting}>
             {isSubmitting ? (
               <span className="flex items-center justify-center gap-2">
-                <LoadingSpinner size="sm" aria-label="Check-in" />
-                Check-in en cours...
-              </span>
+                <LoadingSpinner size="sm" aria-label={t("professional.check_in")} />
+                {t("professional.check_in_en_cours")}</span>
             ) : (
               'Confirmer le check-in'
             )}
@@ -223,5 +223,5 @@ export default function InterventionCheckInForm({
     return content
   }
 
-  return <Card className="border-slate-200" header={<p className="text-sm font-semibold text-[#2563EB]">Check-in</p>}>{content}</Card>
+  return <Card className="border-slate-200" header={<p className="text-sm font-semibold text-[#2563EB]">{t("professional.check_in")}</p>}>{content}</Card>
 }

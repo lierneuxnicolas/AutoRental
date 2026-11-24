@@ -1,10 +1,12 @@
-const dailyRateFormatter = new Intl.NumberFormat('fr-BE', { maximumFractionDigits: 2 })
+import type { TFunction } from 'i18next'
 
-export function formatVehicleDailyRate(rate: string | number): string {
+export function formatVehicleDailyRate(rate: string | number, t?: TFunction, language?: string): string {
   const amount = typeof rate === 'number' ? rate : Number(rate)
   if (String(rate).trim() === '' || !Number.isFinite(amount)) {
-    return 'Tarif indisponible'
+    return t ? t('public.tarif_indisponible') : 'Tarif indisponible'
   }
 
-  return `${dailyRateFormatter.format(amount)} € / jour`
+  const formatted = new Intl.NumberFormat(language ?? 'fr-BE', { maximumFractionDigits: 2 }).format(amount)
+  const value = formatted + ' €'
+  return t ? t('public.rate_jour', { rate: value }) : value + ' / jour'
 }

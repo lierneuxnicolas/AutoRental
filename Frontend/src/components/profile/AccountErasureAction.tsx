@@ -1,3 +1,5 @@
+import { clientDisplay } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import axios from 'axios'
 import { useId, useRef, useState, type FormEvent } from 'react'
 import { requestAccountErasure } from '../../services/authService'
@@ -7,6 +9,7 @@ import Button from '../ui/Button'
 import Input from '../ui/Input'
 
 export default function AccountErasureAction() {
+  const { t } = useTranslation()
   const dialog = useRef<HTMLDialogElement>(null)
   const pending = useRef(false)
   const titleId = useId()
@@ -67,7 +70,7 @@ export default function AccountErasureAction() {
 
   return (
     <div className="mt-2 space-y-2 border-t border-slate-200 pt-1.5">
-      {notice ? <p role="status" className="text-sm text-slate-700">{notice}</p> : null}
+      {notice ? <p role="status" className="text-sm text-slate-700">{clientDisplay(t, notice)}</p> : null}
       <Button
         variant="danger"
         size="sm"
@@ -78,7 +81,7 @@ export default function AccountErasureAction() {
           dialog.current?.showModal()
         }}
       >
-        Supprimer mon compte
+        {t('client.supprimer_mon_compte')}
       </Button>
       <dialog
         ref={dialog}
@@ -91,18 +94,18 @@ export default function AccountErasureAction() {
         }}
       >
         <form className="space-y-4" onSubmit={submit} aria-busy={isSubmitting}>
-          <h2 id={titleId} className="text-xl font-semibold">Supprimer mon compte</h2>
+          <h2 id={titleId} className="text-xl font-semibold">{t('client.supprimer_mon_compte')}</h2>
           <p id={descriptionId} className="text-sm text-slate-700">
-            Cette action désactivera votre compte et entraînera l'effacement des données personnelles qui ne doivent plus être conservées légalement.
+            {t('client.cette_action_desactivera_votre_compte_et_entrainera_l_effacement_des_donnees')}
           </p>
-          <Input label="Mot de passe actuel" type="password" name="password" autoComplete="current-password" required disabled={isSubmitting} />
-          {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
+          <Input label={t('client.mot_de_passe_actuel')} type="password" name="password" autoComplete="current-password" required disabled={isSubmitting} />
+          {error ? <p role="alert" className="text-sm text-red-700">{clientDisplay(t, error)}</p> : null}
           <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
             <Button variant="secondary" disabled={isSubmitting} onClick={(event) => {
               event.currentTarget.form?.reset()
               dialog.current?.close()
             }}>
-              Annuler
+              {t('client.annuler')}
             </Button>
             <Button type="submit" variant="danger" disabled={isSubmitting}>
               {isSubmitting ? 'Envoi en cours…' : 'Confirmer la suppression'}

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useId, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 
@@ -9,28 +10,29 @@ type ProcessStep = {
 
 const PROCESS_STEPS: ProcessStep[] = [
   {
-    title: 'Création du compte et validation du profil',
+    title: 'public.creation_du_compte_et_validation_du_profil',
     image: '/images/rental-process/rental-process-account.png',
-    alt: 'Étapes de création du compte et de validation du profil GetaCar',
+    alt: 'public.etapes_de_creation_du_compte_et_de_validation_du_profil_getacar',
   },
   {
-    title: 'Réservation du véhicule',
+    title: 'public.reservation_du_vehicule',
     image: '/images/rental-process/rental-process-reservation.png',
-    alt: 'Étapes de réservation du véhicule GetaCar',
+    alt: 'public.etapes_de_reservation_du_vehicule_getacar',
   },
   {
-    title: 'Prise en charge du véhicule',
+    title: 'public.prise_en_charge_du_vehicule',
     image: '/images/rental-process/rental-process-pickup.png',
-    alt: 'Étapes de prise en charge du véhicule GetaCar',
+    alt: 'public.etapes_de_prise_en_charge_du_vehicule_getacar',
   },
   {
-    title: 'Restitution du véhicule',
+    title: 'public.restitution_du_vehicule',
     image: '/images/rental-process/rental-process-return.png',
-    alt: 'Étapes de restitution du véhicule GetaCar',
+    alt: 'public.etapes_de_restitution_du_vehicule_getacar',
   },
 ]
 
 export default function HowItWorks() {
+  const { t } = useTranslation()
   const [openIndex, setOpenIndex] = useState<number | null>(0)
   const baseId = useId()
 
@@ -43,7 +45,7 @@ export default function HowItWorks() {
       <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-[0_10px_30px_rgba(15,23,42,0.06)] sm:p-8 lg:p-10">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
-            Comment fonctionne GetaCar ?
+            {t('public.comment_fonctionne_getacar')}
           </h2>
         </div>
 
@@ -71,7 +73,7 @@ export default function HowItWorks() {
                     aria-controls={panelId}
                     onClick={() => handleToggle(index)}
                   >
-                    <span>{step.title}</span>
+                    <span>{t(step.title)}</span>
                     <ChevronDown
                       className={`h-5 w-5 shrink-0 self-center text-[#2563EB] transition-transform duration-200 ${isOpen ? 'rotate-180' : 'rotate-0'}`}
                       aria-hidden="true"
@@ -86,7 +88,7 @@ export default function HowItWorks() {
                   className={`grid transition-all duration-200 ease-out ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
                 >
                   <div className="overflow-hidden px-5 pb-4">
-                    <img src={step.image} alt={step.alt} className="w-full h-auto object-contain" />
+                    <img src={step.image} alt={t(step.alt)} className="w-full h-auto object-contain" />
                   </div>
                 </div>
               </div>

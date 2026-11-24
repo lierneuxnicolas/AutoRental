@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -32,6 +33,7 @@ function mapStatusToBadge(status: WorkerInterventionStatus): { label: string; va
 }
 
 export default function CleaningInterventionsPage() {
+  const { t } = useTranslation()
   const [page, setPage] = useState(1)
 
   const interventionsQuery = useQuery({
@@ -43,7 +45,7 @@ export default function CleaningInterventionsPage() {
   if (interventionsQuery.isLoading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
-        <LoadingSpinner size="lg" aria-label="Chargement des interventions de nettoyage" />
+        <LoadingSpinner size="lg" aria-label={t("professional.chargement_des_interventions_de_nettoyage")} />
       </div>
     )
   }
@@ -53,16 +55,15 @@ export default function CleaningInterventionsPage() {
       <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-8 sm:px-6 lg:px-8">
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message="Les interventions de nettoyage n’ont pas pu être récupérées. Veuillez réessayer."
+          title={t("client.chargement_impossible")}
+          message={t("professional.les_interventions_de_nettoyage_n_ont_pas_pu_etre_recuperees_veuillez_reessayer")}
         />
         <button
           type="button"
           onClick={() => void interventionsQuery.refetch()}
           className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB]"
         >
-          Réessayer
-        </button>
+          {t("client.reessayer_alt")}</button>
       </div>
     )
   }
@@ -74,8 +75,8 @@ export default function CleaningInterventionsPage() {
     return (
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
         <EmptyState
-          title="Aucune intervention assignée"
-          description="Vous n'avez actuellement aucune intervention de nettoyage à traiter."
+          title={t("professional.aucune_intervention_assignee")}
+          description={t("professional.vous_n_avez_actuellement_aucune_intervention_de_nettoyage_a_traiter")}
         />
       </div>
     )
@@ -84,7 +85,7 @@ export default function CleaningInterventionsPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6 flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold text-[#1F2937]">Mes interventions</h1>
+        <h1 className="text-2xl font-semibold text-[#1F2937]">{t("professional.mes_interventions")}</h1>
       </div>
 
       <div className="grid gap-4">
@@ -100,12 +101,12 @@ export default function CleaningInterventionsPage() {
                 <Link to={`/cleaning/interventions/${intervention.id}`}>
                   <Button variant={intervention.status === 'PLANIFIEE' ? 'primary' : 'secondary'} className="min-w-[11rem]">
                     {intervention.status === 'PLANIFIEE'
-                      ? 'Commencer'
+                      ? t("professional.commencer")
                       : intervention.status === 'TERMINEE'
-                        ? 'Voir le rapport'
+                        ? t("professional.voir_le_rapport")
                         : intervention.status === 'EN_COURS'
-                          ? 'Voir l’intervention'
-                          : 'Voir le détail'}
+                          ? t("professional.voir_l_intervention")
+                          : t("client.voir_le_detail")}
                   </Button>
                 </Link>
               )}
@@ -124,10 +125,9 @@ export default function CleaningInterventionsPage() {
             }}
             className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Précédent
-          </button>
+            {t("client.precedent_alt")}</button>
 
-          <p className="text-sm text-slate-600">Page {page}</p>
+          <p className="text-sm text-slate-600">{t("client.page")} {page}</p>
 
           <button
             type="button"
@@ -137,8 +137,7 @@ export default function CleaningInterventionsPage() {
             }}
             className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Suivant
-          </button>
+            {t("client.suivant")}</button>
         </div>
       ) : null}
     </div>

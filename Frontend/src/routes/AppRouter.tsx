@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom'
 import {
   CarFront,
@@ -74,6 +75,7 @@ function NotFoundPage() {
 }
 
 export default function AppRouter() {
+  const { t } = useTranslation()
   return (
     <BrowserRouter>
       <ScrollToTop />
@@ -99,25 +101,25 @@ export default function AppRouter() {
             path="/conditions-location/version-1.0"
             element={(
               <StaticInfoPage
-                title="Conditions de location et assurances"
+                title='public.conditions_de_location_et_assurances'
                 footerNote="Version 1.0 – Conditions de location GetaCar"
                 sections={[
                   {
-                    heading: 'Conditions pour louer',
+                    heading: 'public.conditions_pour_louer',
                     paragraphs: [
-                      "Pour louer un véhicule GetaCar, le client doit avoir **au moins 21 ans**, disposer d'une carte d'identité et d'un permis de conduire valides. Ces documents doivent être validés avant la réservation.",
+                      'public.pour_louer_un_vehicule_getacar_le_client_doit_avoir_au_moins',
                     ],
                   },
                   {
-                    heading: 'Réservation, paiement et assurance',
+                    heading: 'public.reservation_paiement_et_assurance',
                     paragraphs: [
-                      "La réservation est confirmée uniquement si le véhicule est disponible, que la **caution est autorisée** et que le paiement est effectué avec succès. Une assurance **Standard** est comprise dans le prix de base et des formules complémentaires peuvent être proposées. Le montant total est affiché avant la confirmation.",
+                      'public.la_reservation_est_confirmee_uniquement_si_le_vehicule_est_disponible_que',
                     ],
                   },
                   {
-                    heading: 'Caution, état du véhicule et dommages',
+                    heading: 'public.caution_etat_du_vehicule_et_dommages',
                     paragraphs: [
-                      "La caution est réalisée sous forme de **préautorisation bancaire**. Un **état des lieux avec photos** est effectué avant le départ et au retour. En cas de dommage ou de frais liés à la location, le client est informé des montants réclamés et des justificatifs correspondants.",
+                      'public.la_caution_est_realisee_sous_forme_de_preautorisation_bancaire_un_etat',
                     ],
                   },
                 ]}
@@ -128,36 +130,36 @@ export default function AppRouter() {
             path="/about"
             element={(
               <StaticInfoPage
-                title="Qui sommes-nous ?"
-                description="GetaCar est un service de location de véhicules en libre-service conçu pour rendre la location plus simple, autonome et numérique."
+                title='public.qui_sommes_nous'
+                description='public.getacar_est_un_service_de_location_de_vehicules_en_libre_service'
                 paragraphs={[
-                  'La plateforme permet de rechercher un véhicule, réserver, payer, gérer la caution, réaliser les états des lieux et restituer le véhicule depuis une même interface.',
+                  'public.la_plateforme_permet_de_rechercher_un_vehicule_reserver_payer_gerer_la',
                 ]}
                 sections={[
                   {
-                    heading: 'Notre objectif',
+                    heading: 'public.notre_objectif',
                     paragraphs: [
-                      'Proposer une expérience de location claire et pratique, tout en assurant la **sécurité**, la disponibilité des véhicules et le suivi de chaque étape de la location.',
+                      'public.proposer_une_experience_de_location_claire_et_pratique_tout_en_assurant',
                     ],
                   },
                   {
-                    heading: 'Nos valeurs',
+                    heading: 'public.nos_valeurs',
                     valueBlocks: [
                       {
-                        title: 'Simplicité',
-                        description: "Une interface claire et un parcours de location facile à comprendre, de la réservation jusqu'à la restitution.",
+                        title: 'public.simplicite',
+                        description: 'public.une_interface_claire_et_un_parcours_de_location_facile_a_comprendre',
                       },
                       {
-                        title: 'Autonomie',
-                        description: "Le client peut gérer les principales étapes de sa location directement depuis l'application, sans devoir passer systématiquement par une agence.",
+                        title: 'public.autonomie',
+                        description: 'public.le_client_peut_gerer_les_principales_etapes_de_sa_location_directement',
                       },
                       {
-                        title: 'Sécurité',
-                        description: 'Les documents, paiements, cautions et accès aux véhicules sont encadrés par des contrôles et des règles métier.',
+                        title: 'public.securite',
+                        description: 'public.les_documents_paiements_cautions_et_acces_aux_vehicules_sont_encadres_par',
                       },
                       {
-                        title: 'Traçabilité',
-                        description: "Les principales actions liées à la réservation, aux paiements, aux états des lieux et aux interventions sont suivies dans l'application.",
+                        title: 'public.tracabilite',
+                        description: 'public.les_principales_actions_liees_a_la_reservation_aux_paiements_aux_etats',
                       },
                     ],
                   },
@@ -165,40 +167,40 @@ export default function AppRouter() {
                 groups={[
                   {
                     id: 'mentions-legales',
-                    title: 'Mentions légales',
+                    title: 'public.mentions_legales',
                     sections: [
                       {
-                        heading: 'Éditeur du site et contact',
+                        heading: 'public.editeur_du_site_et_contact',
                         content: (
                           <div className="space-y-3">
                             <div className="space-y-1 text-base leading-7 text-slate-600 sm:text-lg">
-                              <p>GetaCar SRL — société fictive dans le cadre du TFE</p>
-                              <p>Responsable du projet : Nicolas Lierneux</p>
-                              <p>Siège social fictif : Bruxelles, Belgique</p>
-                              <p>N° d'entreprise fictif : BE 1111.111.111</p>
-                              <p>N° de TVA fictif : BE 1111.111.111</p>
+                              <p>{t('public.getacar_srl_societe_fictive_dans_le_cadre_du_tfe')}</p>
+                              <p>{t('public.responsable_du_projet_nicolas_lierneux')}</p>
+                              <p>{t('public.siege_social_fictif_bruxelles_belgique')}</p>
+                              <p>{t('public.n_d_entreprise_fictif_be_1111_111_111')}</p>
+                              <p>{t('public.n_de_tva_fictif_be_1111_111_111')}</p>
                             </div>
                             <p className="text-sm italic text-slate-500">
-                              Ces coordonnées administratives sont fictives et utilisées uniquement dans le cadre de la démonstration académique GetaCar.
+                              {t('public.ces_coordonnees_administratives_sont_fictives_et_utilisees_uniquement_dans_le_cadre')}
                             </p>
                             <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
-                              Pour toute question concernant GetaCar, veuillez utiliser la rubrique{' '}
-                              <Link to="/contact#contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> du site.
+                              {t('public.pour_toute_question_concernant_getacar_veuillez_utiliser_la_rubrique')}{' '}
+                              <Link to="/contact#contact" className="font-semibold text-[#2563EB] hover:underline">{t('navigation.contact')}</Link> {t('public.du_site')}
                             </p>
                           </div>
                         ),
                       },
                       {
-                        heading: 'Hébergement et propriété intellectuelle',
+                        heading: 'public.hebergement_et_propriete_intellectuelle',
                         paragraphs: [
-                          "L'application GetaCar est conçue pour être hébergée sur **Microsoft Azure**, notamment pour le frontend, le backend, la base de données et le stockage des fichiers.",
-                          "Les contenus, l'interface et les éléments développés spécifiquement pour GetaCar sont utilisés dans le cadre de ce projet académique. Les marques, logos et services tiers restent la propriété de leurs détenteurs respectifs.",
+                          'public.l_application_getacar_est_concue_pour_etre_hebergee_sur_microsoft_azure',
+                          'public.les_contenus_l_interface_et_les_elements_developpes_specifiquement_pour_getacar',
                         ],
                       },
                       {
-                        heading: 'Responsabilité',
+                        heading: 'public.responsabilite',
                         paragraphs: [
-                          "Les informations présentées sur cette version de GetaCar sont fournies dans le cadre d'un **projet académique et démonstratif**. Le service ne constitue pas actuellement une activité commerciale réelle.",
+                          'public.les_informations_presentees_sur_cette_version_de_getacar_sont_fournies_dans',
                         ],
                       },
                     ],
@@ -211,79 +213,79 @@ export default function AppRouter() {
             path="/privacy"
             element={(
               <StaticInfoPage
-                title="Politique de confidentialité et RGPD"
+                title='public.politique_de_confidentialite_et_rgpd'
                 sections={[
                   {
-                    heading: 'Données collectées et utilisation',
+                    heading: 'public.donnees_collectees_et_utilisation',
                     content: (
                       <div className="space-y-3">
                         <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
-                          Pour créer et utiliser un compte GetaCar, nous traitons notamment votre nom, prénom, coordonnées, date de naissance, carte d'identité et permis de conduire. Les réservations, notifications et informations liées aux états des lieux font également partie des données utilisées par le service.
+                          {t('public.pour_creer_et_utiliser_un_compte_getacar_nous_traitons_notamment_votre')}
                         </p>
                         <ul className="list-disc space-y-1 pl-5 text-base leading-7 text-slate-600 sm:text-lg">
-                          <li>créer et gérer votre compte ;</li>
-                          <li>vérifier votre identité et votre droit à conduire ;</li>
-                          <li>traiter vos réservations ;</li>
-                          <li>suivre vos locations, paiements, cautions et factures ;</li>
-                          <li>gérer les états des lieux et les éventuels incidents.</li>
+                          <li>{t('public.creer_et_gerer_votre_compte')}</li>
+                          <li>{t('public.verifier_votre_identite_et_votre_droit_a_conduire')}</li>
+                          <li>{t('public.traiter_vos_reservations')}</li>
+                          <li>{t('public.suivre_vos_locations_paiements_cautions_et_factures')}</li>
+                          <li>{t('public.gerer_les_etats_des_lieux_et_les_eventuels_incidents')}</li>
                         </ul>
                         <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
-                          L'accès à ces informations est limité aux personnes autorisées dans le cadre de leur fonction.
+                          {t('public.l_acces_a_ces_informations_est_limite_aux_personnes_autorisees_dans')}
                         </p>
                       </div>
                     ),
                   },
                   {
-                    heading: 'Services, stockage et sécurité',
+                    heading: 'public.services_stockage_et_securite',
                     content: (
                       <div className="space-y-3">
                         <ul className="list-disc space-y-1 pl-5 text-base leading-7 text-slate-600 sm:text-lg">
-                          <li>Microsoft Azure pour l'hébergement et le stockage ;</li>
-                          <li>Stripe pour les paiements et cautions ;</li>
-                          <li>Brevo pour les e-mails transactionnels.</li>
+                          <li>{t('public.microsoft_azure_pour_l_hebergement_et_le_stockage')}</li>
+                          <li>{t('public.stripe_pour_les_paiements_et_cautions')}</li>
+                          <li>{t('public.brevo_pour_les_e_mails_transactionnels')}</li>
                         </ul>
                         <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
-                          Ces prestataires ne doivent recevoir que les données nécessaires à leur mission.
+                          {t('public.ces_prestataires_ne_doivent_recevoir_que_les_donnees_necessaires_a_leur')}
                         </p>
                         <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
-                          Les documents d'identité et les photos d'états des lieux sont stockés dans des espaces privés. Les échanges avec l'application sont sécurisés et les accès sont contrôlés selon le rôle de l'utilisateur.
+                          {t('public.les_documents_d_identite_et_les_photos_d_etats_des_lieux')}
                         </p>
                       </div>
                     ),
                   },
                   {
-                    heading: 'Conservation des données',
+                    heading: 'public.conservation_des_donnees',
                     paragraphs: [
-                      "Les documents d'identité peuvent être conservés tant que votre compte reste actif. Les photos d'état des lieux sont conservées pendant le temps nécessaire au suivi de la location ou d'un éventuel litige. Les données comptables et factures sont conservées pendant la durée légale applicable.",
+                      'public.les_documents_d_identite_peuvent_etre_conserves_tant_que_votre_compte',
                     ],
                   },
                 ]}
                 groups={[
                   {
                     id: 'rgpd',
-                    title: 'Vos droits RGPD',
+                    title: 'public.vos_droits_rgpd',
                     sections: [
                       {
-                        heading: 'Comprendre vos droits',
+                        heading: 'public.comprendre_vos_droits',
                         paragraphs: [
-                          "Le RGPD est le règlement européen qui encadre l'utilisation des données personnelles et vous donne des droits sur les informations vous concernant.",
-                          "Vous pouvez demander l'accès à vos données personnelles et faire corriger les informations inexactes ou incomplètes.",
-                          'Selon votre situation, vous pouvez également bénéficier des droits de limitation, opposition et portabilité prévus par le RGPD.',
+                          'public.le_rgpd_est_le_reglement_europeen_qui_encadre_l_utilisation_des',
+                          'public.vous_pouvez_demander_l_acces_a_vos_donnees_personnelles_et_faire',
+                          'public.selon_votre_situation_vous_pouvez_egalement_beneficier_des_droits_de_limitation',
                         ],
                       },
                       {
-                        heading: 'Suppression et conservation des données',
+                        heading: 'public.suppression_et_conservation_des_donnees',
                         paragraphs: [
-                          "Vous pouvez demander la suppression de votre compte GetaCar. Celui-ci est d'abord désactivé, puis les données qui ne doivent plus être conservées peuvent être supprimées ou anonymisées.",
-                          "Certaines informations peuvent toutefois rester archivées lorsqu'elles sont nécessaires pour respecter une obligation légale, comptable ou pour le traitement d'un litige.",
+                          'public.vous_pouvez_demander_la_suppression_de_votre_compte_getacar_celui_ci',
+                          'public.certaines_informations_peuvent_toutefois_rester_archivees_lorsqu_elles_sont_necessaires_pour',
                         ],
                       },
                       {
-                        heading: 'Exercer vos droits',
+                        heading: 'public.exercer_vos_droits',
                         content: (
                           <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
-                            Pour toute demande concernant vos données personnelles, utilisez la rubrique{' '}
-                            <Link to="/contact#contact" className="font-semibold text-[#2563EB] hover:underline">Aide &amp; Contact</Link> de GetaCar.
+                            {t('public.pour_toute_demande_concernant_vos_donnees_personnelles_utilisez_la_rubrique')}{' '}
+                            <Link to="/contact#contact" className="font-semibold text-[#2563EB] hover:underline">{t('navigation.contact')}</Link> {t('public.de_getacar')}
                           </p>
                         ),
                       },
@@ -299,33 +301,33 @@ export default function AppRouter() {
             path="/cookies"
             element={(
               <StaticInfoPage
-                title="Cookies"
+                title='public.cookies'
                 sections={[
                   {
-                    heading: 'Comprendre les cookies',
+                    heading: 'public.comprendre_les_cookies',
                     paragraphs: [
-                      "Un cookie est un petit fichier enregistré par votre navigateur lors de la visite d'un site. Dans GetaCar, les cookies et mécanismes similaires servent principalement à maintenir votre connexion, mémoriser certaines préférences et assurer le bon fonctionnement du service.",
+                      'public.un_cookie_est_un_petit_fichier_enregistre_par_votre_navigateur_lors',
                     ],
                   },
                   {
-                    heading: 'Cookies nécessaires',
+                    heading: 'public.cookies_necessaires',
                     content: (
                       <div className="space-y-3">
                         <ul className="list-disc space-y-1 pl-5 text-base leading-7 text-slate-600 sm:text-lg">
-                          <li>maintenir votre connexion ;</li>
-                          <li>assurer la sécurité de votre session ;</li>
-                          <li>permettre le fonctionnement normal de certaines fonctionnalités.</li>
+                          <li>{t('public.maintenir_votre_connexion')}</li>
+                          <li>{t('public.assurer_la_securite_de_votre_session')}</li>
+                          <li>{t('public.permettre_le_fonctionnement_normal_de_certaines_fonctionnalites')}</li>
                         </ul>
                         <p className="text-base leading-7 text-slate-600 sm:text-lg sm:text-justify">
-                          Ces cookies ne sont pas utilisés à des fins publicitaires.
+                          {t('public.ces_cookies_ne_sont_pas_utilises_a_des_fins_publicitaires')}
                         </p>
                       </div>
                     ),
                   },
                   {
-                    heading: 'Cookies facultatifs et préférences',
+                    heading: 'public.cookies_facultatifs_et_preferences',
                     paragraphs: [
-                      "GetaCar peut prévoir ultérieurement des cookies facultatifs, par exemple pour des statistiques ou certains services tiers. Lorsqu'un consentement est requis, ils ne sont déposés qu'après votre accord. Vous pouvez ensuite accepter, refuser ou modifier votre choix depuis les paramètres prévus à cet effet.",
+                      'public.getacar_peut_prevoir_ulterieurement_des_cookies_facultatifs_par_exemple_pour_des',
                     ],
                   },
                 ]}
@@ -475,11 +477,11 @@ export default function AppRouter() {
               path="payments"
               element={
                 <FeaturePlaceholderPage
-                  title="Paiements"
-                  description="Consultez les opérations de paiement et leur statut."
+                  title={t("professional.paiements")}
+                  description={t("professional.consultez_les_operations_de_paiement_et_leur_statut")}
                   icon={CreditCard}
                   backLink="/manager"
-                  backLabel="Retour au tableau de bord"
+                  backLabel={t("professional.retour_au_tableau_de_bord")}
                 />
               }
             />
@@ -492,9 +494,9 @@ export default function AppRouter() {
               index
               element={
                 <PrivateAreaPage
-                  title="Tableau de bord"
-                  roleLabel="mécanicien"
-                  sections={['Véhicules à réparer', 'Interventions', 'Historique']}
+                  title={t("professional.tableau_de_bord")}
+                  roleLabel={t("professional.mecanicien_2")}
+                  sections={[t("professional.vehicules_a_reparer"), t("professional.interventions"), t("professional.historique")]}
                 />
               }
             />
@@ -502,11 +504,11 @@ export default function AppRouter() {
               path="vehicles"
               element={
                 <FeaturePlaceholderPage
-                  title="Véhicules à réparer"
-                  description="Visualisez les véhicules nécessitant une intervention mécanique."
+                  title={t("professional.vehicules_a_reparer")}
+                  description={t("professional.visualisez_les_vehicules_necessitant_une_intervention_mecanique")}
                   icon={CarFront}
                   backLink="/mechanic"
-                  backLabel="Retour au tableau de bord"
+                  backLabel={t("professional.retour_au_tableau_de_bord")}
                 />
               }
             />
@@ -522,11 +524,11 @@ export default function AppRouter() {
               path="history"
               element={
                 <FeaturePlaceholderPage
-                  title="Historique"
-                  description="Consultez les interventions mécaniques terminées."
+                  title={t("professional.historique")}
+                  description={t("professional.consultez_les_interventions_mecaniques_terminees")}
                   icon={History}
                   backLink="/mechanic"
-                  backLabel="Retour au tableau de bord"
+                  backLabel={t("professional.retour_au_tableau_de_bord")}
                 />
               }
             />
@@ -539,9 +541,9 @@ export default function AppRouter() {
               index
               element={
                 <PrivateAreaPage
-                  title="Tableau de bord"
-                  roleLabel="nettoyage"
-                  sections={['Véhicules à nettoyer', 'Historique']}
+                  title={t("professional.tableau_de_bord")}
+                  roleLabel={t("professional.nettoyage_2")}
+                  sections={[t("professional.vehicules_a_nettoyer"), t("professional.historique")]}
                 />
               }
             />
@@ -549,11 +551,11 @@ export default function AppRouter() {
               path="vehicles"
               element={
                 <FeaturePlaceholderPage
-                  title="Véhicules à nettoyer"
-                  description="Retrouvez les véhicules à traiter pour la mise à disposition."
+                  title={t("professional.vehicules_a_nettoyer")}
+                  description={t("professional.retrouvez_les_vehicules_a_traiter_pour_la_mise_a_disposition")}
                   icon={CarFront}
                   backLink="/cleaning"
-                  backLabel="Retour au tableau de bord"
+                  backLabel={t("professional.retour_au_tableau_de_bord")}
                 />
               }
             />
@@ -569,11 +571,11 @@ export default function AppRouter() {
               path="history"
               element={
                 <FeaturePlaceholderPage
-                  title="Historique"
-                  description="Consultez les opérations de nettoyage déjà effectuées."
+                  title={t("professional.historique")}
+                  description={t("professional.consultez_les_operations_de_nettoyage_deja_effectuees")}
                   icon={History}
                   backLink="/cleaning"
-                  backLabel="Retour au tableau de bord"
+                  backLabel={t("professional.retour_au_tableau_de_bord")}
                 />
               }
             />
@@ -631,11 +633,11 @@ export default function AppRouter() {
               path="roles"
               element={
                 <FeaturePlaceholderPage
-                  title="Rôles"
-                  description="Administrez les rôles et leurs droits d'accès."
+                  title={t("professional.roles")}
+                  description={t("professional.administrez_les_roles_et_leurs_droits_d_acces")}
                   icon={Shield}
                   backLink="/admin"
-                  backLabel="Retour au tableau de bord"
+                  backLabel={t("professional.retour_au_tableau_de_bord")}
                 />
               }
             />
@@ -643,11 +645,11 @@ export default function AppRouter() {
               path="settings"
               element={
                 <FeaturePlaceholderPage
-                  title="Paramètres"
-                  description="Configurez les paramètres de fonctionnement de la plateforme."
+                  title={t("professional.parametres")}
+                  description={t("professional.configurez_les_parametres_de_fonctionnement_de_la_plateforme")}
                   icon={Settings}
                   backLink="/admin"
-                  backLabel="Retour au tableau de bord"
+                  backLabel={t("professional.retour_au_tableau_de_bord")}
                 />
               }
             />
@@ -655,11 +657,11 @@ export default function AppRouter() {
               path="statistics"
               element={
                 <FeaturePlaceholderPage
-                  title="Statistiques"
-                  description="Analysez les indicateurs de performance de l'activité."
+                  title={t("professional.statistiques")}
+                  description={t("professional.analysez_les_indicateurs_de_performance_de_l_activite")}
                   icon={CircleGauge}
                   backLink="/admin"
-                  backLabel="Retour au tableau de bord"
+                  backLabel={t("professional.retour_au_tableau_de_bord")}
                 />
               }
             />

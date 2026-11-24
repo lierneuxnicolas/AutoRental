@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Trash2 } from 'lucide-react'
@@ -22,7 +25,7 @@ const actionButtonClassName = 'shrink-0 whitespace-nowrap px-2.5! text-[13px]!'
 const cancelButtonClassName = `${actionButtonClassName} gap-1.5! border border-red-200 bg-red-50! text-red-700! hover:bg-red-100! focus-visible:ring-red-400!`
 
 function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(clientLocale(), {
     timeZone: 'Europe/Brussels',
     day: '2-digit',
     month: '2-digit',
@@ -34,7 +37,7 @@ function formatDateTime(value: string): string {
 function formatAmount(value: string): string {
   const amount = Number(value)
   return Number.isFinite(amount)
-    ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(amount)
+    ? new Intl.NumberFormat(clientLocale(), { style: 'currency', currency: 'EUR' }).format(amount)
     : `${value} EUR`
 }
 
@@ -53,14 +56,14 @@ function clientLabel(reservation: ReservationManagementDetail): string | null {
 }
 
 function VehiclePhoto({ reservation, mobile = false }: { reservation: ReservationManagementDetail; mobile?: boolean }) {
+  const { t } = useTranslation()
   const photoUrl = resolveMediaUrl(reservation.vehicle.main_photo?.file)
   const sizeClass = mobile ? 'h-20 w-28' : 'h-10 w-14'
 
   if (!photoUrl) {
     return (
       <div className={`flex ${sizeClass} shrink-0 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-2 text-center text-xs text-slate-500`}>
-        Sans photo
-      </div>
+        {t("professional.sans_photo")}</div>
     )
   }
 
@@ -84,6 +87,7 @@ function Period({ reservation }: { reservation: ReservationManagementDetail }) {
 }
 
 export default function ManagerReservationsPage({ basePath = '/manager' }: ManagerReservationsPageProps) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const [downloadingInvoiceForId, setDownloadingInvoiceForId] = useState<number | null>(null)
@@ -143,37 +147,37 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
   return (
     <section className="mx-auto max-w-7xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
       <div>
-        <h1 className="text-3xl font-semibold text-[#0F172A]">Gestion des réservations</h1>
+        <h1 className="text-3xl font-semibold text-[#0F172A]">{t("professional.gestion_des_reservations")}</h1>
       </div>
 
       {reservationsQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
-          <LoadingSpinner size="lg" aria-label="Chargement des reservations" />
+          <LoadingSpinner size="lg" aria-label={t("client.chargement_des_reservations")} />
         </div>
       ) : null}
 
       {reservationsQuery.isError ? (
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message="Les reservations n'ont pas pu etre recuperees. Veuillez reessayer."
+          title={t("client.chargement_impossible")}
+          message={t("professional.les_reservations_n_ont_pas_pu_etre_recuperees_veuillez_reessayer")}
         />
       ) : null}
 
       {invoiceDownloadError ? (
-        <Alert variant="danger" title="Téléchargement impossible" message={invoiceDownloadError} />
+        <Alert variant="danger" title={t("client.telechargement_impossible_alt")} message={professionalDisplay(t, invoiceDownloadError)} />
       ) : null}
 
       {!reservationsQuery.isLoading && !reservationsQuery.isError ? (
         <p className="text-sm text-slate-600">
-          {reservationsQuery.data?.count ?? 0} résultat{(reservationsQuery.data?.count ?? 0) > 1 ? 's' : ''}
+          {reservationsQuery.data?.count ?? 0} {t("professional.resultat")}{(reservationsQuery.data?.count ?? 0) > 1 ? 's' : ''}
         </p>
       ) : null}
 
       {!reservationsQuery.isLoading && !reservationsQuery.isError && reservations.length === 0 ? (
         <EmptyState
-          title="Aucune réservation"
-          description="Il n’y a actuellement aucune réservation à afficher."
+          title={t("client.aucune_reservation")}
+          description={t("professional.il_n_y_a_actuellement_aucune_reservation_a_afficher")}
         />
       ) : null}
 
@@ -195,44 +199,44 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
                         <p className="mt-1 text-sm font-medium text-[#1F2937]">{reservation.vehicle.brand} {reservation.vehicle.model_name}</p>
                         <p className="text-xs text-slate-500">{reservation.vehicle.registration_plate || '—'}</p>
                         <div className="mt-2 flex flex-wrap gap-2">
-                          <StatusBadge variant={status.variant} label={status.label} />
-                          {reservation.needs_review ? <StatusBadge variant="warning" label="À vérifier" /> : null}
+                          <StatusBadge variant={status.variant} label={professionalDisplay(t, status.label)} />
+                          {reservation.needs_review ? <StatusBadge variant="warning" label={t("professional.a_verifier")} /> : null}
                         </div>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
-                        <p className="text-xs text-slate-500">Client</p>
+                        <p className="text-xs text-slate-500">{t("client.client")}</p>
                         <p className="mt-1 font-medium text-[#1F2937]">{clientLabel(reservation) ?? '—'}</p>
                         {reservation.client_summary?.email ? <p className="break-all text-xs text-slate-500">{reservation.client_summary.email}</p> : null}
                       </div>
                       <div>
-                        <p className="text-xs text-slate-500">Période</p>
+                        <p className="text-xs text-slate-500">{t("client.periode")}</p>
                         <div className="mt-1"><Period reservation={reservation} /></div>
                       </div>
                       <div>
-                        <p className="text-xs text-slate-500">Montant</p>
+                        <p className="text-xs text-slate-500">{t("client.montant")}</p>
                         <p className="mt-1 font-semibold text-[#1F2937]">{formatAmount(reservation.rental_amount)}</p>
                       </div>
                     </div>
 
                     <div className="flex flex-wrap justify-end gap-2">
                       <Link to={`${basePath}/reservations/${reservation.id}`}>
-                        <Button variant="secondary" size="sm">Voir détail</Button>
+                        <Button variant="secondary" size="sm">{t("public.voir_detail")}</Button>
                       </Link>
                       <Button
                         variant="secondary"
                         size="sm"
                         disabled={!reservation.invoice_id || downloadingInvoiceForId !== null}
-                        title={reservation.invoice_id ? undefined : 'Aucune facture disponible'}
+                        title={reservation.invoice_id ? undefined : t("professional.aucune_facture_disponible")}
                         onClick={() => void handleInvoiceDownload(reservation)}
                       >
-                        {downloadingInvoiceForId === reservation.id ? 'Téléchargement...' : 'Télécharger facture'}
+                        {downloadingInvoiceForId === reservation.id ? t("client.telechargement_alt") : t("professional.telecharger_facture")}
                       </Button>
                       {reservation.status === 'REAFFECTATION_REQUIRED' ? (
                         <Link to={`${basePath}/reservations/${reservation.id}?action=reassign`}>
-                          <Button size="sm">Réaffecter</Button>
+                          <Button size="sm">{t("professional.reaffecter")}</Button>
                         </Link>
                       ) : null}
                       {canCancel ? (
@@ -246,8 +250,7 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
                           }}
                         >
                           <Trash2 className="h-4 w-4" aria-hidden="true" />
-                          Supprimer
-                        </Button>
+                          {t("professional.supprimer")}</Button>
                       ) : null}
                     </div>
                   </div>
@@ -260,14 +263,14 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
             <table className="manager-reservations-table w-full border-collapse text-left">
               <thead className="border-b border-[#E5E7EB] bg-[#F8FAFC]">
                 <tr>
-                  <th className="w-16 px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Photo</th>
-                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Référence</th>
-                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Client</th>
-                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Véhicule</th>
-                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Période</th>
-                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Montant</th>
-                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Statut</th>
-                  <th className="w-px whitespace-nowrap px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</th>
+                  <th className="w-16 px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.photo")}</th>
+                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("client.reference_alt")}</th>
+                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("client.client")}</th>
+                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("client.vehicule_alt")}</th>
+                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("client.periode")}</th>
+                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("client.montant")}</th>
+                  <th className="px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("client.statut")}</th>
+                  <th className="w-px whitespace-nowrap px-2 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -294,28 +297,28 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
                       <td className="whitespace-nowrap px-2 py-3 text-sm font-semibold text-[#1F2937]">{formatAmount(reservation.rental_amount)}</td>
                       <td className="px-2 py-3">
                         <div className="flex max-w-32 flex-wrap gap-1.5">
-                          <StatusBadge variant={status.variant} label={status.label} />
-                          {reservation.needs_review ? <StatusBadge variant="warning" label="À vérifier" /> : null}
+                          <StatusBadge variant={status.variant} label={professionalDisplay(t, status.label)} />
+                          {reservation.needs_review ? <StatusBadge variant="warning" label={t("professional.a_verifier")} /> : null}
                         </div>
                       </td>
                       <td className="w-px whitespace-nowrap px-2 py-3">
                         <div className="flex flex-nowrap items-center gap-1.5">
                           <Link to={`${basePath}/reservations/${reservation.id}`} className="shrink-0">
-                            <Button variant="secondary" size="sm" className={actionButtonClassName}>Voir détail</Button>
+                            <Button variant="secondary" size="sm" className={actionButtonClassName}>{t("public.voir_detail")}</Button>
                           </Link>
                           <Button
                             variant="secondary"
                             size="sm"
                             className={actionButtonClassName}
                             disabled={!reservation.invoice_id || downloadingInvoiceForId !== null}
-                            title={reservation.invoice_id ? undefined : 'Aucune facture disponible'}
+                            title={reservation.invoice_id ? undefined : t("professional.aucune_facture_disponible")}
                             onClick={() => void handleInvoiceDownload(reservation)}
                           >
-                            {downloadingInvoiceForId === reservation.id ? 'Téléchargement...' : 'Télécharger facture'}
+                            {downloadingInvoiceForId === reservation.id ? t("client.telechargement_alt") : t("professional.telecharger_facture")}
                           </Button>
                           {reservation.status === 'REAFFECTATION_REQUIRED' ? (
                             <Link to={`${basePath}/reservations/${reservation.id}?action=reassign`} className="shrink-0">
-                              <Button size="sm" className={actionButtonClassName}>Réaffecter</Button>
+                              <Button size="sm" className={actionButtonClassName}>{t("professional.reaffecter")}</Button>
                             </Link>
                           ) : null}
                           {canCancel ? (
@@ -329,8 +332,7 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
                               }}
                             >
                               <Trash2 className="h-4 w-4" aria-hidden="true" />
-                              Supprimer
-                            </Button>
+                              {t("professional.supprimer")}</Button>
                           ) : null}
                         </div>
                       </td>
@@ -343,10 +345,10 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
 
           {totalPages > 1 ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
-              <p className="text-sm text-slate-600">Page {page} / {totalPages}</p>
+              <p className="text-sm text-slate-600">{t("client.page")} {page} / {totalPages}</p>
               <div className="flex gap-2">
-                <Button type="button" variant="secondary" size="sm" disabled={!reservationsQuery.data?.previous || page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Précédent</Button>
-                <Button type="button" variant="secondary" size="sm" disabled={!reservationsQuery.data?.next || page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Suivant</Button>
+                <Button type="button" variant="secondary" size="sm" disabled={!reservationsQuery.data?.previous || page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>{t("client.precedent_alt")}</Button>
+                <Button type="button" variant="secondary" size="sm" disabled={!reservationsQuery.data?.next || page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>{t("client.suivant")}</Button>
               </div>
             </div>
           ) : null}
@@ -366,26 +368,23 @@ export default function ManagerReservationsPage({ basePath = '/manager' }: Manag
           }}
         >
           <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-            <h2 id="cancel-reservation-title" className="text-xl font-semibold text-[#0F172A]">Supprimer cette réservation ?</h2>
+            <h2 id="cancel-reservation-title" className="text-xl font-semibold text-[#0F172A]">{t("professional.supprimer_cette_reservation")}</h2>
             <p className="mt-3 text-sm leading-6 text-slate-600">
-              La réservation sera annulée par le gestionnaire et restera conservée dans l’historique.
-            </p>
-            {cancellationError ? <Alert variant="danger" title="Annulation impossible" message={cancellationError} className="mt-4" /> : null}
+              {t("professional.la_reservation_sera_annulee_par_le_gestionnaire_et_restera_conservee_dans_l")}</p>
+            {cancellationError ? <Alert variant="danger" title={t("client.annulation_impossible")} message={professionalDisplay(t, cancellationError)} className="mt-4" /> : null}
             <div className="mt-6 flex flex-wrap justify-end gap-2">
               <Button
                 variant="secondary"
                 disabled={cancellationMutation.isPending}
                 onClick={() => setReservationToCancel(null)}
               >
-                Annuler
-              </Button>
+                {t("client.annuler")}</Button>
               <Button
                 variant="danger"
                 disabled={cancellationMutation.isPending}
                 onClick={() => cancellationMutation.mutate(reservationToCancel.id)}
               >
-                Confirmer la suppression
-              </Button>
+                {t("professional.confirmer_la_suppression")}</Button>
             </div>
           </div>
         </div>

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, type FormEvent } from 'react'
 import type { ComponentType } from 'react'
 import { CarFront, CreditCard, MapPin, Search, Smartphone, Unlock } from 'lucide-react'
@@ -15,23 +16,23 @@ type HighlightCard = {
 
 const HIGHLIGHT_CARDS: HighlightCard[] = [
   {
-    title: 'Location 100 % en ligne',
-    description: 'Réservez, payez et gérez votre location directement depuis votre espace personnel.',
+    title: 'public.location_100_en_ligne',
+    description: 'public.reservez_payez_et_gerez_votre_location_directement_depuis_votre_espace_personnel',
     Icon: Smartphone,
   },
   {
-    title: 'Déverrouillage simple',
-    description: "Accédez à votre véhicule depuis l'application après avoir réalisé l'état des lieux.",
+    title: 'public.deverrouillage_simple',
+    description: 'public.accedez_a_votre_vehicule_depuis_l_application_apres_avoir_realise_l',
     Icon: Unlock,
   },
   {
-    title: 'Paiement sécurisé',
-    description: 'Vos paiements et votre caution sont traités de manière sécurisée.',
+    title: 'public.paiement_securise',
+    description: 'public.vos_paiements_et_votre_caution_sont_traites_de_maniere_securisee',
     Icon: CreditCard,
   },
   {
-    title: 'Large choix',
-    description: 'Choisissez le véhicule adapté à vos besoins parmi plusieurs catégories.',
+    title: 'public.large_choix',
+    description: 'public.choisissez_le_vehicule_adapte_a_vos_besoins_parmi_plusieurs_categories',
     Icon: CarFront,
   },
 ]
@@ -68,6 +69,7 @@ function SearchDateField({
 }
 
 export default function SearchSection() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [startDateValue, setStartDateValue] = useState('')
   const [endDateValue, setEndDateValue] = useState('')
@@ -80,17 +82,17 @@ export default function SearchSection() {
     setFormError(null)
 
     if (!startDateValue || !endDateValue) {
-      setFormError('Veuillez renseigner une date de début et une date de fin.')
+      setFormError('public.veuillez_renseigner_une_date_de_debut_et_une_date_de_fin')
       return
     }
 
     if (startDateValue < getMinimumStartDate()) {
-      setFormError('La date de départ ne peut pas être dans le passé.')
+      setFormError('public.la_date_de_depart_ne_peut_pas_etre_dans_le_passe')
       return
     }
 
     if (endDateValue <= startDateValue) {
-      setFormError('La date de retour doit être postérieure à la date de départ.')
+      setFormError('public.la_date_de_retour_doit_etre_posterieure_a_la_date_de')
       return
     }
 
@@ -126,7 +128,7 @@ export default function SearchSection() {
           </div>
 
           <SearchDateField
-            label="Date de début"
+            label={t('public.date_de_debut')}
             id="search-start-date"
             value={startDateValue}
             minDate={minimumDate}
@@ -134,7 +136,7 @@ export default function SearchSection() {
           />
 
           <SearchDateField
-            label="Date de fin"
+            label={t('public.date_de_fin')}
             id="search-end-date"
             value={endDateValue}
             minDate={endMinimumDate}
@@ -144,21 +146,21 @@ export default function SearchSection() {
           <div className="flex items-end">
             <Button type="submit" variant="danger" size="lg" className="h-14 w-full rounded-2xl px-6 shadow-sm xl:w-auto">
               <Search className="h-5 w-5" aria-hidden="true" />
-              Rechercher
+              {t('public.rechercher')}
             </Button>
           </div>
         </div>
         </form>
 
         {formError ? (
-          <Alert variant="danger" title="Recherche impossible" message={formError} className="mt-5" />
+          <Alert variant="danger" title={t('public.recherche_impossible')} message={t(formError)} className="mt-5" />
         ) : null}
       </div>
 
       <div className="grid grid-cols-1 gap-5 md:auto-rows-fr md:grid-cols-2 xl:grid-cols-4">
         {HIGHLIGHT_CARDS.map(({ title, description, Icon }) => (
           <Card
-            key={title}
+            key={t(title)}
             className="h-full rounded-2xl border-slate-200 bg-white shadow-[0_6px_20px_rgba(15,23,42,0.06)]"
           >
             <article aria-labelledby={`highlight-${title}`} className="flex h-full flex-col">
@@ -167,9 +169,9 @@ export default function SearchSection() {
               </span>
 
               <h3 id={`highlight-${title}`} className="mt-5 text-lg font-semibold text-[#1F2937]">
-                {title}
+                {t(title)}
               </h3>
-              <p className="mt-2 text-sm leading-6 text-slate-600 md:min-h-[72px]">{description}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600 md:min-h-[72px]">{t(description)}</p>
             </article>
           </Card>
         ))}

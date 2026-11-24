@@ -1,3 +1,5 @@
+import { vehicleDisplayLabel } from '../../i18n/vehicleLabels'
+import { useTranslation } from 'react-i18next'
 import { CarFront, Fuel, Gauge, Users } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { formatVehicleDailyRate } from '../../utils/vehiclePrice'
@@ -34,6 +36,7 @@ export default function VehicleCard({
   layout = 'vertical',
   detailQueryString,
 }: VehicleCardProps) {
+  const { t, i18n } = useTranslation()
   const imageAlt = `${brand} ${modelName}`
   const hasImage = Boolean(imageUrl)
   const isHorizontal = layout === 'horizontal'
@@ -68,11 +71,11 @@ export default function VehicleCard({
             <div
               className={isHorizontal ? 'flex h-56 w-full items-center justify-center bg-linear-to-br from-slate-50 to-slate-200 md:h-full md:min-h-56' : 'flex h-44 w-full items-center justify-center bg-linear-to-br from-slate-50 to-slate-200'}
               role="img"
-              aria-label={`Aucune image disponible pour ${imageAlt}`}
+              aria-label={t('public.aucune_image_disponible_pour_name', { name: imageAlt })}
             >
               <div className="inline-flex items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-sm font-medium text-slate-600 shadow-sm">
                 <CarFront className="h-4 w-4" aria-hidden="true" />
-                Visuel indisponible
+                {t('public.visuel_indisponible')}
               </div>
             </div>
           )}
@@ -93,41 +96,41 @@ export default function VehicleCard({
             <dl className={isHorizontal ? 'mt-5 grid grid-cols-1 gap-3 text-sm text-slate-600 sm:grid-cols-3' : 'mt-4 grid grid-cols-2 gap-3 text-sm text-slate-600'}>
               <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
                 <Users className="h-4 w-4 text-[#2563EB]" aria-hidden="true" />
-                <dt className="sr-only">Sièges</dt>
-                <dd>{seats} sièges</dd>
+                <dt className="sr-only">{t('public.sieges')}</dt>
+                <dd>{t('public.count_sieges', { count: seats })}</dd>
               </div>
               <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
                 <Gauge className="h-4 w-4 text-[#2563EB]" aria-hidden="true" />
-                <dt className="sr-only">Transmission</dt>
-                <dd>{transmission}</dd>
+                <dt className="sr-only">{t('public.transmission')}</dt>
+                <dd>{vehicleDisplayLabel(t, transmission)}</dd>
               </div>
               <div className={isHorizontal ? 'flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2' : 'col-span-2 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2'}>
                 <Fuel className="h-4 w-4 text-[#2563EB]" aria-hidden="true" />
-                <dt className="sr-only">Carburant</dt>
-                <dd>{fuelType}</dd>
+                <dt className="sr-only">{t('public.carburant')}</dt>
+                <dd>{vehicleDisplayLabel(t, fuelType)}</dd>
               </div>
             </dl>
           </div>
 
           <div className={isHorizontal ? 'mt-6 flex flex-col gap-4 border-t border-slate-200 pt-4 sm:flex-row sm:items-end sm:justify-between' : 'mt-6 flex items-end justify-between gap-4 border-t border-slate-200 pt-4'}>
             <div>
-              <p className="text-2xl font-semibold text-[#1F2937]">{formatVehicleDailyRate(pricePerDay)}</p>
-              <p className="mt-1 text-xs text-slate-500">TVA de 21 % comprise</p>
+              <p className="text-2xl font-semibold text-[#1F2937]">{formatVehicleDailyRate(pricePerDay, t, i18n.resolvedLanguage)}</p>
+              <p className="mt-1 text-xs text-slate-500">{t('public.tva_de_21_comprise')}</p>
             </div>
             {isAvailable ? (
               <Link
                 to={detailUrl}
                 className="inline-flex h-11 items-center justify-center rounded-2xl bg-[#2563EB] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#1D4ED8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
-                aria-label={`Voir les détails du véhicule ${brand} ${modelName}`}
+                aria-label={t('public.voir_les_details_du_vehicule_name', { name: [brand, modelName].join(' ') })}
               >
-                Voir détail
+                {t('public.voir_detail')}
               </Link>
             ) : (
               <span
                 className="inline-flex h-11 cursor-not-allowed items-center justify-center rounded-2xl bg-slate-300 px-4 text-sm font-medium text-slate-600"
-                aria-label={`Véhicule non disponible: ${brand} ${modelName}`}
+                aria-label={t('public.vehicule_non_disponible_name', { name: [brand, modelName].join(' ') })}
               >
-                Voir détail indisponible
+                {t('public.voir_detail_indisponible')}
               </span>
             )}
           </div>

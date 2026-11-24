@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { clientDisplay, clientLocale } from '../../i18n/clientDisplay'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import axios from 'axios'
@@ -22,7 +24,7 @@ import { getReservationStatusUi } from '../../utils/reservationStatus'
 const actionButtonClassName = 'min-w-44 justify-center'
 
 function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(clientLocale(), {
     timeZone: 'Europe/Brussels',
     day: '2-digit',
     month: '2-digit',
@@ -54,7 +56,7 @@ function formatEuro(value: string | number): string {
     return `${value} EUR`
   }
 
-  return new Intl.NumberFormat('fr-FR', {
+  return new Intl.NumberFormat(clientLocale(), {
     style: 'currency',
     currency: 'EUR',
     minimumFractionDigits: 2,
@@ -91,6 +93,7 @@ async function toInvoiceDownloadErrorMessage(error: unknown): Promise<string> {
 }
 
 export default function ClientReservationsPage() {
+  const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const [downloadingReservationId, setDownloadingReservationId] = useState<number | null>(null)
   const [invoiceDownloadError, setInvoiceDownloadError] = useState<string | null>(null)
@@ -169,20 +172,20 @@ export default function ClientReservationsPage() {
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6">
-        <h1 className="text-3xl font-semibold text-[#0F172A]">Mes réservations</h1>
+        <h1 className="text-3xl font-semibold text-[#0F172A]">{t('client.mes_reservations')}</h1>
       </div>
 
       {reservationsQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
-          <LoadingSpinner size="lg" aria-label="Chargement des réservations" />
+          <LoadingSpinner size="lg" aria-label={t('client.chargement_des_reservations')} />
         </div>
       ) : null}
 
       {reservationsQuery.isError ? (
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message="Les réservations n'ont pas pu être récupérées. Veuillez réessayer."
+          title={t('client.chargement_impossible')}
+          message={t('client.les_reservations_n_ont_pas_pu_etre_recuperees_veuillez_reessayer')}
           className="mb-6"
         />
       ) : null}
@@ -190,19 +193,19 @@ export default function ClientReservationsPage() {
       {invoiceDownloadError ? (
         <Alert
           variant="danger"
-          title="Téléchargement impossible"
-          message={invoiceDownloadError}
+          title={t('client.telechargement_impossible')}
+          message={clientDisplay(t, invoiceDownloadError)}
           className="mb-6"
         />
       ) : null}
 
       {!reservationsQuery.isLoading && !reservationsQuery.isError && reservations.length === 0 ? (
         <EmptyState
-          title="Aucune réservation"
-          description="Aucune réservation"
+          title={t('client.aucune_reservation')}
+          description={t('client.aucune_reservation')}
           action={
             <Link to="/vehicles">
-              <Button>Rechercher un véhicule</Button>
+              <Button>{t('client.rechercher_un_vehicule')}</Button>
             </Link>
           }
         />
@@ -226,11 +229,11 @@ export default function ClientReservationsPage() {
               >
                 {downloadingReservationId === reservation.id ? (
                   <span className="flex items-center gap-2">
-                    <LoadingSpinner size="sm" aria-label="Téléchargement en cours" />
-                    Téléchargement...
+                    <LoadingSpinner size="sm" aria-label={t('client.telechargement_en_cours')} />
+                    {t('client.telechargement')}
                   </span>
                 ) : (
-                  'Télécharger la facture'
+                  t('client.telecharger_la_facture')
                 )}
               </Button>
             )
@@ -253,45 +256,45 @@ export default function ClientReservationsPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
                       <p className="whitespace-nowrap text-sm text-[#0F172A]">
-                        <span className="font-semibold">Référence :</span> {reservation.reference}
+                        <span className="font-semibold">{t('client.reference')}</span> {reservation.reference}
                       </p>
                       <p className="whitespace-nowrap text-sm text-[#0F172A]">
-                        <span className="font-semibold">Date de création :</span> {formatDateTime(reservation.created_at)}
+                        <span className="font-semibold">{t('client.date_de_creation')}</span> {formatDateTime(reservation.created_at)}
                       </p>
                     </div>
-                    <StatusBadge variant={status.variant} label={status.label} />
+                    <StatusBadge variant={status.variant} label={clientDisplay(t, status.label)} />
                   </div>
                 }
               >
                 <div className="grid gap-x-6 gap-y-5 text-sm text-slate-700 lg:grid-cols-3">
                   <div className="space-y-4">
                     <div>
-                      <p className="font-medium text-[#1F2937]">Véhicule</p>
+                      <p className="font-medium text-[#1F2937]">{t('client.vehicule')}</p>
                       <p>{vehicleLabel(reservation)}</p>
                       <p className="text-xs text-slate-500">{reservation.vehicle.registration_number}</p>
                     </div>
                     <div>
-                      <p className="font-medium text-[#1F2937]">Période prévue</p>
-                      <p>Début : {formatDateTime(reservation.start_at)}</p>
-                      <p>Fin : {formatDateTime(reservation.end_at)}</p>
+                      <p className="font-medium text-[#1F2937]">{t('client.periode_prevue')}</p>
+                      <p>{t('client.debut')} {formatDateTime(reservation.start_at)}</p>
+                      <p>{t('client.fin')} {formatDateTime(reservation.end_at)}</p>
                     </div>
                   </div>
                   <div className="space-y-4">
                     <div>
-                      <p className="font-medium text-[#1F2937]">Localisation</p>
+                      <p className="font-medium text-[#1F2937]">{t('client.localisation')}</p>
                       <p>{reservation.vehicle.parking_name}</p>
-                      <p className="text-xs text-slate-500">Place {reservation.vehicle.parking_space_number}</p>
+                      <p className="text-xs text-slate-500">{t('client.place_number', { number: reservation.vehicle.parking_space_number })}</p>
                     </div>
                     <div>
-                      <p className="font-medium text-[#1F2937]">Utilisation réelle</p>
-                      <p>Prise en charge : {formatDateTimeOrDash(reservation.actual_pickup_at)}</p>
-                      <p>Retour : {formatDateTimeOrDash(reservation.actual_return_at)}</p>
+                      <p className="font-medium text-[#1F2937]">{t('client.utilisation_reelle')}</p>
+                      <p>{t('client.prise_en_charge')} {formatDateTimeOrDash(reservation.actual_pickup_at)}</p>
+                      <p>{t('client.retour')} {formatDateTimeOrDash(reservation.actual_return_at)}</p>
                     </div>
                   </div>
                   <div>
-                    <p className="font-medium text-[#1F2937]">Paiement</p>
-                    <p>Montant : {reservation.rental_amount} EUR</p>
-                    <p>Caution : {reservation.deposit_amount} EUR</p>
+                    <p className="font-medium text-[#1F2937]">{t('client.paiement')}</p>
+                    <p>{t('client.montant_alt')} {formatEuro(reservation.rental_amount)}</p>
+                    <p>{t('client.caution')} {formatEuro(reservation.deposit_amount)}</p>
                   </div>
                 </div>
 
@@ -305,16 +308,16 @@ export default function ClientReservationsPage() {
                       <div className="flex flex-col items-center gap-2">
                         {unlockAvailability?.allowed || unlockAvailability?.code === 'ALREADY_UNLOCKED' ? (
                           <Link to={`/client/reservations/${reservation.id}/unlock`}>
-                            <Button size="sm" className={actionButtonClassName}>Déverrouiller le véhicule</Button>
+                            <Button size="sm" className={actionButtonClassName}>{t('client.deverrouiller_le_vehicule')}</Button>
                           </Link>
                         ) : (
                           <Button size="sm" disabled className={actionButtonClassName}>
-                            Déverrouiller le véhicule
+                            {t('client.deverrouiller_le_vehicule')}
                           </Button>
                         )}
                         {!unlockAvailability?.allowed && unlockAvailability?.code !== 'ALREADY_UNLOCKED' ? (
                           <p role="status" className="max-w-xs text-center text-xs text-slate-600">
-                            {unlockAvailability?.message ?? 'Disponibilité du déverrouillage impossible à vérifier. Actualisez la page.'}
+                            {unlockAvailability?.message ?? t('client.disponibilite_du_deverrouillage_impossible_a_verifier_actualisez_la_page')}
                           </p>
                         ) : null}
                       </div>
@@ -326,7 +329,7 @@ export default function ClientReservationsPage() {
                         className={actionButtonClassName}
                         onClick={() => navigate(`/client/reservations/${reservation.id}/return-inspection`)}
                       >
-                        Restituer au parking
+                        {t('client.restituer_au_parking')}
                       </Button>
                     ) : null}
                     {reservation.status === 'A_CONTROLER' && reservation.actual_return_at ? (
@@ -336,7 +339,7 @@ export default function ClientReservationsPage() {
                         className={actionButtonClassName}
                         onClick={() => navigate(`/client/reservations/${reservation.id}/return-inspection/lock`)}
                       >
-                        Voir la restitution
+                        {t('client.voir_la_restitution')}
                       </Button>
                     ) : null}
                   </div>
@@ -344,7 +347,7 @@ export default function ClientReservationsPage() {
                   <div className="flex justify-center sm:justify-end">
                     {showCancelButton ? (
                       <Button variant="danger" size="sm" className={actionButtonClassName} onClick={() => setCancelingReservationId(reservation.id)}>
-                        Annuler ma réservation
+                        {t('client.annuler_ma_reservation')}
                       </Button>
                     ) : null}
                   </div>
@@ -356,7 +359,7 @@ export default function ClientReservationsPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
             <p className="text-sm text-slate-600">
-              Total: <span className="font-semibold text-[#1F2937]">{reservationsQuery.data?.count ?? 0}</span>
+              {t('client.total')} <span className="font-semibold text-[#1F2937]">{reservationsQuery.data?.count ?? 0}</span>
             </p>
             <div className="flex items-center gap-2">
               <Button
@@ -365,7 +368,7 @@ export default function ClientReservationsPage() {
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
                 disabled={!reservationsQuery.data?.previous}
               >
-                Précédent
+                {t('client.precedent')}
               </Button>
               <span className="px-2 text-sm font-medium text-slate-700">Page {page}</span>
               <Button
@@ -374,7 +377,7 @@ export default function ClientReservationsPage() {
                 onClick={() => setPage((current) => current + 1)}
                 disabled={!reservationsQuery.data?.next}
               >
-                Suivant
+                {t('client.suivant')}
               </Button>
             </div>
           </div>
@@ -384,35 +387,35 @@ export default function ClientReservationsPage() {
       {cancelingReservationId !== null ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4">
           <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
-            <h2 className="text-xl font-semibold text-[#0F172A]">Êtes-vous sûr de vouloir annuler cette réservation ?</h2>
+            <h2 className="text-xl font-semibold text-[#0F172A]">{t('client.etes_vous_sur_de_vouloir_annuler_cette_reservation')}</h2>
 
             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
               {cancellationPreviewQuery.isLoading ? (
                 <div className="flex items-center gap-3">
-                  <LoadingSpinner size="sm" aria-label="Chargement des montants d'annulation" />
-                  <span>Calcul des montants en cours...</span>
+                  <LoadingSpinner size="sm" aria-label={t('client.chargement_des_montants_d_annulation')} />
+                  <span>{t('client.calcul_des_montants_en_cours')}</span>
                 </div>
               ) : null}
 
               {cancellationPreviewQuery.isError ? (
-                <Alert variant="danger" message="Les montants d'annulation ne sont pas disponibles pour le moment." />
+                <Alert variant="danger" message={t('client.les_montants_d_annulation_ne_sont_pas_disponibles_pour_le_moment')} />
               ) : null}
 
               {cancelMutation.isError ? (
-                <Alert variant="danger" message="L'annulation n'a pas pu être finalisée. Veuillez réessayer." />
+                <Alert variant="danger" message={t('client.l_annulation_n_a_pas_pu_etre_finalisee_veuillez_reessayer')} />
               ) : null}
 
               {cancellationPreviewQuery.data ? (
                 <div className="space-y-1">
                   {cancellationPreviewQuery.data.no_refund ? (
                     <p className="font-semibold text-red-700">
-                      Vous annulez moins de 24 heures avant le départ. Aucun remboursement ne sera effectué.
+                      {t('client.vous_annulez_moins_de_24_heures_avant_le_depart_aucun_remboursement')}
                     </p>
                   ) : null}
-                  <p>Montant payé : {formatEuro(cancellationPreviewQuery.data.amount_paid)}</p>
-                  <p>Frais d'annulation : {formatEuro(cancellationPreviewQuery.data.cancellation_fee)}</p>
-                  <p>Remboursement prévu : {formatEuro(cancellationPreviewQuery.data.refundable_amount)}</p>
-                  <p>Caution : libérée intégralement</p>
+                  <p>{t('client.montant_paye')} {formatEuro(cancellationPreviewQuery.data.amount_paid)}</p>
+                  <p>{t('client.frais_d_annulation')} {formatEuro(cancellationPreviewQuery.data.cancellation_fee)}</p>
+                  <p>{t('client.remboursement_prevu')} {formatEuro(cancellationPreviewQuery.data.refundable_amount)}</p>
+                  <p>{t('client.caution_liberee_integralement')}</p>
                 </div>
               ) : null}
             </div>
@@ -423,7 +426,7 @@ export default function ClientReservationsPage() {
                 onClick={() => setCancelingReservationId(null)}
                 disabled={cancelMutation.isPending}
               >
-                Non, conserver ma réservation
+                {t('client.non_conserver_ma_reservation')}
               </Button>
               <Button
                 variant="danger"
@@ -434,7 +437,7 @@ export default function ClientReservationsPage() {
                   || !cancellationPreviewQuery.data?.can_cancel
                 }
               >
-                {cancelMutation.isPending ? 'Annulation en cours...' : 'Oui, annuler ma réservation'}
+                {cancelMutation.isPending ? t('client.annulation_en_cours') : t('client.oui_annuler_ma_reservation')}
               </Button>
             </div>
           </div>

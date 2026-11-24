@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Alert, LoadingSpinner } from '../feedback'
@@ -8,6 +9,7 @@ import type { PublicVehicle } from '../../types/vehicle'
 import { resolveMediaUrl } from '../../utils/media'
 
 export default function PopularVehicles() {
+  const { t } = useTranslation()
   const [vehicles, setVehicles] = useState<PublicVehicle[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -33,7 +35,7 @@ export default function PopularVehicles() {
         }
 
         setVehicles([])
-        setErrorMessage('Impossible de charger les véhicules populaires pour le moment.')
+        setErrorMessage('public.impossible_de_charger_les_vehicules_populaires_pour_le_moment')
       } finally {
         if (isMounted) {
           setIsLoading(false)
@@ -69,7 +71,7 @@ export default function PopularVehicles() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="max-w-3xl">
             <h2 id="popular-vehicles-title" className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
-              Véhicules populaires
+              {t('public.vehicules_populaires')}
             </h2>
           </div>
 
@@ -77,17 +79,17 @@ export default function PopularVehicles() {
             to="/vehicles"
             className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-[#1F2937] shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
           >
-            Voir tous les véhicules
+            {t('public.voir_tous_les_vehicules')}
           </Link>
         </div>
 
         {errorMessage ? (
-          <Alert variant="danger" title="Erreur de chargement" message={errorMessage} className="mt-8" />
+          <Alert variant="danger" title={t('public.erreur_de_chargement')} message={t(errorMessage)} className="mt-8" />
         ) : null}
 
         {isLoading ? (
           <div className="mt-10 flex justify-center">
-            <LoadingSpinner aria-label="Chargement des véhicules populaires" />
+            <LoadingSpinner aria-label={t('public.chargement_des_vehicules_populaires')} />
           </div>
         ) : null}
 

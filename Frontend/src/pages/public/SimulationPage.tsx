@@ -1,3 +1,6 @@
+import { clientDisplay, clientLocale } from '../../i18n/clientDisplay'
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AxiosError } from 'axios'
@@ -57,7 +60,7 @@ function formatDateTimeLabel(value: string): string {
     return value
   }
 
-  return parsedValue.toLocaleString('fr-FR', {
+  return parsedValue.toLocaleString(clientLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
@@ -70,16 +73,12 @@ function formatCurrency(value: string | number): string {
     return `${value} EUR`
   }
 
-  return `${parsedValue.toFixed(2)} EUR`
-}
-
-function formatDailyInsurancePrice(value: number): string {
-  return `+ ${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(value)} €/jour`
+  return new Intl.NumberFormat(clientLocale(), { style: 'currency', currency: 'EUR' }).format(parsedValue)
 }
 
 function formatDurationLabel(value: string | number, billedDays?: number): string {
   if (typeof billedDays === 'number' && billedDays > 0) {
-    return `${billedDays} jour${billedDays > 1 ? 's' : ''}`
+    return new Intl.NumberFormat(clientLocale(), { style: 'unit', unit: 'day', unitDisplay: 'long' }).format(billedDays)
   }
 
   const parsedValue = Number(value)
@@ -87,17 +86,17 @@ function formatDurationLabel(value: string | number, billedDays?: number): strin
     return `${value} heures`
   }
 
-  return `${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(parsedValue)} heures`
+  return new Intl.NumberFormat(clientLocale(), { style: 'unit', unit: 'hour', unitDisplay: 'long', maximumFractionDigits: 2 }).format(parsedValue)
 }
 
-function formatIncludedKm(vehicle: PublicVehicle): string {
+function formatIncludedKm(t: TFunction, vehicle: PublicVehicle): string {
   const includedKmPerDay = vehicle.conditions?.included_km_per_day ?? vehicle.included_km_per_day
 
   if (typeof includedKmPerDay !== 'number' || !Number.isFinite(includedKmPerDay)) {
     return 'Non renseigné'
   }
 
-  return `${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(includedKmPerDay)} km / jour`
+  return t('client.distance_km_jour', { distance: new Intl.NumberFormat(clientLocale(), { maximumFractionDigits: 0 }).format(includedKmPerDay) })
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -124,6 +123,7 @@ function computeInsuranceDays(durationHours: string | number, billedDays?: numbe
 }
 
 export default function SimulationPage() {
+  const { t } = useTranslation()
   const { vehicleId: routeVehicleId } = useParams<{ vehicleId: string }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -271,17 +271,17 @@ export default function SimulationPage() {
     features: string[]
   }> = {
     standard: {
-      priceLabel: 'Incluse dans le prix',
+      priceLabel: t('client.incluse_dans_le_prix'),
       features: [
-        'Assurance de base obligatoire.',
-        'Franchise standard applicable en cas de dommage couvert.',
+        t('client.assurance_de_base_obligatoire'),
+        t('client.franchise_standard_applicable_en_cas_de_dommage_couvert'),
       ],
     },
     complementary: {
-      priceLabel: formatDailyInsurancePrice(INSURANCE_DAILY_PRICE.complementary),
+      priceLabel: t('client.amount_par_jour', { amount: '+ ' + formatCurrency(INSURANCE_DAILY_PRICE.complementary) }),
       features: [
-        'Assurance de base incluse.',
-        'Franchise réduite en cas de dommage couvert.',
+        t('client.assurance_de_base_incluse_alt_alt'),
+        t('client.franchise_reduite_en_cas_de_dommage_couvert'),
       ],
     },
   }
@@ -291,16 +291,14 @@ export default function SimulationPage() {
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <header className="max-w-3xl">
           <h1 id="simulation-page-title" className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
-            Simulation de prix
-          </h1>
+            {t("professional.simulation_de_prix")}</h1>
           <p className="mt-3 text-base leading-7 text-slate-600 sm:text-lg">
-            Calculez un montant indicatif pour votre période de location à partir du contrat backend de simulation.
-          </p>
+            {t("professional.calculez_un_montant_indicatif_pour_votre_periode_de_location_a_partir_du")}</p>
         </header>
 
         {!vehicleIdParam ? (
           <div className="mt-6">
-            <Alert variant="info" title="Sélection de véhicule requise" message="Sélectionnez un véhicule depuis le catalogue ou la recherche pour lancer une simulation." />
+            <Alert variant="info" title={t("professional.selection_de_vehicule_requise")} message={t("professional.selectionnez_un_vehicule_depuis_le_catalogue_ou_la_recherche_pour_lancer_une")} />
           </div>
         ) : null}
 
@@ -308,12 +306,12 @@ export default function SimulationPage() {
           <div className="mt-6 space-y-4">
             <Alert
               variant="info"
-              title="Période de réservation requise"
-              message="Revenez au catalogue des véhicules pour choisir une date de début et une date de fin avant de lancer la simulation."
+              title={t("professional.periode_de_reservation_requise")}
+              message={t("professional.revenez_au_catalogue_des_vehicules_pour_choisir_une_date_de_debut_et")}
             />
             <div>
               <Link to="/vehicles" className="inline-flex">
-                <Button variant="secondary">Retour au catalogue</Button>
+                <Button variant="secondary">{t("professional.retour_au_catalogue")}</Button>
               </Link>
             </div>
           </div>
@@ -321,13 +319,13 @@ export default function SimulationPage() {
 
         {isLoading ? (
           <div className="mt-8 flex justify-center">
-            <LoadingSpinner aria-label="Chargement de la simulation" size="lg" />
+            <LoadingSpinner aria-label={t("professional.chargement_de_la_simulation")} size="lg" />
           </div>
         ) : null}
 
         {!isLoading && errorMessage ? (
           <div className="mt-6">
-            <Alert variant="danger" title="Erreur de simulation" message={errorMessage} />
+            <Alert variant="danger" title={t("professional.erreur_de_simulation")} message={errorMessage} />
           </div>
         ) : null}
 
@@ -344,8 +342,7 @@ export default function SimulationPage() {
                     />
                   ) : (
                     <div className="flex h-52 items-center justify-center text-sm font-medium text-slate-500 md:h-full">
-                      Photo indisponible
-                    </div>
+                      {t("client.photo_indisponible")}</div>
                   )}
                 </div>
 
@@ -354,78 +351,76 @@ export default function SimulationPage() {
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2563EB]">{vehicle.category}</p>
                     <h2 className="mt-1 text-2xl font-semibold tracking-tight text-[#1F2937]">{vehicle.brand} {vehicle.model_name}</h2>
                     <p className="mt-3 text-xl font-semibold text-[#1F2937]">{formatVehicleDailyRate(vehicle.category_daily_rate)}</p>
-                    <p className="mt-1 text-xs text-slate-500">TVA de 21 % comprise</p>
+                    <p className="mt-1 text-xs text-slate-500">{t("professional.tva_de_21_comprise")}</p>
                   </div>
 
                   <Button variant="secondary" className="w-full md:w-auto" onClick={() => navigate(`/vehicles/${vehicleIdParam}`)}>
-                    Retour au véhicule
-                  </Button>
+                    {t("professional.retour_au_vehicule")}</Button>
                 </div>
               </div>
             </Card>
 
-            <Card className="flex h-full flex-col border-slate-200 bg-[#FFF7ED]" header={<h2 className="text-lg font-semibold text-[#1F2937]">Récapitulatif de votre location</h2>}>
+            <Card className="flex h-full flex-col border-slate-200 bg-[#FFF7ED]" header={<h2 className="text-lg font-semibold text-[#1F2937]">{t("professional.recapitulatif_de_votre_location")}</h2>}>
               <div className="flex h-full flex-col gap-5">
                 <div className="rounded-2xl border border-orange-100 bg-white px-4 py-4 sm:px-5">
                   <div className="space-y-3">
                     <div className="flex items-start justify-between gap-4 border-b border-orange-100 pb-3">
-                      <span className="text-sm text-slate-600">Date/heure de début</span>
+                      <span className="text-sm text-slate-600">{t("professional.date_heure_de_debut")}</span>
                       <span className="text-right text-sm font-medium text-[#1F2937]">{formatDateTimeLabel(startParam ?? '')}</span>
                     </div>
                     <div className="flex items-start justify-between gap-4 border-b border-orange-100 pb-3">
-                      <span className="text-sm text-slate-600">Date/heure de fin</span>
+                      <span className="text-sm text-slate-600">{t("client.date_heure_de_fin")}</span>
                       <span className="text-right text-sm font-medium text-[#1F2937]">{formatDateTimeLabel(endParam ?? '')}</span>
                     </div>
                     <div className="flex items-start justify-between gap-4 border-b border-orange-100 pb-3">
-                      <span className="text-sm text-slate-600">Durée</span>
+                      <span className="text-sm text-slate-600">{t("public.duree")}</span>
                       <span className="text-sm font-medium text-[#1F2937]">{formatDurationLabel(simulation.duration_hours, simulation.billed_days)}</span>
                     </div>
                     <div className="flex items-start justify-between gap-4 border-b border-orange-100 pb-3">
-                      <span className="text-sm text-slate-600">Prix de base</span>
+                      <span className="text-sm text-slate-600">{t("professional.prix_de_base")}</span>
                       <span className="text-sm font-medium text-[#1F2937]">{formatCurrency(simulation.rental_amount)}</span>
                     </div>
                     <div className="flex items-start justify-between gap-4 border-b border-orange-100 pb-3">
-                      <span className="text-sm text-slate-600">Kilométrage inclus</span>
-                      <span className="text-sm font-medium text-[#1F2937]">{formatIncludedKm(vehicle)}</span>
+                      <span className="text-sm text-slate-600">{t("professional.kilometrage_inclus")}</span>
+                      <span className="text-sm font-medium text-[#1F2937]">{formatIncludedKm(t, vehicle)}</span>
                     </div>
                     <div className="flex items-start justify-between gap-4 border-b border-orange-100 pb-3">
-                      <span className="text-sm text-slate-600">Assurance choisie</span>
+                      <span className="text-sm text-slate-600">{t("professional.assurance_choisie")}</span>
                       <span className="text-sm font-medium text-[#1F2937]">{selectedInsuranceOption?.label ?? 'Aucune'}</span>
                     </div>
                     <div className="flex items-start justify-between gap-4 border-b border-orange-100 pb-3">
-                      <span className="text-sm text-slate-600">Prix de l’assurance</span>
+                      <span className="text-sm text-slate-600">{t("professional.prix_de_l_assurance")}</span>
                       <span className="text-sm font-medium text-[#1F2937]">
-                        {selectedInsuranceAmount !== null ? formatCurrency(selectedInsuranceAmount) : selectedInsurance ? 'Tarif indisponible' : 'A sélectionner'}
+                        {selectedInsuranceAmount !== null ? formatCurrency(selectedInsuranceAmount) : selectedInsurance ? t("public.tarif_indisponible") : 'A sélectionner'}
                       </span>
                     </div>
                   </div>
 
                   <div className="mt-4 flex items-center justify-between rounded-2xl bg-[#FFF7ED] px-4 py-3">
-                    <span className="text-base font-semibold text-[#1F2937]">Total estimé</span>
+                    <span className="text-base font-semibold text-[#1F2937]">{t("professional.total_estime")}</span>
                     <span className="text-xl font-semibold text-[#EA580C]">
                       {computedTotalAmount !== null ? formatCurrency(computedTotalAmount) : formatCurrency(simulation.total_amount)}
                     </span>
                   </div>
                 </div>
 
-                <fieldset className="rounded-[32px] border border-violet-100 bg-white p-4 sm:p-6" aria-label="Choisissez votre assurance">
-                  <legend className="sr-only">Choisissez votre assurance</legend>
+                <fieldset className="rounded-[32px] border border-violet-100 bg-white p-4 sm:p-6" aria-label={t("public.choisissez_votre_assurance")}>
+                  <legend className="sr-only">{t("public.choisissez_votre_assurance")}</legend>
 
                   <div className="space-y-5">
                     <div>
-                      <h2 className="text-2xl font-semibold tracking-tight text-[#1F2937]">Choisissez votre assurance</h2>
+                      <h2 className="text-2xl font-semibold tracking-tight text-[#1F2937]">{t("public.choisissez_votre_assurance")}</h2>
                       <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 sm:text-base">
-                        Sélectionnez l’option qui correspond le mieux à vos besoins pour rouler en toute sérénité.
-                      </p>
+                        {t("professional.selectionnez_l_option_qui_correspond_le_mieux_a_vos_besoins_pour_rouler")}</p>
                     </div>
 
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                         <span className="font-semibold text-[#1F2937]">{insuranceSummaryVehicleLabel}</span>
                         <span className="text-slate-400">·</span>
-                        <span>Départ {insuranceSummaryStartLabel}</span>
+                        <span>{t("public.depart")} {insuranceSummaryStartLabel}</span>
                         <span className="text-slate-400">·</span>
-                        <span>Retour {insuranceSummaryEndLabel}</span>
+                        <span>{t("public.retour")} {insuranceSummaryEndLabel}</span>
                         <span className="text-slate-400">·</span>
                         <span>{insuranceSummaryDurationLabel}</span>
                       </div>
@@ -458,7 +453,7 @@ export default function SimulationPage() {
                             className="sr-only"
                           />
 
-                          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-500">{option.label}</p>
+                          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-500">{clientDisplay(t, option.label)}</p>
                           <p className="mt-2 text-xl font-semibold text-[#1F2937]">{cardDetails.priceLabel}</p>
 
                           <ul className="mt-5 space-y-3 text-sm text-slate-700">
@@ -477,11 +472,10 @@ export default function SimulationPage() {
                     </div>
 
                     {!selectedInsurance ? (
-                      <p className="text-xs font-medium text-[#7C3AED]">Veuillez sélectionner une assurance pour continuer.</p>
+                      <p className="text-xs font-medium text-[#7C3AED]">{t("professional.veuillez_selectionner_une_assurance_pour_continuer")}</p>
                     ) : selectedInsuranceAmount === null ? (
                       <p className="text-xs font-medium text-[#7C3AED]">
-                        Le backend de simulation ne fournit pas encore le tarif de cette assurance. Le total reste basé sur le prix de location API.
-                      </p>
+                        {t("professional.le_backend_de_simulation_ne_fournit_pas_encore_le_tarif_de_cette")}</p>
                     ) : null}
                   </div>
                 </fieldset>
@@ -492,8 +486,7 @@ export default function SimulationPage() {
                   onClick={handleReservationClick}
                   disabled={!canContinueReservation}
                 >
-                  Continuer la réservation
-                </Button>
+                  {t("professional.continuer_la_reservation")}</Button>
               </div>
             </Card>
           </div>
@@ -501,7 +494,7 @@ export default function SimulationPage() {
 
         {!isLoading && !errorMessage && !hasSearchDates && !vehicleIdParam ? (
           <div className="mt-8">
-            <EmptyState title="Aucune simulation en cours" description="Choisissez un véhicule et une période pour démarrer la simulation." />
+            <EmptyState title={t("professional.aucune_simulation_en_cours")} description={t("professional.choisissez_un_vehicule_et_une_periode_pour_demarrer_la_simulation")} />
           </div>
         ) : null}
       </div>

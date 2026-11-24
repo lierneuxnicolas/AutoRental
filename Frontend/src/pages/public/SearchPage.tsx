@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Alert, EmptyState, LoadingSpinner } from '../../components/feedback'
@@ -54,6 +55,7 @@ function toVehicleList(payload: Awaited<ReturnType<typeof getAvailableVehicles>>
 }
 
 export default function SearchPage() {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const [vehicles, setVehicles] = useState<PublicVehicle[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -85,7 +87,7 @@ export default function SearchPage() {
         setVehicles([])
         setResultCount(null)
         setIsLoading(false)
-        setErrorMessage('Veuillez renseigner des dates pour rechercher des véhicules disponibles.')
+        setErrorMessage('public.veuillez_renseigner_des_dates_pour_rechercher_des_vehicules_disponibles')
         return
       }
 
@@ -114,7 +116,7 @@ export default function SearchPage() {
         setVehicles([])
         setResultCount(null)
         setIsLoading(false)
-        setErrorMessage('Les paramètres de recherche sont invalides.')
+        setErrorMessage('public.les_parametres_de_recherche_sont_invalides')
         return
       }
 
@@ -129,7 +131,7 @@ export default function SearchPage() {
         setVehicles([])
         setResultCount(null)
         setIsLoading(false)
-        setErrorMessage('La date de fin doit être postérieure à la date de début.')
+        setErrorMessage('public.la_date_de_fin_doit_etre_posterieure_a_la_date_de')
         return
       }
 
@@ -149,7 +151,7 @@ export default function SearchPage() {
 
         setVehicles([])
         setResultCount(null)
-        setErrorMessage('Impossible de charger les véhicules disponibles pour le moment.')
+        setErrorMessage('public.impossible_de_charger_les_vehicules_disponibles_pour_le_moment')
       } finally {
         if (isMounted) {
           setIsLoading(false)
@@ -173,7 +175,7 @@ export default function SearchPage() {
     const normalizedLocation = locationInput.trim()
 
     if (!normalizedStart || !normalizedEnd) {
-      setFormError('Veuillez renseigner une date de début et une date de fin.')
+      setFormError('public.veuillez_renseigner_une_date_de_debut_et_une_date_de_fin')
       return
     }
 
@@ -186,7 +188,7 @@ export default function SearchPage() {
     }
 
     if (startInput < getMinimumStartDate()) {
-      setFormError('La date de départ ne peut pas être dans le passé.')
+      setFormError('public.la_date_de_depart_ne_peut_pas_etre_dans_le_passe')
       return
     }
 
@@ -194,7 +196,7 @@ export default function SearchPage() {
     const endDate = new Date(endIso)
 
     if (endDate <= startDate) {
-      setFormError('La date de fin doit être postérieure à la date de début.')
+      setFormError('public.la_date_de_fin_doit_etre_posterieure_a_la_date_de')
       return
     }
 
@@ -242,25 +244,25 @@ export default function SearchPage() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <header className="max-w-3xl">
           <h1 id="search-page-title" className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
-            Véhicules disponibles
+            {t('public.vehicules_disponibles')}
           </h1>
           <p className="mt-3 text-base leading-7 text-slate-600 sm:text-lg">
-            Consultez instantly les véhicules libres pour votre période de location.
+            {t('public.consultez_instantly_les_vehicules_libres_pour_votre_periode_de_location')}
           </p>
           {hasSearchDates && searchedStart && searchedEnd ? (
             <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-600">
-              <span className="rounded-full bg-slate-100 px-3 py-1">Début : {formatDateTimeLabel(searchedStart)}</span>
-              <span className="rounded-full bg-slate-100 px-3 py-1">Fin : {formatDateTimeLabel(searchedEnd)}</span>
-              {resultCount !== null ? <span className="rounded-full bg-slate-100 px-3 py-1">{resultCount} résultat{resultCount > 1 ? 's' : ''}</span> : null}
+              <span className="rounded-full bg-slate-100 px-3 py-1">{t('public.debut')} : {formatDateTimeLabel(searchedStart)}</span>
+              <span className="rounded-full bg-slate-100 px-3 py-1">{t('public.fin')} : {formatDateTimeLabel(searchedEnd)}</span>
+              {resultCount !== null ? <span className="rounded-full bg-slate-100 px-3 py-1">{t('public.count_resultat', { count: resultCount })}</span> : null}
             </div>
           ) : null}
         </header>
 
         {vehicleId ? (
           <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <Alert variant="info" title="Recherche liée au véhicule" message={`Le véhicule sélectionné est conservé dans l’URL pour une future simulation : ${vehicleId}.`} className="border-0 bg-transparent p-0" />
+            <Alert variant="info" title={t('public.recherche_liee_au_vehicule')} message={t('public.le_vehicule_selectionne_est_conserve_dans_lurl_pour_une_future_simulation', { id: vehicleId })} className="border-0 bg-transparent p-0" />
             <Link to={`/vehicles/${vehicleId}/simulation?${searchedStart ? `start=${encodeURIComponent(searchedStart)}` : ''}${searchedStart && searchedEnd ? '&' : ''}${searchedEnd ? `end=${encodeURIComponent(searchedEnd)}` : ''}`} className="inline-flex">
-              <Button variant="danger">Simuler le prix</Button>
+              <Button variant="danger">{t('public.simuler_le_prix')}</Button>
             </Link>
           </div>
         ) : null}
@@ -268,14 +270,14 @@ export default function SearchPage() {
         <Card className="mt-6 border-slate-200">
           <form key={formKey} onSubmit={handleSubmit} className="grid gap-4 md:grid-cols-[1.2fr_1fr_1fr_auto] md:items-end">
             <Input
-              label="Lieu de prise en charge"
-              placeholder="Ex: Bruxelles, Paris"
+              label={t('public.lieu_de_prise_en_charge')}
+              placeholder={t('public.ex_bruxelles_paris')}
               value={locationInput}
               onChange={(event) => setLocationInput(event.target.value)}
             />
 
             <Input
-              label="Date de départ"
+              label={t('public.date_de_depart')}
               type="date"
               min={getMinimumStartDate()}
               value={startInput}
@@ -283,38 +285,38 @@ export default function SearchPage() {
             />
 
             <Input
-              label="Date de retour"
+              label={t('public.date_de_retour')}
               type="date"
               min={startInput ? getFollowingDate(startInput) : getFollowingDate(getMinimumStartDate())}
               value={endInput}
               onChange={(event) => setEndInput(event.target.value)}
             />
 
-            <p className="text-xs text-slate-500 md:col-span-3">Retour à 10 h · location minimale d’une journée.</p>
+            <p className="text-xs text-slate-500 md:col-span-3">{t('public.retour_a_10_h_location_minimale_dune_journee')}</p>
 
             <Button type="submit" variant="danger" className="w-full md:w-auto">
-              Rechercher
+              {t('public.rechercher')}
             </Button>
           </form>
 
-          {formError ? <Alert variant="danger" title="Recherche impossible" message={formError} className="mt-4" /> : null}
+          {formError ? <Alert variant="danger" title={t('public.recherche_impossible')} message={t(formError)} className="mt-4" /> : null}
         </Card>
 
         {errorMessage ? (
-          <Alert variant="danger" title="Erreur de recherche" message={errorMessage} className="mt-6" />
+          <Alert variant="danger" title={t('public.erreur_de_recherche')} message={t(errorMessage)} className="mt-6" />
         ) : null}
 
         {isLoading ? (
           <div className="mt-10 flex justify-center">
-            <LoadingSpinner aria-label="Chargement des véhicules disponibles" size="lg" />
+            <LoadingSpinner aria-label={t('public.chargement_des_vehicules_disponibles')} size="lg" />
           </div>
         ) : null}
 
         {!isLoading && cards.length === 0 ? (
           <div className="mt-10">
             <EmptyState
-              title="Aucun véhicule disponible"
-              description="Aucune offre ne correspond à votre période de location pour le moment."
+              title={t('public.aucun_vehicule_disponible')}
+              description={t('public.aucune_offre_ne_correspond_a_votre_periode_de_location_pour_le')}
             />
           </div>
         ) : null}

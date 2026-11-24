@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { supportedLanguages } from '../../i18n'
 import { NavLink, Link } from 'react-router-dom'
 import { CarFront, ChevronDown, CircleHelp, Globe, Menu, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -6,20 +8,16 @@ import Logo from '../Logo'
 import UserSessionMenu from './UserSessionMenu'
 
 const navItems = [
-  { label: 'Catalogue véhicules', to: '/vehicles', Icon: CarFront },
-  { label: 'Aide & Contact', to: '/contact', Icon: CircleHelp },
+  { label: 'navigation.catalog', to: '/vehicles', Icon: CarFront },
+  { label: 'navigation.contact', to: '/contact', Icon: CircleHelp },
 ]
 
-const languageOptions = [
-  { value: 'FR', label: 'FR' },
-  { value: 'NL', label: 'NL' },
-  { value: 'EN', label: 'EN' },
-]
+const languageOptions = supportedLanguages.map((value) => ({ value, label: value.toUpperCase() }))
 
 const linkStyles = 'text-base font-medium transition-colors'
 const authMenuItems = [
-  { label: 'Se connecter', to: '/login' },
-  { label: 'Créer un compte', to: '/register' },
+  { label: 'auth.login', to: '/login' },
+  { label: 'auth.register', to: '/register' },
 ]
 
 type OpenMenu = 'language' | 'account' | null
@@ -28,7 +26,8 @@ const MENU_CLOSE_DELAY_MS = 200
 export default function PublicHeader() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
-  const [selectedLanguage, setSelectedLanguage] = useState('FR')
+  const { t, i18n } = useTranslation()
+  const selectedLanguage = i18n.resolvedLanguage ?? 'fr'
   const desktopAuthMenuRef = useRef<HTMLDivElement | null>(null)
   const mobileAuthMenuRef = useRef<HTMLDivElement | null>(null)
   const desktopLanguageMenuRef = useRef<HTMLDivElement | null>(null)
@@ -118,12 +117,12 @@ export default function PublicHeader() {
   return (
     <header className="relative z-[1000] border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-        <Link to="/" className="inline-flex items-center w-[140px] md:w-[165px] lg:w-[190px] shrink-0" aria-label="GetaCar accueil">
+        <Link to="/" className="inline-flex items-center w-[140px] md:w-[165px] lg:w-[190px] shrink-0" aria-label={t("navigation.home")}>
           <Logo width="100%" className="w-full h-auto object-contain" />
         </Link>
 
         <div className="hidden items-center gap-3 md:flex">
-          <nav className="hidden items-center gap-6 lg:flex" aria-label="Navigation principale">
+          <nav className="hidden items-center gap-6 lg:flex" aria-label={t("navigation.main")}>
             {navItems.map((item) => (
               <NavLink
                 key={item.to}
@@ -133,7 +132,7 @@ export default function PublicHeader() {
                 }
               >
                 <item.Icon className="h-4 w-4" aria-hidden="true" />
-                {item.label}
+                {t(item.label)}
               </NavLink>
             ))}
           </nav>
@@ -153,15 +152,15 @@ export default function PublicHeader() {
               }}
               aria-expanded={languageMenuOpen}
               aria-haspopup="menu"
-              aria-label="Sélectionner la langue"
+              aria-label={t("navigation.chooseLanguage")}
             >
               <Globe className="h-4 w-4 text-[#2563EB]" aria-hidden="true" />
-              <span>{selectedLanguage}</span>
+              <span>{selectedLanguage.toUpperCase()}</span>
               <ChevronDown className="h-4 w-4" aria-hidden="true" />
             </button>
 
             {languageMenuOpen ? (
-              <div className="absolute right-0 z-[1100] mt-2 w-28 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg" role="menu" aria-label="Sélection de la langue">
+              <div className="absolute right-0 z-[1100] mt-2 w-28 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg" role="menu" aria-label={t("navigation.languageMenu")}>
                 {languageOptions.map((option) => (
                   <button
                     key={option.value}
@@ -169,7 +168,7 @@ export default function PublicHeader() {
                     role="menuitemradio"
                     aria-checked={selectedLanguage === option.value}
                     onClick={() => {
-                      setSelectedLanguage(option.value)
+                      void i18n.changeLanguage(option.value)
                       closeLanguageMenu()
                     }}
                     className={`flex w-full items-center justify-center rounded-xl px-3 py-2 text-sm font-medium transition ${
@@ -203,11 +202,11 @@ export default function PublicHeader() {
                 aria-haspopup="menu"
               >
                 <UserRound className="h-4 w-4 text-[#2563EB]" aria-hidden="true" />
-                <span>Connexion / Inscription</span>
+                <span>{t('navigation.auth')}</span>
               </button>
 
               {authMenuOpen ? (
-                <div className="absolute right-0 z-[1100] mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg" role="menu" aria-label="Menu de connexion et inscription">
+                <div className="absolute right-0 z-[1100] mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg" role="menu" aria-label={t("navigation.authMenu")}>
                   {authMenuItems.map((item) => (
                     <Link
                       key={item.to}
@@ -216,7 +215,7 @@ export default function PublicHeader() {
                       onClick={closeAuthMenu}
                       className="block rounded-xl px-3 py-2 text-base font-medium text-[#1F2937] transition hover:bg-slate-100 hover:text-[#2563EB]"
                     >
-                      {item.label}
+                      {t(item.label)}
                     </Link>
                   ))}
                 </div>
@@ -229,7 +228,7 @@ export default function PublicHeader() {
           type="button"
           className="inline-flex items-center justify-center rounded-2xl border border-slate-200 p-2 text-[#1F2937] md:hidden"
           onClick={() => setMobileOpen((value) => !value)}
-          aria-label="Ouvrir le menu"
+          aria-label={t("navigation.openMenu")}
           aria-expanded={mobileOpen}
         >
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -238,7 +237,7 @@ export default function PublicHeader() {
 
       {mobileOpen ? (
         <div className="border-t border-slate-200 bg-white px-4 py-4 md:hidden">
-          <nav className="flex flex-col gap-3" aria-label="Navigation mobile">
+          <nav className="flex flex-col gap-3" aria-label={t("navigation.mobile")}>
             {navItems.map((item) => (
               <NavLink
                 key={item.to}
@@ -251,7 +250,7 @@ export default function PublicHeader() {
                 }
               >
                 <item.Icon className="h-4 w-4" aria-hidden="true" />
-                {item.label}
+                {t(item.label)}
               </NavLink>
             ))}
           </nav>
@@ -272,20 +271,20 @@ export default function PublicHeader() {
                 }}
                 aria-expanded={languageMenuOpen}
                 aria-haspopup="menu"
-                aria-label="Sélectionner la langue"
+                aria-label={t("navigation.chooseLanguage")}
               >
                 <span className="inline-flex items-center gap-2">
                   <Globe className="h-4 w-4 text-[#2563EB]" aria-hidden="true" />
                   Langue
                 </span>
                 <span className="inline-flex items-center gap-2">
-                  <span>{selectedLanguage}</span>
+                  <span>{selectedLanguage.toUpperCase()}</span>
                   <ChevronDown className="h-4 w-4" aria-hidden="true" />
                 </span>
               </button>
 
               {languageMenuOpen ? (
-                <div className="absolute left-0 right-0 z-[1100] mt-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg" role="menu" aria-label="Sélection de la langue">
+                <div className="absolute left-0 right-0 z-[1100] mt-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg" role="menu" aria-label={t("navigation.languageMenu")}>
                   {languageOptions.map((option) => (
                     <button
                       key={option.value}
@@ -293,7 +292,7 @@ export default function PublicHeader() {
                       role="menuitemradio"
                       aria-checked={selectedLanguage === option.value}
                       onClick={() => {
-                        setSelectedLanguage(option.value)
+                        void i18n.changeLanguage(option.value)
                         closeLanguageMenu()
                       }}
                       className={`flex w-full items-center justify-center rounded-xl px-3 py-2 text-base font-medium transition ${
@@ -327,11 +326,11 @@ export default function PublicHeader() {
                   aria-haspopup="menu"
                 >
                   <UserRound className="h-4 w-4 text-[#2563EB]" aria-hidden="true" />
-                  <span>Connexion / Inscription</span>
+                  <span>{t('navigation.auth')}</span>
                 </button>
 
                 {authMenuOpen ? (
-                  <div className="absolute left-0 right-0 z-[1100] mt-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg" role="menu" aria-label="Menu de connexion et inscription">
+                  <div className="absolute left-0 right-0 z-[1100] mt-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg" role="menu" aria-label={t("navigation.authMenu")}>
                     {authMenuItems.map((item) => (
                       <Link
                         key={item.to}
@@ -343,7 +342,7 @@ export default function PublicHeader() {
                         }}
                         className="block rounded-xl px-3 py-2 text-base font-medium text-[#1F2937] transition hover:bg-slate-100 hover:text-[#2563EB]"
                       >
-                        {item.label}
+                        {t(item.label)}
                       </Link>
                     ))}
                   </div>

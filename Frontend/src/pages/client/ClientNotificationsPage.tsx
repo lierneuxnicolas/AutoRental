@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { clientDisplay, clientLocale } from '../../i18n/clientDisplay'
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Alert from '../../components/feedback/Alert'
@@ -15,7 +17,7 @@ import {
 import type { Notification, NotificationListQueryParams } from '../../types/notification'
 
 function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(clientLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -31,6 +33,7 @@ function getNotificationStatusLabel(notification: Notification): { label: string
 }
 
 export default function ClientNotificationsPage() {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
 
@@ -82,11 +85,11 @@ export default function ClientNotificationsPage() {
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-4 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold text-[#0F172A]">Notifications</h1>
+          <h1 className="text-3xl font-semibold text-[#0F172A]">{t('client.notifications')}</h1>
         </div>
 
         <div className="rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 shadow-sm">
-          <p className="whitespace-nowrap text-sm font-semibold text-[#0F172A]">Non lu : {unreadCount}</p>
+          <p className="whitespace-nowrap text-sm font-semibold text-[#0F172A]">{t('client.non_lu_count', { count: unreadCount })}</p>
         </div>
       </div>
 
@@ -97,29 +100,29 @@ export default function ClientNotificationsPage() {
           onClick={handleMarkAllAsRead}
           disabled={markAllAsReadMutation.isPending || unreadCount === 0}
         >
-          {markAllAsReadMutation.isPending ? 'Traitement...' : 'Tout marquer comme lu'}
+          {markAllAsReadMutation.isPending ? t('client.traitement') : t('client.tout_marquer_comme_lu')}
         </Button>
       </div>
 
       {notificationsQuery.isLoading || unreadCountQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
-          <LoadingSpinner size="lg" aria-label="Chargement des notifications" />
+          <LoadingSpinner size="lg" aria-label={t('client.chargement_des_notifications')} />
         </div>
       ) : null}
 
       {notificationsQuery.isError ? (
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message="Les notifications n'ont pas pu être récupérées. Veuillez réessayer."
+          title={t('client.chargement_impossible')}
+          message={t('client.les_notifications_n_ont_pas_pu_etre_recuperees_veuillez_reessayer')}
           className="mb-6"
         />
       ) : null}
 
       {!notificationsQuery.isLoading && !notificationsQuery.isError && notifications.length === 0 ? (
         <EmptyState
-          title="Aucune notification"
-          description="Vous n’avez aucune nouvelle notification."
+          title={t('client.aucune_notification')}
+          description={t('client.vous_navez_aucune_nouvelle_notification')}
         />
       ) : null}
 
@@ -136,32 +139,32 @@ export default function ClientNotificationsPage() {
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{formatDateTime(notification.created_at)}</p>
-                      <p className="text-base font-semibold text-[#0F172A]">{notification.title}</p>
+                      <p className="text-base font-semibold text-[#0F172A]">{clientDisplay(t, notification.title)}</p>
                     </div>
-                    <StatusBadge variant={status.variant} label={status.label} />
+                    <StatusBadge variant={status.variant} label={clientDisplay(t, status.label)} />
                   </div>
                 }
               >
                 <div className="space-y-3">
                   {!notification.is_read ? (
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <p className="flex-1 text-sm leading-7 text-slate-700">{notification.message}</p>
+                      <p className="flex-1 text-sm leading-7 text-slate-700">{clientDisplay(t, notification.message)}</p>
                       <Button
                         variant="secondary"
                         size="sm"
                         onClick={() => handleMarkAsRead(notification.id)}
                         disabled={isPending}
                       >
-                        {isPending ? 'Mise à jour...' : 'Marquer comme lue'}
+                        {isPending ? t('client.mise_a_jour') : t('client.marquer_comme_lue')}
                       </Button>
                     </div>
                   ) : (
-                    <p className="text-sm leading-7 text-slate-700">{notification.message}</p>
+                    <p className="text-sm leading-7 text-slate-700">{clientDisplay(t, notification.message)}</p>
                   )}
 
                   {notification.read_at ? (
                     <div className="text-sm text-slate-500">
-                      {`Lue le ${formatDateTime(notification.read_at)}`}
+                      {t('client.lue_le_date', { date: formatDateTime(notification.read_at) })}
                     </div>
                   ) : null}
                 </div>
@@ -171,11 +174,11 @@ export default function ClientNotificationsPage() {
 
           <div className="flex items-center justify-between gap-4 pt-2">
             <Button variant="secondary" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={!hasPreviousPage || page === 1}>
-              Précédent
+              {t('client.precedent')}
             </Button>
-            <span className="text-sm text-slate-600">Page {page}</span>
+            <span className="text-sm text-slate-600">{t('client.page')} {page}</span>
             <Button variant="secondary" size="sm" onClick={() => setPage((current) => current + 1)} disabled={!hasNextPage}>
-              Suivant
+              {t('client.suivant')}
             </Button>
           </div>
         </div>

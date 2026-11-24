@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import axios from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -78,7 +81,7 @@ function formatDateTime(value: string | null): string {
     return value
   }
 
-  return parsed.toLocaleString('fr-FR', {
+  return parsed.toLocaleString(clientLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
@@ -136,6 +139,7 @@ interface BackupRecordCardProps {
 }
 
 function BackupRecordCard({ record, isDownloading, onDownload }: BackupRecordCardProps) {
+  const { t } = useTranslation()
   const statusPresentation = mapStatusToBadge(record.status)
 
   return (
@@ -143,36 +147,36 @@ function BackupRecordCard({ record, isDownloading, onDownload }: BackupRecordCar
       header={
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Sauvegarde</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{t("professional.sauvegarde")}</p>
             <p className="text-base font-semibold text-[#0F172A]">{record.filename}</p>
           </div>
-          <StatusBadge variant={statusPresentation.variant} label={statusPresentation.label} />
+          <StatusBadge variant={statusPresentation.variant} label={professionalDisplay(t, statusPresentation.label)} />
         </div>
       }
     >
       <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 lg:grid-cols-6">
         <div>
-          <p className="font-medium text-[#1F2937]">Date</p>
+          <p className="font-medium text-[#1F2937]">{t("professional.date")}</p>
           <p className="mt-1">{formatDateTime(record.created_at)}</p>
         </div>
         <div>
-          <p className="font-medium text-[#1F2937]">Nom du fichier</p>
+          <p className="font-medium text-[#1F2937]">{t("professional.nom_du_fichier")}</p>
           <p className="mt-1 break-all">{record.filename}</p>
         </div>
         <div>
-          <p className="font-medium text-[#1F2937]">Type</p>
+          <p className="font-medium text-[#1F2937]">{t("professional.type")}</p>
           <p className="mt-1">{record.backup_type}</p>
         </div>
         <div>
-          <p className="font-medium text-[#1F2937]">Statut</p>
+          <p className="font-medium text-[#1F2937]">{t("client.statut")}</p>
           <p className="mt-1">{record.status}</p>
         </div>
         <div>
-          <p className="font-medium text-[#1F2937]">Taille</p>
+          <p className="font-medium text-[#1F2937]">{t("professional.taille")}</p>
           <p className="mt-1">{formatFileSize(record.file_size)}</p>
         </div>
         <div>
-          <p className="font-medium text-[#1F2937]">Date de fin</p>
+          <p className="font-medium text-[#1F2937]">{t("public.date_de_fin")}</p>
           <p className="mt-1">{formatDateTime(record.completed_at)}</p>
         </div>
 
@@ -180,7 +184,7 @@ function BackupRecordCard({ record, isDownloading, onDownload }: BackupRecordCar
           <div className="md:col-span-2 lg:col-span-6">
             <Alert
               variant="danger"
-              title="Erreur de sauvegarde"
+              title={t("professional.erreur_de_sauvegarde")}
               message={record.error_message}
             />
           </div>
@@ -198,8 +202,8 @@ function BackupRecordCard({ record, isDownloading, onDownload }: BackupRecordCar
             >
               {isDownloading ? (
                 <>
-                  <LoadingSpinner size="sm" aria-label="Telechargement en cours" />
-                  <span>Téléchargement...</span>
+                  <LoadingSpinner size="sm" aria-label={t("client.telechargement_en_cours_alt")} />
+                  <span>{t("client.telechargement_alt")}</span>
                 </>
               ) : (
                 'Télécharger'
@@ -213,6 +217,7 @@ function BackupRecordCard({ record, isDownloading, onDownload }: BackupRecordCar
 }
 
 export default function AdminBackupsPage() {
+  const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -265,11 +270,10 @@ export default function AdminBackupsPage() {
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Administration</p>
-          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">Sauvegardes</h1>
+          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">{t("professional.administration")}</p>
+          <h1 className="mt-2 text-3xl font-semibold text-[#0F172A]">{t("professional.sauvegardes")}</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Gérez les sauvegardes de la base de données AutoRental.
-          </p>
+            {t("professional.gerez_les_sauvegardes_de_la_base_de_donnees_autorental")}</p>
         </div>
 
         <Button
@@ -282,8 +286,8 @@ export default function AdminBackupsPage() {
         >
           {createBackupMutation.isPending ? (
             <>
-              <LoadingSpinner size="sm" aria-label="Creation de la sauvegarde" />
-              <span>Creation...</span>
+              <LoadingSpinner size="sm" aria-label={t("professional.creation_de_la_sauvegarde")} />
+              <span>{t("professional.creation")}</span>
             </>
           ) : (
             'Créer une sauvegarde'
@@ -294,7 +298,7 @@ export default function AdminBackupsPage() {
       {successMessage ? (
         <Alert
           variant="success"
-          title="Operation reussie"
+          title={t("professional.operation_reussie")}
           message={successMessage}
           className="mb-6"
         />
@@ -303,31 +307,31 @@ export default function AdminBackupsPage() {
       {actionError ? (
         <Alert
           variant="danger"
-          title="Creation impossible"
-          message={actionError}
+          title={t("professional.creation_impossible")}
+          message={professionalDisplay(t, actionError)}
           className="mb-6"
         />
       ) : null}
 
       {backupsQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
-          <LoadingSpinner size="lg" aria-label="Chargement des sauvegardes" />
+          <LoadingSpinner size="lg" aria-label={t("professional.chargement_des_sauvegardes")} />
         </div>
       ) : null}
 
       {backupsQuery.isError ? (
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message={toErrorMessage(backupsQuery.error)}
+          title={t("client.chargement_impossible")}
+          message={professionalDisplay(t, toErrorMessage(backupsQuery.error))}
           className="mb-6"
         />
       ) : null}
 
       {!backupsQuery.isLoading && !backupsQuery.isError && backups.length === 0 ? (
         <EmptyState
-          title="Aucune sauvegarde"
-          description="Aucune sauvegarde n’a encore été créée."
+          title={t("professional.aucune_sauvegarde")}
+          description={t("professional.aucune_sauvegarde_n_a_encore_ete_creee")}
         />
       ) : null}
 
@@ -346,9 +350,9 @@ export default function AdminBackupsPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
             <p className="text-sm text-slate-600">
-              Page actuelle: <span className="font-semibold text-[#1F2937]">{page}</span>
+              {t("professional.page_actuelle")}<span className="font-semibold text-[#1F2937]">{page}</span>
               {' · '}
-              Total: <span className="font-semibold text-[#1F2937]">{backupsQuery.data?.count ?? 0}</span>
+              {t("client.total")}<span className="font-semibold text-[#1F2937]">{backupsQuery.data?.count ?? 0}</span>
             </p>
             <div className="flex items-center gap-2">
               <Button
@@ -359,8 +363,7 @@ export default function AdminBackupsPage() {
                 }}
                 disabled={!backupsQuery.data?.previous}
               >
-                Precedent
-              </Button>
+                {t("client.precedent_alt")}</Button>
               <Button
                 variant="secondary"
                 size="sm"
@@ -369,8 +372,7 @@ export default function AdminBackupsPage() {
                 }}
                 disabled={!backupsQuery.data?.next}
               >
-                Suivant
-              </Button>
+                {t("client.suivant")}</Button>
             </div>
           </div>
         </div>

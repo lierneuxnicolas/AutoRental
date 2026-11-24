@@ -1,3 +1,5 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { useTranslation } from 'react-i18next'
 import InspectionPhotoSlot from './InspectionPhotoSlot'
 import { STANDARD_INSPECTION_PHOTO_SLOTS } from './standardInspectionPhotos'
 
@@ -14,18 +16,19 @@ export default function StandardInspectionPhotoGrid({
   disabled = false,
   onFileChange,
 }: StandardInspectionPhotoGridProps) {
+  const { t } = useTranslation()
   return (
     <section className="space-y-4 rounded-2xl border border-[#E2E8F0] bg-white p-4 sm:p-5">
       <div>
         <h2 className="text-lg font-semibold text-[#0F172A]">{title}</h2>
-        <p className="mt-1 text-sm text-slate-500">Extérieur, habitacle et tableau de bord.</p>
+        <p className="mt-1 text-sm text-slate-500">{t("professional.exterieur_habitacle_et_tableau_de_bord")}</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         {STANDARD_INSPECTION_PHOTO_SLOTS.map((slot) => (
           <InspectionPhotoSlot
             key={slot.key}
             photoType={slot.photoType}
-            label={slot.label}
+            label={professionalDisplay(t, slot.label)}
             previewUrl={photoState[slot.key]?.previewUrl ?? null}
             uploadedUrl={photoState[slot.key]?.previewUrl ?? null}
             isUploading={disabled}

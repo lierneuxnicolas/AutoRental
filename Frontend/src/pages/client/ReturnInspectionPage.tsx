@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { clientDisplay, clientLocale } from '../../i18n/clientDisplay'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AxiosError } from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -291,7 +293,7 @@ function formatDateTime(value: string): string {
     return value
   }
 
-  return parsed.toLocaleString('fr-FR', {
+  return parsed.toLocaleString(clientLocale(), {
     dateStyle: 'long',
     timeStyle: 'short',
   })
@@ -319,7 +321,8 @@ function ReturnInspectionLayout({
   showInspectionSummary?: boolean
   allStepsDone?: boolean
 }) {
-  const stepLabels = ['Parking', 'Extérieur', 'Intérieur', 'État du véhicule', 'Verrouillage', 'Terminé']
+  const { t } = useTranslation()
+  const stepLabels = ['Parking', 'Extérieur', 'Intérieur', 'État du véhicule', 'Verrouillage', 'Terminé'].map((label) => clientDisplay(t, label))
   const steps = stepLabels.map((label, index) => ({
     order: index + 1,
     label,
@@ -344,7 +347,7 @@ function ReturnInspectionLayout({
         <Card className="mb-6">
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-medium text-[#1F2937]">Progression</p>
+              <p className="text-sm font-medium text-[#1F2937]">{t('client.progression')}</p>
               <p className="text-sm font-semibold text-[#0F172A]">{progress}%</p>
             </div>
             <div className="h-3 overflow-hidden rounded-full bg-[#E5E7EB]">
@@ -352,10 +355,10 @@ function ReturnInspectionLayout({
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inspection</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{t('client.inspection')}</p>
                 <p className="text-base font-semibold text-[#0F172A]">#{inspection.id}</p>
               </div>
-              <StatusBadge variant={inspectionStatusToBadge(inspection.status).variant} label={inspectionStatusToBadge(inspection.status).label} />
+              <StatusBadge variant={inspectionStatusToBadge(inspection.status).variant} label={clientDisplay(t, inspectionStatusToBadge(inspection.status).label)} />
             </div>
           </div>
         </Card>
@@ -375,6 +378,7 @@ export function ReturnInspectionExteriorPage() {
 }
 
 function ReturnInspectionParkingPage() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [parkingConfirmationError, setParkingConfirmationError] = useState(false)
@@ -389,7 +393,7 @@ function ReturnInspectionParkingPage() {
   if (!isReservationIdValid) {
     return (
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Réservation invalide" message="L'identifiant de réservation est invalide." />
+        <Alert variant="danger" title={t('client.reservation_invalide_alt')} message={t('client.l_identifiant_de_reservation_est_invalide_alt')} />
       </section>
     )
   }
@@ -403,25 +407,25 @@ function ReturnInspectionParkingPage() {
       {reservationQuery.isLoading ? (
         <Card>
           <div className="flex items-center justify-center gap-3 text-sm text-slate-600">
-            <LoadingSpinner size="sm" aria-label="Chargement du parking" />
-            <p>Chargement des informations du parking...</p>
+            <LoadingSpinner size="sm" aria-label={t('client.chargement_du_parking')} />
+            <p>{t('client.chargement_des_informations_du_parking')}</p>
           </div>
         </Card>
       ) : null}
       {reservationQuery.isError ? (
-        <Alert variant="danger" title="Chargement impossible" message="Les informations de restitution n'ont pas pu être chargées. Veuillez réessayer." />
+        <Alert variant="danger" title={t('client.chargement_impossible')} message={t('client.les_informations_de_restitution_n_ont_pas_pu_etre_chargees_veuillez')} />
       ) : null}
       {reservation ? (
         <div className="space-y-6">
           <Card>
             <div className="space-y-6 text-center">
-              <h1 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Parking</h1>
+              <h1 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">{t('client.parking')}</h1>
               <div className="space-y-3">
                 <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#EDE9FE] text-[#6D28D9]">
                   <MapPin aria-hidden="true" size={24} />
                 </span>
                 <div className="space-y-1">
-                  <h2 className="text-lg font-semibold text-[#1F2937]">Parking de dépôt</h2>
+                  <h2 className="text-lg font-semibold text-[#1F2937]">{t('client.parking_de_depot')}</h2>
                   <p className="text-base font-medium text-slate-800">{parkingName}</p>
                   <p className="text-sm leading-6 text-slate-600">
                     {parkingAddress || 'Adresse du parking non renseignée.'}
@@ -429,12 +433,12 @@ function ReturnInspectionParkingPage() {
                 </div>
               </div>
               <p className="text-lg font-semibold leading-7 text-[#1F2937] sm:text-xl">
-                Le véhicule est-il stationné au parking de départ indiqué ci-dessous ?
+                {t('client.le_vehicule_est_il_stationne_au_parking_de_depart_indique_ci')}
               </p>
               {parkingConfirmationError ? (
                 <Alert
                   variant="danger"
-                  message="Veuillez restituer le véhicule au parking de départ avant de continuer."
+                  message={t('client.veuillez_restituer_le_vehicule_au_parking_de_depart_avant_de_continuer')}
                 />
               ) : null}
             </div>
@@ -442,7 +446,7 @@ function ReturnInspectionParkingPage() {
 
           <div className="flex flex-col-reverse justify-between gap-3 sm:flex-row">
             <Button variant="secondary" className="w-full sm:w-auto" onClick={() => navigate('/client/reservations')}>
-              Retour à mes réservations
+              {t('public.retour_a_mes_reservations')}
             </Button>
             <div className="flex flex-col-reverse gap-3 sm:flex-row">
               <Button
@@ -450,13 +454,13 @@ function ReturnInspectionParkingPage() {
                 className="w-full sm:w-auto"
                 onClick={() => setParkingConfirmationError(true)}
               >
-                Non
+                {t('public.non')}
               </Button>
               <Button
                 className="w-full bg-[#6D28D9] text-white hover:bg-[#5B21B6] focus-visible:ring-[#6D28D9] sm:w-auto"
                 onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/exterior`)}
               >
-                Oui, continuer vers l'extérieur
+                {t('client.oui_continuer_vers_l_exterieur')}
               </Button>
             </div>
           </div>
@@ -467,6 +471,7 @@ function ReturnInspectionParkingPage() {
 }
 
 function ReturnInspectionStepOne() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const reservationId = Number(id)
@@ -610,7 +615,7 @@ function ReturnInspectionStepOne() {
   if (!isReservationIdValid) {
     return (
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+        <Alert variant="danger" title={t('client.reservation_invalide')} message={t('client.l_identifiant_de_reservation_est_invalide')} />
       </section>
     )
   }
@@ -637,10 +642,10 @@ function ReturnInspectionStepOne() {
       progress={progress}
       showInspectionSummary={false}
     >
-      {reservationLoadErrorMessage ? <Alert className="mb-4" variant="danger" title="Chargement impossible" message={reservationLoadErrorMessage} /> : null}
+      {reservationLoadErrorMessage ? <Alert className="mb-4" variant="danger" title={t('client.chargement_impossible')} message={reservationLoadErrorMessage ? clientDisplay(t, reservationLoadErrorMessage) : undefined} /> : null}
       {initializationErrorMessage ? (
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <Alert className="flex-1" variant="danger" title="Initialisation impossible" message={initializationErrorMessage} />
+          <Alert className="flex-1" variant="danger" title={t('client.initialisation_impossible')} message={initializationErrorMessage ? clientDisplay(t, initializationErrorMessage) : undefined} />
           <Button
             variant="secondary"
             onClick={() => {
@@ -651,7 +656,7 @@ function ReturnInspectionStepOne() {
             }}
             disabled={startMutation.isPending}
           >
-            Réessayer
+            {t('client.reessayer')}
           </Button>
         </div>
       ) : null}
@@ -659,8 +664,8 @@ function ReturnInspectionStepOne() {
       {isInitializingInspection ? (
         <Card>
           <div className="flex items-center gap-3 text-sm text-slate-600">
-            <LoadingSpinner size="sm" aria-label="Initialisation" />
-            <p>Initialisation de l’état des lieux...</p>
+            <LoadingSpinner size="sm" aria-label={t('client.initialisation')} />
+            <p>{t('client.initialisation_de_letat_des_lieux')}</p>
           </div>
         </Card>
       ) : null}
@@ -669,9 +674,9 @@ function ReturnInspectionStepOne() {
         <Card
           header={(
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat des lieux - Extérieur</h2>
+              <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">{t('client.etat_des_lieux_exterieur_alt')}</h2>
               <Link to={`/client/reservations?highlight=${reservationId}`}>
-                <Button variant="secondary">Retour a la reservation</Button>
+                <Button variant="secondary">{t('client.retour_a_la_reservation')}</Button>
               </Link>
             </div>
           )}
@@ -684,7 +689,7 @@ function ReturnInspectionStepOne() {
                 <InspectionPhotoSlot
                   key={slotConfig.key}
                   photoType={slotConfig.photoType}
-                  label={slotConfig.label}
+                  label={clientDisplay(t, slotConfig.label)}
                   previewUrl={slot.previewUrl}
                   uploadedUrl={slot.uploadedPhoto?.file ?? null}
                   isUploading={uploadingSlotKeysRef.current.has(slotConfig.key)}
@@ -701,7 +706,7 @@ function ReturnInspectionStepOne() {
           </div>
           <div className="mt-4 flex justify-center">
             <Button className="w-full sm:w-auto" disabled={!canContinue} onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/interior`)}>
-              Continuer
+              {t('public.continuer')}
             </Button>
           </div>
         </Card>
@@ -711,6 +716,7 @@ function ReturnInspectionStepOne() {
 }
 
 export function ReturnInspectionInteriorPage() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const reservationId = Number(id)
@@ -807,7 +813,7 @@ export function ReturnInspectionInteriorPage() {
   if (!isReservationIdValid) {
     return (
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+        <Alert variant="danger" title={t('client.reservation_invalide')} message={t('client.l_identifiant_de_reservation_est_invalide')} />
       </section>
     )
   }
@@ -819,13 +825,13 @@ export function ReturnInspectionInteriorPage() {
       progress={Math.round((completedInteriorPhotos / INTERIOR_PHOTO_SLOTS.length) * 100)}
       showInspectionSummary={false}
     >
-      {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
+      {globalError ? <Alert className="mb-4" variant="danger" title={t('client.action_impossible')} message={clientDisplay(t, globalError)} /> : null}
       <Card
         header={(
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">Etat des lieux - Intérieur</h2>
+            <h2 className="text-2xl font-semibold text-[#1F2937] sm:text-3xl">{t('client.etat_des_lieux_interieur_alt')}</h2>
             <Link to={`/client/reservations?highlight=${reservationId}`}>
-              <Button variant="secondary">Retour a la reservation</Button>
+              <Button variant="secondary">{t('client.retour_a_la_reservation')}</Button>
             </Link>
           </div>
         )}
@@ -838,7 +844,7 @@ export function ReturnInspectionInteriorPage() {
               <InspectionPhotoSlot
                 key={slotConfig.key}
                 photoType={slotConfig.photoType}
-                label={slotConfig.label}
+                label={clientDisplay(t, slotConfig.label)}
                 previewUrl={slot.previewUrl}
                 uploadedUrl={slot.uploadedPhoto?.file ?? null}
                 isUploading={uploadingSlotKeysRef.current.has(slotConfig.key)}
@@ -855,7 +861,7 @@ export function ReturnInspectionInteriorPage() {
         </div>
         <div className="mt-4 flex justify-center">
           <Button className="w-full sm:w-auto" disabled={!canContinue} onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/vehicle-state`)}>
-            Continuer
+            {t('public.continuer')}
           </Button>
         </div>
       </Card>
@@ -864,6 +870,7 @@ export function ReturnInspectionInteriorPage() {
 }
 
 export function ReturnInspectionVehicleStatePage() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const reservationId = Number(id)
   const isReservationIdValid = Number.isInteger(reservationId) && reservationId > 0
@@ -874,18 +881,19 @@ export function ReturnInspectionVehicleStatePage() {
   })
 
   if (!isReservationIdValid) {
-    return <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+    return <Alert variant="danger" title={t('client.reservation_invalide')} message={t('client.l_identifiant_de_reservation_est_invalide')} />
   }
   if (reservationQuery.isLoading) {
-    return <LoadingSpinner aria-label="Chargement de la restitution" />
+    return <LoadingSpinner aria-label={t('client.chargement_de_la_restitution')} />
   }
   if (reservationQuery.isError || !reservationQuery.data) {
-    return <Alert variant="danger" title="Chargement impossible" message="Impossible de charger la restitution." />
+    return <Alert variant="danger" title={t('client.chargement_impossible')} message={t('client.impossible_de_charger_la_restitution')} />
   }
   return <ReturnVehicleStateForm key={reservationId} reservationId={reservationId} />
 }
 
 function ReturnVehicleStateForm({ reservationId }: { reservationId: number }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const isReservationIdValid = true
   const reservationQuery = useQuery({
@@ -1092,7 +1100,7 @@ function ReturnVehicleStateForm({ reservationId }: { reservationId: number }) {
   if (!isReservationIdValid) {
     return (
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+        <Alert variant="danger" title={t('client.reservation_invalide')} message={t('client.l_identifiant_de_reservation_est_invalide')} />
       </section>
     )
   }
@@ -1101,12 +1109,12 @@ function ReturnVehicleStateForm({ reservationId }: { reservationId: number }) {
     return (
       <ReturnInspectionLayout stepIndex={4} inspection={inspection} progress={50} showInspectionSummary={false}>
         <Card>
-          <h1 className="text-xl font-semibold">État du véhicule enregistré</h1>
+          <h1 className="text-xl font-semibold">{t('client.etat_du_vehicule_enregistre')}</h1>
           <p>Kilométrage final : {inspection.mileage ?? 'non renseigné'} km</p>
           <p>Carburant ou batterie : {inspection.energy_level_percent ?? 'non renseigné'} %</p>
-          <p>{inspection.damages?.length ? 'Anomalie enregistrée' : 'Aucune anomalie enregistrée'}</p>
+          <p>{inspection.damages?.length ? t('client.anomalie_enregistree') : t('client.aucune_anomalie_enregistree')}</p>
           <Button className="mt-4" onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/lock`)}>
-            Continuer vers le verrouillage
+            {t('client.continuer_vers_le_verrouillage')}
           </Button>
         </Card>
       </ReturnInspectionLayout>
@@ -1115,7 +1123,7 @@ function ReturnVehicleStateForm({ reservationId }: { reservationId: number }) {
 
   const anomalyPhotoFields = (
     <div className="space-y-2">
-      <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie (2 maximum)</p>
+      <p className="text-sm font-medium text-[#1F2937]">{t('client.photos_de_l_anomalie_2_maximum')}</p>
       <div className="grid gap-3 sm:grid-cols-2">
         {ANOMALY_PHOTO_SLOTS.map((slot) => {
           const slotState = anomalyPhotoState[slot.key]
@@ -1124,10 +1132,10 @@ function ReturnVehicleStateForm({ reservationId }: { reservationId: number }) {
               <div className="space-y-3">
                 <p className="text-sm font-semibold text-[#1F2937]">{slot.label}</p>
                 <input ref={(input) => { anomalyPhotoInputRefs.current[slot.key] = input }} type="file" accept="image/*" capture="environment" disabled={slotState.isUploading} className="hidden" onChange={(event) => { const file = event.target.files?.[0] ?? null; if (file) void uploadAnomalyPhoto(slot.key, file) }} />
-                {slotState.previewUrl ? <img src={slotState.previewUrl} alt={slot.label} className="h-44 w-full rounded-2xl border border-[#E5E7EB] object-cover" /> : <div className="flex h-44 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-sm text-slate-500">Emplacement vide</div>}
-                {slotState.errorMessage ? <Alert variant="danger" message={slotState.errorMessage} /> : null}
-                <Button className="w-full" disabled={slotState.isUploading} onClick={() => anomalyPhotoInputRefs.current[slot.key]?.click()}>{slotState.isUploading ? 'Envoi en cours...' : slotState.photoId ? 'Remplacer la photo' : 'Ajouter une photo'}</Button>
-                {slotState.photoId ? <Button variant="secondary" className="w-full" onClick={() => removeAnomalyPhoto(slot.key)}>Supprimer la photo</Button> : null}
+                {slotState.previewUrl ? <img src={slotState.previewUrl} alt={slot.label} className="h-44 w-full rounded-2xl border border-[#E5E7EB] object-cover" /> : <div className="flex h-44 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-sm text-slate-500">{t('client.emplacement_vide')}</div>}
+                {slotState.errorMessage ? <Alert variant="danger" message={clientDisplay(t, slotState.errorMessage)} /> : null}
+                <Button className="w-full" disabled={slotState.isUploading} onClick={() => anomalyPhotoInputRefs.current[slot.key]?.click()}>{slotState.isUploading ? t('client.envoi_en_cours_alt') : slotState.photoId ? t('client.remplacer_la_photo') : t('client.ajouter_une_photo')}</Button>
+                {slotState.photoId ? <Button variant="secondary" className="w-full" onClick={() => removeAnomalyPhoto(slot.key)}>{t('client.supprimer_la_photo')}</Button> : null}
               </div>
             </Card>
           )
@@ -1143,7 +1151,7 @@ function ReturnVehicleStateForm({ reservationId }: { reservationId: number }) {
       progress={50}
       showInspectionSummary={false}
     >
-      {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
+      {globalError ? <Alert className="mb-4" variant="danger" title={t('client.action_impossible')} message={clientDisplay(t, globalError)} /> : null}
       <div className="space-y-4">
         <InspectionVehicleStateCard
           mileageLabel="Kilométrage final"
@@ -1181,15 +1189,15 @@ function ReturnVehicleStateForm({ reservationId }: { reservationId: number }) {
         />
 
           {missingFields.length > 0 ? (
-            <Alert variant="warning" title="Champs requis" message={<ul className="list-disc pl-5">{missingFields.map((item) => <li key={item}>{item}</li>)}</ul>} />
+            <Alert variant="warning" title={t('client.champs_requis')} message={<ul className="list-disc pl-5">{missingFields.map((item) => <li key={item}>{item}</li>)}</ul>} />
           ) : null}
 
           <div className="flex justify-center">
             <Button className="w-full sm:w-auto" disabled={!canContinue || saveStateMutation.isPending} onClick={onSaveVehicleState}>
               {saveStateMutation.isPending ? (
                 <span className="flex items-center gap-2">
-                  <LoadingSpinner size="sm" aria-label="Enregistrement en cours" />
-                  Enregistrement...
+                  <LoadingSpinner size="sm" aria-label={t('client.enregistrement_en_cours')} />
+                  {t('client.enregistrement')}
                 </span>
               ) : (
                 'Enregistrer l\'etat du vehicule'
@@ -1210,6 +1218,7 @@ export function ReturnInspectionConfirmationPage() {
 }
 
 function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean }) {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -1437,7 +1446,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
   if (!isReservationIdValid) {
     return (
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+        <Alert variant="danger" title={t('client.reservation_invalide')} message={t('client.l_identifiant_de_reservation_est_invalide')} />
       </section>
     )
   }
@@ -1452,10 +1461,10 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
     >
       {isLockStep && globalError ? (
         <div className="mb-4">
-          <Alert variant="danger" title="Vérification de la restitution" message={globalError} />
+          <Alert variant="danger" title={t('client.verification_de_la_restitution')} message={clientDisplay(t, globalError)} />
           {verificationRequired ? (
             <Button className="mt-3" disabled={verificationMutation.isPending} onClick={() => verificationMutation.mutate()}>
-              {verificationMutation.isPending ? 'Vérification en cours...' : 'Vérifier la restitution'}
+              {verificationMutation.isPending ? t('client.verification_en_cours') : t('client.verifier_la_restitution')}
             </Button>
           ) : null}
         </div>
@@ -1464,14 +1473,14 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
       {reservationQuery.isLoading || (isLockStep && reservationQuery.isFetching) ? (
         <Card>
           <div className="flex items-center justify-center gap-3 py-4 text-sm text-slate-600">
-            <LoadingSpinner size="sm" aria-label="Chargement de la restitution" />
-            <p>Chargement des informations de restitution...</p>
+            <LoadingSpinner size="sm" aria-label={t('client.chargement_de_la_restitution')} />
+            <p>{t('client.chargement_des_informations_de_restitution')}</p>
           </div>
         </Card>
       ) : null}
 
       {reservationQuery.isError ? (
-        <Alert variant="danger" title="Chargement impossible" message="Les informations de la restitution n'ont pas pu être chargées." />
+        <Alert variant="danger" title={t('client.chargement_impossible')} message={t('client.les_informations_de_la_restitution_n_ont_pas_pu_etre_chargees')} />
       ) : null}
 
       {isLockStep && !reservationQuery.isLoading && !reservationQuery.isFetching && !reservationQuery.isError && !isInspectionCompleted ? (
@@ -1479,24 +1488,24 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
           {inspection && !canLockVehicle ? (
             <Alert
               variant="warning"
-              title="État des lieux incomplet"
+              title={t('client.etat_des_lieux_incomplet')}
               message={
                 missingReturnPhotoTypes.length > 0
-                  ? 'Les photos obligatoires de l’état des lieux doivent être enregistrées avant le verrouillage.'
+                  ? t('client.les_photos_obligatoires_de_letat_des_lieux_doivent_etre_enregistrees_avant')
                   : 'Enregistrez le kilométrage final et le niveau de carburant ou de batterie pour continuer.'
               }
             />
           ) : null}
           {!inspection && reservation ? (
-            <Alert variant="warning" title="État des lieux introuvable" message="Reprenez l’état des lieux de retour avant de verrouiller le véhicule." />
+            <Alert variant="warning" title={t('client.etat_des_lieux_introuvable')} message={t('client.reprenez_letat_des_lieux_de_retour_avant_de_verrouiller_le_vehicule')} />
           ) : null}
 
           <Card>
             <h1 className="text-center text-2xl font-semibold text-[#1F2937] sm:text-3xl">
-              Verrouillage du véhicule
+              {t('client.verrouillage_du_vehicule')}
             </h1>
             <p className="mt-2 text-center text-base leading-7 text-slate-600">
-              Veuillez replacer la clé dans son boîtier situé dans la boîte à gants.
+              {t('client.veuillez_replacer_la_cle_dans_son_boitier_situe_dans_la_boite')}
             </p>
 
             <div className="relative mx-auto flex h-72 w-full max-w-sm items-center justify-center overflow-hidden sm:h-80">
@@ -1524,20 +1533,20 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
               >
                 {demoKeyCheckMutation.isPending ? (
                   <span className="flex items-center gap-2">
-                    <LoadingSpinner size="sm" aria-label="Vérification de démonstration en cours" />
-                    Vérification en cours...
+                    <LoadingSpinner size="sm" aria-label={t('client.verification_de_demonstration_en_cours')} />
+                    {t('client.verification_en_cours')}
                   </span>
                 ) : isDemoKeyCheckCompleted ? (
                   <>
                     <Check aria-hidden="true" size={18} />
-                    Clé détectée
+                    {t('client.cle_detectee')}
                   </>
                 ) : (
-                  'Détecter la clé'
+                  t('client.detecter_la_cle')
                 )}
               </Button>
               <p className="text-center text-xs text-slate-500">
-                Vérification de démonstration : aucun capteur physique n’est utilisé.
+                {t('client.verification_de_demonstration_aucun_capteur_physique_nest_utilise')}
               </p>
               <Button
                 className={`w-full ${canFinalizeReturn
@@ -1548,13 +1557,13 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
               >
                 {completeMutation.isPending ? (
                   <span className="flex items-center gap-2">
-                    <LoadingSpinner size="sm" aria-label="Verrouillage en cours" />
-                    Verrouillage en cours...
+                    <LoadingSpinner size="sm" aria-label={t('client.verrouillage_en_cours')} />
+                    {t('client.verrouillage_en_cours_alt')}
                   </span>
                 ) : (
                   <>
                     <LockKeyhole aria-hidden="true" size={18} />
-                    Verrouiller le véhicule
+                    {t('client.verrouiller_le_vehicule')}
                   </>
                 )}
               </Button>
@@ -1567,7 +1576,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
               className="w-full max-w-sm"
               onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/vehicle-state`)}
             >
-              Retour à l’état du véhicule
+              {t('client.retour_a_letat_du_vehicule')}
             </Button>
           </div>
         </div>
@@ -1578,14 +1587,14 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
           <div className="space-y-4 text-center">
             <Alert
               variant="warning"
-              title="Restitution non terminée"
-              message="La confirmation finale s’affichera après la confirmation du verrouillage."
+              title={t('client.restitution_non_terminee')}
+              message={t('client.la_confirmation_finale_saffichera_apres_la_confirmation_du_verrouillage')}
             />
             <Button
               className="w-full bg-[#6D28D9] text-white hover:bg-[#5B21B6] focus-visible:ring-[#6D28D9] sm:w-auto"
               onClick={() => navigate(`/client/reservations/${reservationId}/return-inspection/lock`)}
             >
-              Continuer vers le verrouillage
+              {t('client.continuer_vers_le_verrouillage')}
             </Button>
           </div>
         </Card>
@@ -1598,9 +1607,9 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
               <div className="mb-5 flex h-28 w-28 items-center justify-center rounded-full bg-[#16A34A] shadow-[0_16px_40px_rgba(22,163,74,0.3)]">
                 <Check aria-hidden="true" className="text-white" size={60} strokeWidth={3} />
               </div>
-              <h1 className="text-3xl font-semibold text-[#0F172A] sm:text-4xl">Véhicule restitué</h1>
+              <h1 className="text-3xl font-semibold text-[#0F172A] sm:text-4xl">{t('client.vehicule_restitue')}</h1>
               <p className="mt-3 text-base text-slate-700">
-                Votre véhicule a bien été verrouillé et restitué. Le gestionnaire vérifiera les frais avant la clôture financière.
+                {t('client.votre_vehicule_a_bien_ete_verrouille_et_restitue_le_gestionnaire_verifiera')}
               </p>
             </div>
           </Card>
@@ -1611,7 +1620,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
                 <div className="h-24 w-36 overflow-hidden rounded-2xl bg-[#F1F5F9]">
                   {currentVehicleQuery.isLoading ? (
                     <div className="flex h-full items-center justify-center">
-                      <LoadingSpinner size="sm" aria-label="Chargement de la photo du véhicule" />
+                      <LoadingSpinner size="sm" aria-label={t('client.chargement_de_la_photo_du_vehicule')} />
                     </div>
                   ) : resolveMediaUrl(currentVehicleQuery.data?.main_photo?.file) ? (
                     <img
@@ -1621,7 +1630,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
                     />
                   ) : (
                     <div className="flex h-full items-center justify-center px-3 text-center text-xs text-slate-500">
-                      Photo indisponible
+                      {t('client.photo_indisponible')}
                     </div>
                   )}
                 </div>
@@ -1633,7 +1642,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
               </div>
 
               <div className="rounded-2xl bg-[#F8FAFC] px-4 py-3 text-left lg:text-right">
-                <p className="text-sm font-medium text-slate-600">Véhicule restitué le</p>
+                <p className="text-sm font-medium text-slate-600">{t('client.vehicule_restitue_le')}</p>
                 <p className="mt-1 text-base font-semibold text-[#0F172A]">
                   {reservation?.actual_return_at || inspection?.completed_at
                     ? formatDateTime(reservation?.actual_return_at ?? inspection!.completed_at!)
@@ -1644,11 +1653,11 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
           </Card>
 
           {invoiceDownloadError ? (
-            <Alert className="mb-2" variant="danger" title="Telechargement impossible" message={invoiceDownloadError} />
+            <Alert className="mb-2" variant="danger" title={t('client.telechargement_impossible_alt')} message={clientDisplay(t, invoiceDownloadError)} />
           ) : null}
 
           {invoiceQuery.isError ? (
-            <Alert className="mb-2" variant="warning" title="Facture indisponible" message="La facture n'a pas pu etre chargee pour le moment. Vous pouvez reessayer plus tard depuis la section Mes factures." />
+            <Alert className="mb-2" variant="warning" title={t('client.facture_indisponible')} message={t('client.la_facture_n_a_pas_pu_etre_chargee_pour_le_moment')} />
           ) : null}
 
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
@@ -1661,8 +1670,8 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
             >
               {isDownloadingInvoice ? (
                 <span className="flex items-center gap-2">
-                  <LoadingSpinner size="sm" aria-label="Telechargement de la facture" />
-                  Telechargement...
+                  <LoadingSpinner size="sm" aria-label={t('client.telechargement_de_la_facture')} />
+                  {t('client.telechargement_alt')}
                 </span>
               ) : invoiceQuery.isLoading && !invoiceQuery.data ? (
                 'Preparation de la facture...'
@@ -1672,7 +1681,7 @@ function ReturnInspectionCompletionPage({ isLockStep }: { isLockStep: boolean })
             </Button> : null}
 
             <Button variant="secondary" className="w-full sm:w-auto" onClick={() => navigate('/client/reservations')}>
-              Retour à mes réservations
+              {t('public.retour_a_mes_reservations')}
             </Button>
           </div>
         </div>

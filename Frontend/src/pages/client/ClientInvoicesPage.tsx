@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { clientDisplay, clientLocale } from '../../i18n/clientDisplay'
 import { useState } from 'react'
 import axios from 'axios'
 import { useQuery } from '@tanstack/react-query'
@@ -18,7 +20,7 @@ function formatDate(value: string): string {
     return value
   }
 
-  return parsed.toLocaleDateString('fr-FR', {
+  return parsed.toLocaleDateString(clientLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -33,7 +35,7 @@ function formatMoney(amount: string, currency: string): string {
   }
 
   try {
-    return new Intl.NumberFormat('fr-FR', {
+    return new Intl.NumberFormat(clientLocale(), {
       style: 'currency',
       currency,
       minimumFractionDigits: 2,
@@ -116,6 +118,7 @@ function buildPdfFilename(invoiceNumber: string): string {
 }
 
 export default function ClientInvoicesPage() {
+  const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<number | null>(null)
   const [invoiceDownloadError, setInvoiceDownloadError] = useState<string | null>(null)
@@ -154,20 +157,20 @@ export default function ClientInvoicesPage() {
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6">
-        <h1 className="text-3xl font-semibold text-[#0F172A]">Mes factures</h1>
+        <h1 className="text-3xl font-semibold text-[#0F172A]">{t('client.mes_factures')}</h1>
       </div>
 
       {invoicesQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
-          <LoadingSpinner size="lg" aria-label="Chargement des factures" />
+          <LoadingSpinner size="lg" aria-label={t('client.chargement_des_factures')} />
         </div>
       ) : null}
 
       {invoicesQuery.isError ? (
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message={toErrorMessage(invoicesQuery.error)}
+          title={t('client.chargement_impossible')}
+          message={clientDisplay(t, toErrorMessage(invoicesQuery.error))}
           className="mb-6"
         />
       ) : null}
@@ -175,16 +178,16 @@ export default function ClientInvoicesPage() {
       {invoiceDownloadError ? (
         <Alert
           variant="danger"
-          title="Telechargement impossible"
-          message={invoiceDownloadError}
+          title={t('client.telechargement_impossible_alt')}
+          message={clientDisplay(t, invoiceDownloadError)}
           className="mb-6"
         />
       ) : null}
 
       {!invoicesQuery.isLoading && !invoicesQuery.isError && pageInvoices.length === 0 ? (
         <EmptyState
-          title="Aucune facture"
-          description="Vos factures apparaîtront ici après vos locations."
+          title={t('client.aucune_facture')}
+          description={t('client.vos_factures_apparaitront_ici_apres_vos_locations')}
         />
       ) : null}
 
@@ -200,20 +203,20 @@ export default function ClientInvoicesPage() {
                 header={
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Facture</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{t('client.facture')}</p>
                       <p className="text-base font-semibold text-[#0F172A]">{invoice.number}</p>
                     </div>
-                    <StatusBadge variant={status.variant} label={status.label} />
+                    <StatusBadge variant={status.variant} label={clientDisplay(t, status.label)} />
                   </div>
                 }
               >
                 <div className="grid gap-4 text-sm text-slate-700 md:grid-cols-2 lg:grid-cols-5">
                   <div>
-                    <p className="font-medium text-[#1F2937]">Reference</p>
+                    <p className="font-medium text-[#1F2937]">{t('client.reference_alt')}</p>
                     <p className="mt-1">{invoice.number}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-[#1F2937]">Reservation</p>
+                    <p className="font-medium text-[#1F2937]">{t('client.reservation')}</p>
                     <p className="mt-1">#{invoice.reservation_id}</p>
                   </div>
                   <div>
@@ -221,19 +224,19 @@ export default function ClientInvoicesPage() {
                     <p className="mt-1">{formatDate(invoice.issue_date)}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-[#1F2937]">Montant</p>
+                    <p className="font-medium text-[#1F2937]">{t('client.montant')}</p>
                     <p className="mt-1">{formatMoney(invoice.total_amount, invoice.currency)}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-[#1F2937]">Statut</p>
-                    <p className="mt-1">{status.label}</p>
+                    <p className="font-medium text-[#1F2937]">{t('client.statut')}</p>
+                    <p className="mt-1">{clientDisplay(t, status.label)}</p>
                   </div>
                 </div>
 
                 <div className="mt-5 flex flex-wrap gap-2">
                   <Link to={`/client/invoices/${invoice.id}`}>
                     <Button variant="secondary" size="sm">
-                      Voir le detail
+                      {t('client.voir_le_detail')}
                     </Button>
                   </Link>
                   <Button
@@ -245,8 +248,8 @@ export default function ClientInvoicesPage() {
                   >
                     {isDownloadingThisInvoice ? (
                       <span className="flex items-center gap-2">
-                        <LoadingSpinner size="sm" aria-label="Telechargement en cours" />
-                        Telechargement...
+                        <LoadingSpinner size="sm" aria-label={t('client.telechargement_en_cours_alt')} />
+                        {t('client.telechargement_alt')}
                       </span>
                     ) : (
                       'Telecharger le PDF'
@@ -259,7 +262,7 @@ export default function ClientInvoicesPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
             <p className="text-sm text-slate-600">
-              Total: <span className="font-semibold text-[#1F2937]">{invoicesQuery.data?.count ?? 0}</span>
+              {t('client.total')} <span className="font-semibold text-[#1F2937]">{invoicesQuery.data?.count ?? 0}</span>
             </p>
             <div className="flex items-center gap-2">
               <Button
@@ -270,7 +273,7 @@ export default function ClientInvoicesPage() {
                 }}
                 disabled={!invoicesQuery.data?.previous}
               >
-                Precedent
+                {t('client.precedent_alt')}
               </Button>
               <span className="px-2 text-sm font-medium text-slate-700">Page {page}</span>
               <Button
@@ -281,7 +284,7 @@ export default function ClientInvoicesPage() {
                 }}
                 disabled={!invoicesQuery.data?.next}
               >
-                Suivant
+                {t('client.suivant')}
               </Button>
             </div>
           </div>

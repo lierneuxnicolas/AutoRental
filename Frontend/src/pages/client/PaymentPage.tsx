@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { clientDisplay, clientLocale, stripeLocale } from '../../i18n/clientDisplay'
 import { useEffect, useMemo, useState } from 'react'
 import { AxiosError } from 'axios'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -52,7 +54,7 @@ function formatDateTimeLabel(value: string): string {
     return value
   }
 
-  return parsedValue.toLocaleString('fr-FR', {
+  return parsedValue.toLocaleString(clientLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
@@ -131,6 +133,7 @@ interface StripePaymentFormProps {
 }
 
 function StripePaymentForm({ isSubmitting, returnUrl, onSubmit }: StripePaymentFormProps) {
+  const { t } = useTranslation()
   const stripe = useStripe()
   const elements = useElements()
   const [cardError, setCardError] = useState<string | null>(null)
@@ -174,13 +177,13 @@ function StripePaymentForm({ isSubmitting, returnUrl, onSubmit }: StripePaymentF
         />
       </div>
 
-      {cardError ? <Alert variant="danger" title="Paiement refuse" message={cardError} /> : null}
+      {cardError ? <Alert variant="danger" title={t('client.paiement_refuse')} message={clientDisplay(t, cardError)} /> : null}
 
       <Button className="w-full" variant="danger" disabled={!stripe || isSubmitting} onClick={handleSubmit}>
         {isSubmitting ? (
           <span className="flex items-center justify-center gap-2">
-            <LoadingSpinner size="sm" aria-label="Paiement en cours" />
-            Paiement en cours...
+            <LoadingSpinner size="sm" aria-label={t('client.paiement_en_cours')} />
+            {t('public.paiement_en_cours')}
           </span>
         ) : (
           'Payer 97 € et préautoriser 500 €'
@@ -191,6 +194,7 @@ function StripePaymentForm({ isSubmitting, returnUrl, onSubmit }: StripePaymentF
 }
 
 export default function PaymentPage() {
+  const { t } = useTranslation()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { isAuthenticated, isLoading: isAuthLoading } = useAuth()
@@ -366,10 +370,10 @@ export default function PaymentPage() {
       <section className="py-8 sm:py-10" aria-labelledby="payment-page-title">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
           <h1 id="payment-page-title" className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
-            Paiement
+            {t('client.paiement')}
           </h1>
           <div className="mt-6">
-            <Alert variant="danger" title="Reservation invalide" message="Le parametre reservationId est requis et doit etre un entier positif." />
+            <Alert variant="danger" title={t('client.reservation_invalide')} message={t('client.le_parametre_reservationid_est_requis_et_doit_etre_un_entier_positif')} />
           </div>
         </div>
       </section>
@@ -381,13 +385,13 @@ export default function PaymentPage() {
       <section className="py-8 sm:py-10" aria-labelledby="payment-page-title">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
           <h1 id="payment-page-title" className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
-            Paiement
+            {t('client.paiement')}
           </h1>
           <div className="mt-6">
             <Alert
               variant="danger"
-              title="Configuration Stripe manquante"
-              message="La variable VITE_STRIPE_PUBLISHABLE_KEY doit etre definie pour activer le paiement Stripe Test."
+              title={t('public.configuration_stripe_manquante')}
+              message={t('client.la_variable_vite_stripe_publishable_key_doit_etre_definie_pour_activer')}
             />
           </div>
         </div>
@@ -399,18 +403,18 @@ export default function PaymentPage() {
     <section className="py-8 sm:py-10" aria-labelledby="payment-page-title">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <h1 id="payment-page-title" className="text-3xl font-semibold tracking-tight text-[#1F2937] sm:text-4xl">
-          Paiement
+          {t('client.paiement')}
         </h1>
 
         {isAuthLoading ? (
           <div className="mt-8 flex justify-center">
-            <LoadingSpinner size="lg" aria-label="Verification de session" />
+            <LoadingSpinner size="lg" aria-label={t('client.verification_de_session')} />
           </div>
         ) : null}
 
         {!isAuthLoading && reservationQuery.isLoading ? (
           <div className="mt-8 flex justify-center">
-            <LoadingSpinner size="lg" aria-label="Chargement de la reservation" />
+            <LoadingSpinner size="lg" aria-label={t('client.chargement_de_la_reservation')} />
           </div>
         ) : null}
 
@@ -418,25 +422,25 @@ export default function PaymentPage() {
           <div className="mt-6">
             <Alert
               variant="danger"
-              title="Reservation introuvable ou inaccessible"
-              message={toErrorMessage(reservationQuery.error)}
+              title={t('client.reservation_introuvable_ou_inaccessible')}
+              message={clientDisplay(t, toErrorMessage(reservationQuery.error))}
             />
           </div>
         ) : null}
 
         {!isAuthLoading && reservationQuery.data ? (
           <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-            <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Recapitulatif de reservation</h2>}>
+            <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t('client.recapitulatif_de_reservation')}</h2>}>
               <div className="space-y-4">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-medium uppercase tracking-wide text-slate-500">Reference</p>
-                  <StatusBadge variant={statusVariant(reservationQuery.data.status)} label={statusLabel(reservationQuery.data.status)} />
+                  <p className="text-sm font-medium uppercase tracking-wide text-slate-500">{t('client.reference_alt')}</p>
+                  <StatusBadge variant={statusVariant(reservationQuery.data.status)} label={clientDisplay(t, statusLabel(reservationQuery.data.status))} />
                 </div>
 
                 <p className="text-xl font-semibold text-[#1F2937]">{reservationQuery.data.reference}</p>
 
                 <div>
-                  <p className="text-sm font-medium uppercase tracking-wide text-slate-500">Vehicule</p>
+                  <p className="text-sm font-medium uppercase tracking-wide text-slate-500">{t('client.vehicule_alt')}</p>
                   <p className="mt-1 text-lg font-semibold text-[#1F2937]">
                     {reservationQuery.data.vehicle.brand} {reservationQuery.data.vehicle.model_name}
                   </p>
@@ -445,7 +449,7 @@ export default function PaymentPage() {
 
                 <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-2">
                   <div>
-                    <p className="text-sm font-medium uppercase tracking-wide text-slate-500">Periode</p>
+                    <p className="text-sm font-medium uppercase tracking-wide text-slate-500">{t('client.periode')}</p>
                     <p className="mt-1 text-sm text-slate-700">{formatDateTimeLabel(reservationQuery.data.start_at)}</p>
                     <p className="text-sm text-slate-700">{formatDateTimeLabel(reservationQuery.data.end_at)}</p>
                   </div>
@@ -453,13 +457,13 @@ export default function PaymentPage() {
 
                 <div className="rounded-2xl border border-slate-200 p-4">
                   <div className="flex items-center justify-between py-2">
-                    <span className="text-sm text-slate-600">Paiement location</span>
+                    <span className="text-sm text-slate-600">{t('client.paiement_location')}</span>
                     <span className="font-semibold text-[#1F2937]">
                       {paymentSummary ? formatCurrency(paymentSummary.rentalAmount) : 'Indisponible'}
                     </span>
                   </div>
                   <div className="flex items-center justify-between py-2">
-                    <span className="text-sm text-slate-600">Caution</span>
+                    <span className="text-sm text-slate-600">{t('public.caution')}</span>
                     <span className="font-semibold text-[#1F2937]">
                       {paymentSummary ? formatCurrency(paymentSummary.depositAmount) : 'Indisponible'}
                     </span>
@@ -468,21 +472,21 @@ export default function PaymentPage() {
               </div>
             </Card>
 
-            <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">Paiement Stripe Test</h2>}>
+            <Card header={<h2 className="text-lg font-semibold text-[#1F2937]">{t('client.paiement_stripe_test')}</h2>}>
               <div className="space-y-4">
                 <Alert
                   variant="info"
-                  title="Moyen de paiement"
-                  message="Le backend calcule les montants et prépare d'abord la préautorisation de caution, puis le paiement de location."
+                  title={t('client.moyen_de_paiement')}
+                  message={t('client.le_backend_calcule_les_montants_et_prepare_d_abord_la_preautorisation')}
                 />
 
-                {workflowError ? <Alert variant="danger" title="Paiement impossible" message={workflowError} /> : null}
+                {workflowError ? <Alert variant="danger" title={t('public.paiement_impossible')} message={clientDisplay(t, workflowError)} /> : null}
 
                 {isProcessingConfirmation ? (
                   <Alert
                     variant="warning"
-                    title="Paiement en cours de confirmation"
-                    message="Le paiement est valide cote Stripe. Confirmation backend en cours via webhook..."
+                    title={t('client.paiement_en_cours_de_confirmation')}
+                    message={t('client.le_paiement_est_valide_cote_stripe_confirmation_backend_en_cours_via')}
                   />
                 ) : null}
 
@@ -502,15 +506,15 @@ export default function PaymentPage() {
                   >
                     {preparePaymentMutation.isPending ? (
                       <span className="flex items-center justify-center gap-2">
-                        <LoadingSpinner size="sm" aria-label="Preparation du paiement" />
-                        Preparation du paiement...
+                        <LoadingSpinner size="sm" aria-label={t('client.preparation_du_paiement')} />
+                        {t('client.preparation_du_paiement_alt')}
                       </span>
                     ) : (
                       'Preparer le paiement'
                     )}
                   </Button>
                 ) : (
-                  <Elements stripe={stripePromise} options={{ clientSecret: paymentClientSecret }}>
+                  <Elements stripe={stripePromise} options={{ clientSecret: paymentClientSecret, locale: stripeLocale() }}>
                     <div className="space-y-3">
                       <StripePaymentForm
                         isSubmitting={isProcessingConfirmation}
@@ -518,8 +522,7 @@ export default function PaymentPage() {
                         onSubmit={handleStripeSuccess}
                       />
                       <p className="text-sm leading-6 text-slate-600">
-                        En confirmant, vous autorisez le paiement de {paymentSummary ? formatCurrency(paymentSummary.rentalAmount) : '97.00 EUR'} ainsi qu&apos;une préautorisation séparée de{' '}
-                        {paymentSummary ? formatCurrency(paymentSummary.depositAmount) : '500.00 EUR'} pour la caution.
+                        {t('professional.en_confirmant_vous_autorisez_le_paiement_de_rental_ainsi_qu_une_preautorisation', { rental: formatCurrency(paymentSummary?.rentalAmount ?? '97.00'), deposit: formatCurrency(paymentSummary?.depositAmount ?? '500.00') })}
                       </p>
                     </div>
                   </Elements>
@@ -528,8 +531,8 @@ export default function PaymentPage() {
                 {!isProcessingConfirmation && paymentClientSecret && reservationQuery.data.status === 'CONFIRMEE' ? (
                   <Alert
                     variant="success"
-                    title="Reservation confirmee"
-                    message="Le backend a confirme votre paiement. Redirection vers votre espace client..."
+                    title={t('client.reservation_confirmee')}
+                    message={t('client.le_backend_a_confirme_votre_paiement_redirection_vers_votre_espace_client')}
                   />
                 ) : null}
               </div>

@@ -1,3 +1,5 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { useTranslation } from 'react-i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { Link, useNavigate } from 'react-router-dom'
@@ -42,6 +44,7 @@ function getResumeErrorMessage(error: unknown): string {
 }
 
 export default function MechanicInterventionsPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const interventionsQuery = useQuery({
@@ -60,7 +63,7 @@ export default function MechanicInterventionsPage() {
   if (interventionsQuery.isLoading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
-        <LoadingSpinner size="lg" aria-label="Chargement des interventions" />
+        <LoadingSpinner size="lg" aria-label={t("professional.chargement_des_interventions")} />
       </div>
     )
   }
@@ -70,16 +73,15 @@ export default function MechanicInterventionsPage() {
       <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-8 sm:px-6 lg:px-8">
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message="Les interventions n’ont pas pu être récupérées. Veuillez réessayer."
+          title={t("client.chargement_impossible")}
+          message={t("professional.les_interventions_n_ont_pas_pu_etre_recuperees_veuillez_reessayer")}
         />
         <button
           type="button"
           onClick={() => void interventionsQuery.refetch()}
           className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB]"
         >
-          Réessayer
-        </button>
+          {t("client.reessayer_alt")}</button>
       </div>
     )
   }
@@ -90,8 +92,8 @@ export default function MechanicInterventionsPage() {
     return (
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
         <EmptyState
-          title="Aucune intervention assignée"
-          description="Vous n'avez actuellement aucune intervention à traiter."
+          title={t("professional.aucune_intervention_assignee")}
+          description={t("professional.vous_n_avez_actuellement_aucune_intervention_a_traiter")}
         />
       </div>
     )
@@ -100,11 +102,11 @@ export default function MechanicInterventionsPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6 flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold text-[#1F2937]">Mes interventions</h1>
+        <h1 className="text-2xl font-semibold text-[#1F2937]">{t("professional.mes_interventions")}</h1>
       </div>
 
       <div className="grid gap-4">
-        {resumeMutation.isError ? <Alert variant="danger" title="Reprise impossible" message={getResumeErrorMessage(resumeMutation.error)} /> : null}
+        {resumeMutation.isError ? <Alert variant="danger" title={t("professional.reprise_impossible")} message={professionalDisplay(t, getResumeErrorMessage(resumeMutation.error))} /> : null}
         {interventions.map((intervention) => {
           const statusBadge = mapStatusToBadge(intervention.status)
 
@@ -121,15 +123,15 @@ export default function MechanicInterventionsPage() {
                     disabled={resumeMutation.isPending}
                     onClick={() => void resumeMutation.mutateAsync(intervention.id)}
                   >
-                    {resumeMutation.isPending ? 'Reprise...' : 'Reprendre l’intervention'}
+                    {resumeMutation.isPending ? t("professional.reprise") : t("professional.reprendre_l_intervention")}
                   </Button>
                 ) : null}
                 {intervention.status === 'EN_PAUSE' ? null : intervention.status === 'PLANIFIEE' ? (
-                  <Link to={`/mechanic/interventions/${intervention.id}`}><Button className="min-w-[11rem]">Commencer</Button></Link>
+                  <Link to={`/mechanic/interventions/${intervention.id}`}><Button className="min-w-[11rem]">{t("professional.commencer")}</Button></Link>
                 ) : intervention.status === 'TERMINEE' ? (
-                  <Link to={`/mechanic/interventions/${intervention.id}`}><Button variant="secondary" className="min-w-[11rem]">Voir le rapport</Button></Link>
+                  <Link to={`/mechanic/interventions/${intervention.id}`}><Button variant="secondary" className="min-w-[11rem]">{t("professional.voir_le_rapport")}</Button></Link>
                 ) : (
-                  <Link to={`/mechanic/interventions/${intervention.id}`}><Button variant="secondary" className="min-w-[11rem]">{intervention.status === 'EN_COURS' ? 'Voir l’intervention' : 'Voir le détail'}</Button></Link>
+                  <Link to={`/mechanic/interventions/${intervention.id}`}><Button variant="secondary" className="min-w-[11rem]">{intervention.status === 'EN_COURS' ? t("professional.voir_l_intervention") : t("client.voir_le_detail")}</Button></Link>
                 )}
                 </>
               )}

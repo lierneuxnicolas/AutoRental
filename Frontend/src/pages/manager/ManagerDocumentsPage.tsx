@@ -1,3 +1,5 @@
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -50,7 +52,7 @@ function mapTransmissionToLabel(
 }
 
 function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(clientLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -58,7 +60,7 @@ function formatDate(value: string): string {
 }
 
 function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat(clientLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -77,6 +79,7 @@ function sortDocuments(docs: ManagerClientDocumentList[]): ManagerClientDocument
 // ── Composant document card (mobile) ─────────────────────────────────────────
 
 function DocumentCard({ doc }: { doc: ManagerClientDocumentList }) {
+  const { t } = useTranslation()
   const { label, variant } = mapStatusToUi(doc.status)
   return (
     <Card>
@@ -93,17 +96,17 @@ function DocumentCard({ doc }: { doc: ManagerClientDocumentList }) {
 
         <div className="grid grid-cols-2 gap-2 text-sm text-[#1F2937]">
           <div>
-            <span className="text-slate-500">Type : </span>
+            <span className="text-slate-500">{t("professional.type_2")} </span>
             {mapDocTypeToLabel(doc.document_type)}
             {mapTransmissionToLabel(doc) ? <span className="block text-xs text-slate-500">{mapTransmissionToLabel(doc)}</span> : null}
                       </div>
                       <div>
-            <span className="text-slate-500">Envoyé le : </span>
+            <span className="text-slate-500">{t("professional.envoye_le_2")} </span>
             {formatDateTime(doc.uploaded_at)}
           </div>
           {doc.expiration_date ? (
             <div className="col-span-2">
-              <span className="text-slate-500">Expiration : </span>
+              <span className="text-slate-500">{t("professional.expiration_2")} </span>
               {formatDate(doc.expiration_date)}
             </div>
           ) : null}
@@ -112,8 +115,7 @@ function DocumentCard({ doc }: { doc: ManagerClientDocumentList }) {
         <div className="flex justify-end">
           <Link to={`/manager/documents/${doc.id}`}>
             <Button variant="secondary" size="sm">
-              Voir le détail
-            </Button>
+              {t("client.voir_le_detail")}</Button>
           </Link>
         </div>
       </div>
@@ -124,6 +126,7 @@ function DocumentCard({ doc }: { doc: ManagerClientDocumentList }) {
 // ── Ligne de tableau (desktop) ────────────────────────────────────────────────
 
 function DocumentRow({ doc }: { doc: ManagerClientDocumentList }) {
+  const { t } = useTranslation()
   const { label, variant } = mapStatusToUi(doc.status)
   return (
     <tr className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F9FAFB]">
@@ -145,8 +148,7 @@ function DocumentRow({ doc }: { doc: ManagerClientDocumentList }) {
       <td className="px-4 py-3">
         <Link to={`/manager/documents/${doc.id}`}>
           <Button variant="secondary" size="sm">
-            Voir le détail
-          </Button>
+            {t("client.voir_le_detail")}</Button>
         </Link>
       </td>
     </tr>
@@ -158,6 +160,7 @@ function DocumentRow({ doc }: { doc: ManagerClientDocumentList }) {
 const PAGE_SIZE = 20
 
 export default function ManagerDocumentsPage() {
+  const { t } = useTranslation()
   const [page, setPage] = useState(1)
 
   const { data, isLoading, isError, isFetching, refetch } = useQuery({
@@ -188,13 +191,13 @@ export default function ManagerDocumentsPage() {
   return (
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div>
-        <h1 className="text-2xl font-bold text-[#0F172A]">Documents à valider</h1>
+        <h1 className="text-2xl font-bold text-[#0F172A]">{t("professional.documents_a_valider")}</h1>
       </div>
 
       {/* États */}
       {isLoading && (
         <div className="flex justify-center py-16">
-          <LoadingSpinner size="lg" aria-label="Chargement des documents" />
+          <LoadingSpinner size="lg" aria-label={t("client.chargement_des_documents")} />
         </div>
       )}
 
@@ -202,23 +205,23 @@ export default function ManagerDocumentsPage() {
         <div className="space-y-3">
           <Alert
             variant="danger"
-            title="Erreur de chargement"
-            message="Impossible de récupérer les documents. Veuillez réessayer."
+            title={t("public.erreur_de_chargement")}
+            message={t("professional.impossible_de_recuperer_les_documents_veuillez_reessayer")}
           />
           <Button
             variant="secondary"
             disabled={isFetching}
             onClick={() => void refetch()}
           >
-            {isFetching ? 'Chargement...' : 'Réessayer'}
+            {isFetching ? t("client.chargement") : t("client.reessayer_alt")}
           </Button>
         </div>
       )}
 
       {!isLoading && !isError && sortedDocuments.length === 0 && (
         <EmptyState
-          title="Aucun document"
-          description="Aucun document n’a été transmis."
+          title={t("professional.aucun_document")}
+          description={t("professional.aucun_document_n_a_ete_transmis")}
         />
       )}
 
@@ -234,12 +237,12 @@ export default function ManagerDocumentsPage() {
             <table className="w-full border-collapse text-left">
               <thead className="border-b border-[#E5E7EB] bg-[#F5F5F5]">
                 <tr>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Client</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Type</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Statut</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Envoyé le</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Expiration</th>
-                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Action</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("client.client")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.type")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("client.statut")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.envoye_le")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.expiration")}</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.action")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -258,10 +261,9 @@ export default function ManagerDocumentsPage() {
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
               >
-                Précédent
-              </Button>
+                {t("client.precedent_alt")}</Button>
               <span className="text-sm text-slate-500">
-                Page {page} / {totalPages}
+                {t("client.page")}{page} / {totalPages}
               </span>
               <Button
                 variant="secondary"
@@ -269,8 +271,7 @@ export default function ManagerDocumentsPage() {
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => p + 1)}
               >
-                Suivant
-              </Button>
+                {t("client.suivant")}</Button>
             </div>
           )}
         </>

@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { clientDisplay, clientLocale } from '../../i18n/clientDisplay'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AxiosError } from 'axios'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -34,7 +36,7 @@ function formatDateTime(value: string | null | undefined): string {
     return value
   }
 
-  return parsed.toLocaleString('fr-FR', {
+  return parsed.toLocaleString(clientLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
@@ -65,6 +67,7 @@ function toErrorMessage(error: unknown): string {
 }
 
 export default function DepartureInspectionConfirmationPage() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const reservationId = Number(id)
@@ -174,7 +177,7 @@ export default function DepartureInspectionConfirmationPage() {
   if (!isReservationIdValid) {
     return (
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+        <Alert variant="danger" title={t('client.reservation_invalide')} message={t('client.l_identifiant_de_reservation_est_invalide')} />
       </section>
     )
   }
@@ -188,11 +191,11 @@ export default function DepartureInspectionConfirmationPage() {
       <section className="mx-auto flex min-h-[70vh] max-w-6xl items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
         <Card className="w-full max-w-2xl">
           <div className="flex flex-col items-center gap-3 py-8 text-center">
-            <LoadingSpinner size="lg" aria-label="Validation en cours" />
-            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-[#7C3AED]">Confirmation</p>
-            <h1 className="text-3xl font-semibold text-[#0F172A]">Location démarrée !</h1>
+            <LoadingSpinner size="lg" aria-label={t('client.validation_en_cours')} />
+            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-[#7C3AED]">{t('public.confirmation')}</p>
+            <h1 className="text-3xl font-semibold text-[#0F172A]">{t('client.location_demarree')}</h1>
             <p className="max-w-lg text-sm leading-6 text-slate-600">
-              Vérification finale en cours avant d’afficher votre confirmation.
+              {t('client.verification_finale_en_cours_avant_dafficher_votre_confirmation')}
             </p>
           </div>
         </Card>
@@ -206,10 +209,10 @@ export default function DepartureInspectionConfirmationPage() {
         <div className="relative left-1/2 mb-6 w-[min(100vw-2rem,72rem)] -translate-x-1/2 sm:w-[min(100vw-3rem,72rem)] lg:w-[min(100vw-4rem,72rem)]">
           <ReservationProgressBanner className="mb-6 sm:mb-8" steps={steps} />
         </div>
-        <Alert className="mb-4" variant="danger" title="Confirmation impossible" message={completionFailedMessage} />
+        <Alert className="mb-4" variant="danger" title={t('client.confirmation_impossible')} message={clientDisplay(t, completionFailedMessage)} />
         <div className="flex justify-center">
           <Link to={`/client/reservations/${reservationId}/departure-inspection/vehicle-state`}>
-            <Button variant="secondary">Retour à l'étape État du véhicule</Button>
+            <Button variant="secondary">{t('client.retour_a_l_etape_etat_du_vehicule')}</Button>
           </Link>
         </div>
       </section>
@@ -226,12 +229,12 @@ export default function DepartureInspectionConfirmationPage() {
           <header className="text-center">
             <h1 className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[26px] font-semibold text-[#0F172A]">
               <span aria-hidden="true" className="text-3xl leading-none text-green-600">✓</span>
-              <span>Votre location a démarré. Bonne route !</span>
+              <span>{t('client.votre_location_a_demarre_bonne_route')}</span>
             </h1>
           </header>
 
           <section
-            aria-label="Résumé du véhicule"
+            aria-label={t('client.resume_du_vehicule')}
             className="mx-auto flex w-full flex-col items-start gap-4 sm:max-w-4xl sm:translate-x-2 sm:flex-row sm:items-center sm:gap-5"
           >
             {displayVehiclePhoto ? (
@@ -244,24 +247,24 @@ export default function DepartureInspectionConfirmationPage() {
             </div>
             <dl className="space-y-3 text-sm leading-5 sm:ml-auto sm:mr-[30px] sm:shrink-0 sm:text-left">
               <div>
-                <dt className="text-slate-600">Début</dt>
+                <dt className="text-slate-600">{t('public.debut')}</dt>
                 <dd className="font-medium text-[#1F2937]">{formatDateTime(reservationQuery.data?.start_at)}</dd>
               </div>
               <div>
-                <dt className="text-slate-600">Fin</dt>
+                <dt className="text-slate-600">{t('public.fin')}</dt>
                 <dd className="font-medium text-[#1F2937]">{formatDateTime(reservationQuery.data?.end_at)}</dd>
               </div>
             </dl>
           </section>
 
-          <section aria-label="Informations pratiques" className="space-y-5 rounded-xl bg-slate-50 p-4 text-[15px] leading-6 text-[#1F2937] sm:p-5">
+          <section aria-label={t('client.informations_pratiques')} className="space-y-5 rounded-xl bg-slate-50 p-4 text-[15px] leading-6 text-[#1F2937] sm:p-5">
             <div className="space-y-3 text-center">
-              <p><strong>Récupérez la clé</strong> dans le boîtier sécurisé de la boîte à gants.</p>
-              <p><strong>Documents et constat d'accident</strong> dans la boîte à gants.</p>
+              <p><strong>{t('client.recuperez_la_cle')}</strong> {t('client.dans_le_boitier_securise_de_la_boite_a_gants')}</p>
+              <p><strong>{t('client.documents_et_constat_d_accident')}</strong> {t('client.dans_la_boite_a_gants')}</p>
             </div>
 
             <div className="text-center">
-              <p className="text-base font-semibold text-[#1F2937]">Restitution — Parking GetaCar, Gare Centrale</p>
+              <p className="text-base font-semibold text-[#1F2937]">{t('client.restitution_parking_getacar_gare_centrale')}</p>
               <a
                 href={GOOGLE_MAPS_URL}
                 target="_blank"
@@ -275,7 +278,7 @@ export default function DepartureInspectionConfirmationPage() {
 
           <div className="flex justify-center">
             <Button className="w-full max-w-sm" onClick={() => navigate('/client')}>
-              Retour au tableau de bord
+              {t('client.retour_au_tableau_de_bord')}
             </Button>
           </div>
         </div>

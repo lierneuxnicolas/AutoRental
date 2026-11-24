@@ -1,3 +1,5 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { useTranslation } from 'react-i18next'
 import { useRef } from 'react'
 import Alert from '../feedback/Alert'
 import LoadingSpinner from '../feedback/LoadingSpinner'
@@ -25,6 +27,7 @@ export default function InspectionPhotoSlot({
   errorMessage,
   onFileChange,
 }: InspectionPhotoSlotProps) {
+  const { t } = useTranslation()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const isUploaded = Boolean(uploadedUrl)
@@ -45,7 +48,7 @@ export default function InspectionPhotoSlot({
             {label}
             {isUploaded ? <span className="ml-2 text-[#16A34A]">✓</span> : null}
           </h3>
-          <StatusBadge variant={status.variant} label={status.label} />
+          <StatusBadge variant={status.variant} label={professionalDisplay(t, status.label)} />
         </div>
       }
     >
@@ -69,7 +72,7 @@ export default function InspectionPhotoSlot({
           </div>
         ) : (
           <div className="flex h-44 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-sm text-slate-500">
-            Selectionnez une photo {photoType.toLowerCase().replace(/_/g, ' ')}.
+            {t("professional.selectionnez_une_photo")}{photoType.toLowerCase().replace(/_/g, ' ')}.
           </div>
         )}
 
@@ -84,9 +87,8 @@ export default function InspectionPhotoSlot({
         >
           {isUploading ? (
             <span className="flex items-center gap-2">
-              <LoadingSpinner size="sm" aria-label="Envoi de photo" />
-              Envoi en cours...
-            </span>
+              <LoadingSpinner size="sm" aria-label={t("professional.envoi_de_photo")} />
+              {t("client.envoi_en_cours_alt")}</span>
           ) : isUploaded ? (
             'Remplacer la photo'
           ) : (

@@ -1,3 +1,5 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import Alert from '../feedback/Alert'
 import LoadingSpinner from '../feedback/LoadingSpinner'
@@ -27,6 +29,7 @@ function buildEmptyPhotoState() {
 }
 
 export default function InterventionCheckOutForm({ initialMileage, initialEnergyLevel, embedded = false, disabled = false, isSubmitting = false, onSubmit }: InterventionCheckOutFormProps) {
+  const { t } = useTranslation()
   const [finalMileage, setFinalMileage] = useState(initialMileage !== null && initialMileage !== undefined ? String(initialMileage) : '')
   const [finalEnergyLevel, setFinalEnergyLevel] = useState(initialEnergyLevel !== null && initialEnergyLevel !== undefined ? String(initialEnergyLevel) : '')
   const [anomalyPresent, setAnomalyPresent] = useState<boolean | null>(null)
@@ -96,10 +99,10 @@ export default function InterventionCheckOutForm({ initialMileage, initialEnergy
 
   const content = (
       <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-        {localError ? <Alert variant="danger" title="Check-out incomplet" message={localError} /> : null}
+        {localError ? <Alert variant="danger" title={t("professional.check_out_incomplet")} message={professionalDisplay(t, localError)} /> : null}
 
         <InspectionVehicleStateCard
-          title="État final du véhicule"
+          title={t("professional.etat_final_du_vehicule")}
           mileageLabel="Kilométrage final"
           mileage={finalMileage}
           onMileageChange={setFinalMileage}
@@ -122,14 +125,14 @@ export default function InterventionCheckOutForm({ initialMileage, initialEnergy
         />
 
         <StandardInspectionPhotoGrid
-          title="Photos de check-out"
+          title={t("professional.photos_de_check_out")}
           photoState={photoState}
           disabled={disabled || isSubmitting}
           onFileChange={setSlotFile}
         />
 
         <div className="flex justify-end">
-          <Button type="submit" disabled={disabled || isSubmitting}>{isSubmitting ? <span className="flex items-center gap-2"><LoadingSpinner size="sm" aria-label="Clôture" />Clôture...</span> : "Terminer l’intervention"}</Button>
+          <Button type="submit" disabled={disabled || isSubmitting}>{isSubmitting ? <span className="flex items-center gap-2"><LoadingSpinner size="sm" aria-label={t("professional.cloture")} />{t("professional.cloture_2")}</span> : t("professional.terminer_l_intervention")}</Button>
         </div>
       </form>
   )
@@ -138,5 +141,5 @@ export default function InterventionCheckOutForm({ initialMileage, initialEnergy
     return content
   }
 
-  return <Card className="border-slate-200" header={<p className="text-sm font-semibold text-[#2563EB]">Check-out</p>}>{content}</Card>
+  return <Card className="border-slate-200" header={<p className="text-sm font-semibold text-[#2563EB]">{t("professional.check_out")}</p>}>{content}</Card>
 }

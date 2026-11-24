@@ -1,3 +1,5 @@
+import { clientDisplay } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import axios from 'axios'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -45,6 +47,7 @@ function toErrorMessage(error: unknown): string {
 }
 
 export default function ClientVehicleUnlockPage() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const reservationId = Number(id)
@@ -96,7 +99,7 @@ export default function ClientVehicleUnlockPage() {
   if (!isReservationIdValid) {
     return (
       <section className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+        <Alert variant="danger" title={t('client.reservation_invalide')} message={t('client.l_identifiant_de_reservation_est_invalide')} />
       </section>
     )
   }
@@ -104,7 +107,7 @@ export default function ClientVehicleUnlockPage() {
   if (reservationQuery.isLoading || vehicleQuery.isLoading) {
     return (
       <section className="mx-auto flex min-h-[50vh] max-w-3xl items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
-        <LoadingSpinner size="lg" aria-label="Chargement" />
+        <LoadingSpinner size="lg" aria-label={t('client.chargement_alt')} />
       </section>
     )
   }
@@ -112,9 +115,9 @@ export default function ClientVehicleUnlockPage() {
   if (reservationQuery.isError || !reservationQuery.data) {
     return (
       <section className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Chargement impossible" message="La reservation est introuvable ou inaccessible." className="mb-4" />
+        <Alert variant="danger" title={t('client.chargement_impossible')} message={t('client.la_reservation_est_introuvable_ou_inaccessible')} className="mb-4" />
         <Link to="/client/reservations">
-          <Button variant="secondary">Retour a mes reservations</Button>
+          <Button variant="secondary">{t('client.retour_a_mes_reservations')}</Button>
         </Link>
       </section>
     )
@@ -128,7 +131,7 @@ export default function ClientVehicleUnlockPage() {
 
       <div className="mb-6 flex items-center justify-center gap-3">
         <h1 className="mt-2 w-full text-center text-2xl font-semibold leading-snug text-[#0F172A] sm:text-3xl">
-          Déverrouillez votre véhicule avec votre smartphone.
+          {t('client.deverrouillez_votre_vehicule_avec_votre_smartphone')}
         </h1>
       </div>
 
@@ -136,17 +139,17 @@ export default function ClientVehicleUnlockPage() {
         <UnlockDetectionIllustration isDetected={canUnlock} />
 
         {!canUnlock && !isAlreadyUnlocked ? (
-          <Alert variant="warning" title="Déverrouillage indisponible" message={availability?.message ?? 'La disponibilité ne peut pas être vérifiée. Actualisez la page.'} />
+          <Alert variant="warning" title={t('client.deverrouillage_indisponible')} message={availability?.message ?? 'La disponibilité ne peut pas être vérifiée. Actualisez la page.'} />
         ) : null}
 
         {isAlreadyUnlocked ? (
           <div className="w-full max-w-md rounded-2xl border border-[#86EFAC] bg-[#DCFCE7] px-4 py-3 text-center text-sm font-semibold text-[#166534]">
-            Véhicule déverrouillé.
+            {t('client.vehicule_deverrouille')}
           </div>
         ) : null}
 
         {unlockMutation.isError && !isAlreadyUnlocked ? (
-          <Alert variant="danger" title="Deverrouillage impossible" message={toErrorMessage(unlockMutation.error)} />
+          <Alert variant="danger" title={t('client.deverrouillage_impossible')} message={clientDisplay(t, toErrorMessage(unlockMutation.error))} />
         ) : null}
 
         <Button
@@ -162,14 +165,14 @@ export default function ClientVehicleUnlockPage() {
           }}
         >
           {isAlreadyUnlocked
-            ? "Continuer vers l'état des lieux"
+            ? t('client.continuer_vers_letat_des_lieux')
             : unlockMutation.isPending
-              ? 'Deverrouillage en cours...'
-              : 'Déverrouiller le véhicule'}
+              ? t('client.deverrouillage_en_cours')
+              : t('client.deverrouiller_le_vehicule')}
         </Button>
 
         <p className="-mt-1 max-w-md text-center text-base leading-6 text-slate-700">
-          Après le déverrouillage, prenez les photos et complétez l'état du véhicule. Récupérez ensuite les clés dans le boîtier sécurisé de la boîte à gants.
+          {t('client.apres_le_deverrouillage_prenez_les_photos_et_completez_l_etat_du')}
         </p>
       </div>
     </section>

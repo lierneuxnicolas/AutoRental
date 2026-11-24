@@ -1,9 +1,11 @@
+import { authMessageKey } from '../../i18n/authMessages'
+import { useTranslation } from 'react-i18next'
 import { useMemo, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { newPasswordSchema } from '../../utils/passwordValidation'
+import { createPasswordSchema } from '../../utils/passwordValidation'
 import axios from 'axios'
 import PasswordInput from '../../components/ui/PasswordInput'
 import Button from '../../components/ui/Button'
@@ -14,17 +16,18 @@ import type { PasswordResetConfirmRequest } from '../../types/auth'
 
 const resetPasswordSchema = z
   .object({
-    uid: z.string().min(1, 'Le lien de réinitialisation est incomplet.'),
-    token: z.string().min(1, 'Le lien de réinitialisation est incomplet.'),
-    new_password: newPasswordSchema,
-    new_password_confirm: z.string().min(1, 'La confirmation du mot de passe est obligatoire.'),
+    uid: z.string().min(1, 'public.le_lien_de_reinitialisation_est_incomplet'),
+    token: z.string().min(1, 'public.le_lien_de_reinitialisation_est_incomplet'),
+    new_password: createPasswordSchema('validation.passwordLength', 'validation.passwordCharacter'),
+    new_password_confirm: z.string().min(1, 'validation.confirmPassword'),
   })
   .refine((data) => data.new_password === data.new_password_confirm, {
-    message: 'Les mots de passe ne correspondent pas.',
+    message: 'validation.passwordMismatch',
     path: ['new_password_confirm'],
   })
 
 export default function ResetPasswordPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [serverError, setServerError] = useState<string | null>(null)
@@ -63,7 +66,7 @@ export default function ResetPasswordPage() {
         new_password: values.new_password,
         new_password_confirm: values.new_password_confirm,
       })
-      setSuccessMessage('Votre mot de passe a été réinitialisé avec succès.')
+      setSuccessMessage('public.votre_mot_de_passe_a_ete_reinitialise_avec_succes')
       window.setTimeout(() => navigate('/login', { replace: true }), 1200)
     } catch (error) {
       if (axios.isAxiosError(error)) {
@@ -72,7 +75,7 @@ export default function ResetPasswordPage() {
         for (const field of ['new_password', 'new_password_confirm'] as const) {
           const message = Array.isArray(data?.[field]) ? data[field][0] : data?.[field]
           if (typeof message === 'string') {
-            setError(field, { type: 'server', message })
+            setError(field, { type: 'server', message: authMessageKey(message) })
             hasPasswordError = true
           }
         }
@@ -82,15 +85,15 @@ export default function ResetPasswordPage() {
         const detail = data?.detail ?? data?.message
 
         if (error.code === 'ERR_NETWORK') {
-          setServerError('Impossible de joindre le serveur. Vérifiez votre connexion.')
+          setServerError('auth.networkError')
           return
         }
 
-        setServerError(typeof detail === 'string' ? detail : 'Le lien de réinitialisation est invalide ou a expiré.')
+        setServerError(typeof detail === 'string' ? authMessageKey(detail) : 'public.le_lien_de_reinitialisation_est_invalide_ou_a_expire')
         return
       }
 
-      setServerError('Une erreur inattendue s’est produite.')
+      setServerError('auth.unexpectedError')
     }
   }
 
@@ -100,26 +103,26 @@ export default function ResetPasswordPage() {
         <div className="grid gap-0 lg:grid-cols-[1fr_1fr]">
           <div className="bg-[#0F172A] p-8 text-white sm:p-10 lg:p-12">
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-blue-200">AutoRental</p>
-            <h1 className="mt-4 text-3xl font-semibold sm:text-4xl">Réinitialiser votre mot de passe</h1>
+            <h1 className="mt-4 text-3xl font-semibold sm:text-4xl">{t('public.reinitialiser_votre_mot_de_passe')}</h1>
             <p className="mt-4 max-w-md text-sm leading-7 text-slate-300 sm:text-base">
-              Choisissez un nouveau mot de passe pour sécuriser votre compte.
+              {t('public.choisissez_un_nouveau_mot_de_passe_pour_securiser_votre_compte')}
             </p>
           </div>
 
           <div className="p-8 sm:p-10 lg:p-12">
             <div className="mb-6">
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">Mot de passe</p>
-              <h2 className="mt-2 text-2xl font-semibold text-[#0F172A]">Créer un nouveau mot de passe</h2>
+              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#2563EB]">{t('auth.password')}</p>
+              <h2 className="mt-2 text-2xl font-semibold text-[#0F172A]">{t('public.creer_un_nouveau_mot_de_passe')}</h2>
             </div>
 
-            {serverError ? <Alert variant="danger" title="Réinitialisation impossible" message={serverError} className="mb-6" /> : null}
-            {successMessage ? <Alert variant="success" title="Réinitialisation réussie" message={successMessage} className="mb-6" /> : null}
+            {serverError ? <Alert variant="danger" title={t('public.reinitialisation_impossible')} message={t(serverError)} className="mb-6" /> : null}
+            {successMessage ? <Alert variant="success" title={t('public.reinitialisation_reussie')} message={t(successMessage)} className="mb-6" /> : null}
 
             {!isReady ? (
               <Alert
                 variant="warning"
-                title="Lien incomplet"
-                message="Le lien de réinitialisation est incomplet. Veuillez utiliser le lien envoyé par e-mail."
+                title={t('public.lien_incomplet')}
+                message={t('public.le_lien_de_reinitialisation_est_incomplet_veuillez_utiliser_le_lien_envoye')}
                 className="mb-6"
               />
             ) : null}
@@ -127,30 +130,32 @@ export default function ResetPasswordPage() {
             {isReady ? (
               <form className="space-y-5" onSubmit={handleSubmit(onSubmit)} noValidate>
                 <PasswordInput
-                  label="Nouveau mot de passe"
+                  localize
+                  label={t('public.nouveau_mot_de_passe')}
                   minimumLengthValue={passwordValue}
                   autoComplete="new-password"
                   placeholder="••••••••"
-                  error={errors.new_password?.message}
+                  error={errors.new_password?.message ? t(errors.new_password.message) : undefined}
                   {...register('new_password')}
                 />
 
                 <PasswordInput
-                  label="Confirmer le nouveau mot de passe"
+                  localize
+                  label={t('public.confirmer_le_nouveau_mot_de_passe')}
                   autoComplete="new-password"
                   placeholder="••••••••"
-                  error={errors.new_password_confirm?.message}
+                  error={errors.new_password_confirm?.message ? t(errors.new_password_confirm.message) : undefined}
                   {...register('new_password_confirm')}
                 />
 
                 <Button type="submit" className="w-full" disabled={isSubmitting}>
                   {isSubmitting ? (
                     <span className="flex items-center justify-center gap-2">
-                      <LoadingSpinner size="sm" aria-label="Réinitialisation en cours" />
-                      Réinitialisation...
+                      <LoadingSpinner size="sm" aria-label={t('public.reinitialisation_en_cours')} />
+                      {t('public.reinitialisation')}
                     </span>
                   ) : (
-                    'Réinitialiser le mot de passe'
+                    t('public.reinitialiser_le_mot_de_passe')
                   )}
                 </Button>
               </form>
@@ -158,7 +163,7 @@ export default function ResetPasswordPage() {
 
             <div className="mt-6 text-sm text-slate-600">
               <Link to="/login" className="font-medium text-[#2563EB] transition hover:text-[#1D4ED8]">
-                Retour à la connexion
+                {t('public.retour_a_la_connexion')}
               </Link>
             </div>
           </div>

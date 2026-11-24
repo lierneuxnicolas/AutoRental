@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import DocumentPdfPreview from '../../components/documents/DocumentPdfPreview'
 import { documentPreviewKind } from '../../utils/documentPreview'
 import { useEffect, useState } from 'react'
@@ -49,7 +52,7 @@ function formatDate(value: string | null): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime())
     ? value
-    : new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(date)
+    : new Intl.DateTimeFormat(clientLocale(), { dateStyle: 'medium' }).format(date)
 }
 
 function mapDocumentType(type: ManagerClientDocumentList['document_type']): string {
@@ -108,14 +111,15 @@ interface UserActionsProps {
 }
 
 function UserActions({ user, currentUserId, documentsOnly, onView, onToggleStatus, isUpdating }: UserActionsProps) {
+  const { t } = useTranslation()
   if (documentsOnly) {
-    return <Button variant="secondary" size="sm" onClick={() => onView(user, 'documents')}>Voir documents</Button>
+    return <Button variant="secondary" size="sm" onClick={() => onView(user, 'documents')}>{t("professional.voir_documents")}</Button>
   }
   const canManage = canManageUser(user, currentUserId)
   return (
     <div className="flex flex-wrap gap-2">
-      <Button variant="secondary" size="sm" onClick={() => onView(user, 'info')}>Voir informations</Button>
-      <Button variant="secondary" size="sm" onClick={() => onView(user, 'documents')}>Voir documents</Button>
+      <Button variant="secondary" size="sm" onClick={() => onView(user, 'info')}>{t("professional.voir_informations")}</Button>
+      <Button variant="secondary" size="sm" onClick={() => onView(user, 'documents')}>{t("professional.voir_documents")}</Button>
       {canManage ? (
         <Button
           variant={user.is_active ? 'danger' : 'success'}
@@ -123,11 +127,11 @@ function UserActions({ user, currentUserId, documentsOnly, onView, onToggleStatu
           disabled={isUpdating}
           onClick={() => onToggleStatus(user)}
         >
-          {isUpdating ? 'Traitement...' : user.is_active ? 'Désactiver' : 'Réactiver'}
+          {isUpdating ? t("client.traitement") : user.is_active ? t("professional.desactiver") : t("professional.reactiver")}
         </Button>
       ) : (
         <span className="self-center text-xs text-slate-500">
-          {user.id === currentUserId ? 'Compte actuel' : 'Gestion non autorisée'}
+          {user.id === currentUserId ? t("professional.compte_actuel") : t("professional.gestion_non_autorisee")}
         </span>
       )}
     </div>
@@ -162,8 +166,9 @@ function UserDocuments({ documents, onPreview, isPreviewing }: {
   onPreview: (document: ManagerClientDocumentList) => void
   isPreviewing: number | null
 }) {
+  const { t } = useTranslation()
   if (documents.length === 0) {
-    return <EmptyState title="Aucun document" description="Aucun document n’est associé à ce compte." />
+    return <EmptyState title={t("professional.aucun_document")} description={t("professional.aucun_document_n_est_associe_a_ce_compte")} />
   }
 
   return (
@@ -174,8 +179,8 @@ function UserDocuments({ documents, onPreview, isPreviewing }: {
           <div key={document.id} className="flex flex-col gap-3 rounded-2xl border border-[#E5E7EB] p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 space-y-1">
               <p className="font-medium text-[#1F2937]">{mapDocumentType(document.document_type)}</p>
-              <p className="text-sm text-slate-600">Statut : <StatusBadge variant={status.variant} label={status.label} /></p>
-              <p className="text-sm text-slate-500">Expiration : {formatDate(document.expiration_date)}</p>
+              <p className="text-sm text-slate-600">{t("professional.statut")} <StatusBadge variant={status.variant} label={professionalDisplay(t, status.label)} /></p>
+              <p className="text-sm text-slate-500">{t("professional.expiration_2")} {formatDate(document.expiration_date)}</p>
             </div>
             <Button
               variant="secondary"
@@ -183,7 +188,7 @@ function UserDocuments({ documents, onPreview, isPreviewing }: {
               disabled={isPreviewing !== null}
               onClick={() => onPreview(document)}
             >
-              {isPreviewing === document.id ? 'Ouverture...' : 'Consulter'}
+              {isPreviewing === document.id ? t("professional.ouverture") : t("client.consulter")}
             </Button>
           </div>
         )
@@ -193,6 +198,7 @@ function UserDocuments({ documents, onPreview, isPreviewing }: {
 }
 
 export default function ManagerUsersPage() {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { user: currentUser } = useAuth()
   const [page, setPage] = useState(1)
@@ -310,28 +316,28 @@ export default function ManagerUsersPage() {
   return (
     <section className="mx-auto max-w-7xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
       <div>
-        <h1 className="text-3xl font-semibold text-[#0F172A]">Utilisateurs</h1>
+        <h1 className="text-3xl font-semibold text-[#0F172A]">{t("navigation.users")}</h1>
       </div>
 
-      {operationError ? <Alert variant="danger" title="Action impossible" message={operationError} /> : null}
+      {operationError ? <Alert variant="danger" title={t("client.action_impossible")} message={professionalDisplay(t, operationError)} /> : null}
       {usersQuery.isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center">
-          <LoadingSpinner size="lg" aria-label="Chargement des utilisateurs" />
+          <LoadingSpinner size="lg" aria-label={t("professional.chargement_des_utilisateurs")} />
         </div>
       ) : null}
       {usersQuery.isError ? (
         <div className="space-y-3">
-          <Alert variant="danger" title="Chargement impossible" message="La liste des utilisateurs n’a pas pu être récupérée." />
-          <Button variant="secondary" size="sm" onClick={() => void usersQuery.refetch()}>Réessayer</Button>
+          <Alert variant="danger" title={t("client.chargement_impossible")} message={t("professional.la_liste_des_utilisateurs_n_a_pas_pu_etre_recuperee")} />
+          <Button variant="secondary" size="sm" onClick={() => void usersQuery.refetch()}>{t("client.reessayer_alt")}</Button>
         </div>
       ) : null}
       {!usersQuery.isLoading && !usersQuery.isError ? (
         <>
           <p className="text-sm text-slate-600">
-            {usersQuery.data?.count ?? 0} utilisateur{(usersQuery.data?.count ?? 0) > 1 ? 's' : ''}
+            {usersQuery.data?.count ?? 0} {t("navigation.user")}{(usersQuery.data?.count ?? 0) > 1 ? 's' : ''}
           </p>
           {users.length === 0 ? (
-            <EmptyState title="Aucun utilisateur" description="Aucun compte utilisateur n’est actuellement enregistré." />
+            <EmptyState title={t("professional.aucun_utilisateur")} description={t("professional.aucun_compte_utilisateur_n_est_actuellement_enregistre")} />
           ) : (
             <>
               <div className="space-y-3 min-[1152px]:hidden">
@@ -343,11 +349,11 @@ export default function ManagerUsersPage() {
                           <p className="break-words font-semibold text-[#0F172A]">{fullName(item)}</p>
                           <p className="break-all text-sm text-slate-500">{item.email}</p>
                         </div>
-                        <StatusBadge variant={item.is_active ? 'success' : 'danger'} label={item.is_active ? 'Actif' : 'Désactivé'} />
+                        <StatusBadge variant={item.is_active ? 'success' : 'danger'} label={item.is_active ? t("professional.actif") : t("professional.desactive")} />
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                         <StatusBadge variant={roleVariant(item.role)} label={roleLabel(item.role)} />
-                        <span className="text-slate-500">Inscrit le {formatDate(item.date_joined)}</span>
+                        <span className="text-slate-500">{t("professional.inscrit_le")} {formatDate(item.date_joined)}</span>
                       </div>
                       <UserActions
                         user={item}
@@ -366,12 +372,12 @@ export default function ManagerUsersPage() {
                 <table className="w-full min-w-[1050px] border-collapse text-left">
                   <thead className="border-b border-[#E5E7EB] bg-[#F8FAFC]">
                     <tr>
-                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Nom et prénom</th>
-                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">E-mail</th>
-                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Rôle</th>
-                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Statut</th>
-                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Date d’inscription</th>
-                      <th className="w-[28rem] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.nom_et_prenom")}</th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.e_mail")}</th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.role")}</th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("client.statut")}</th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.date_d_inscription")}</th>
+                      <th className="w-[28rem] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t("professional.actions")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -380,7 +386,7 @@ export default function ManagerUsersPage() {
                         <td className="max-w-48 break-words px-4 py-3 text-sm font-medium text-[#1F2937]">{fullName(item)}</td>
                         <td className="max-w-56 break-all px-4 py-3 text-sm text-[#1F2937]">{item.email}</td>
                         <td className="px-4 py-3"><StatusBadge variant={roleVariant(item.role)} label={roleLabel(item.role)} /></td>
-                        <td className="px-4 py-3"><StatusBadge variant={item.is_active ? 'success' : 'danger'} label={item.is_active ? 'Actif' : 'Désactivé'} /></td>
+                        <td className="px-4 py-3"><StatusBadge variant={item.is_active ? 'success' : 'danger'} label={item.is_active ? t("professional.actif") : t("professional.desactive")} /></td>
                         <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">{formatDate(item.date_joined)}</td>
                         <td className="px-4 py-3">
                           <UserActions
@@ -399,10 +405,10 @@ export default function ManagerUsersPage() {
               </div>
               {totalPages > 1 ? (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3">
-                  <span className="text-sm text-slate-600">Page {page} / {totalPages}</span>
+                  <span className="text-sm text-slate-600">{t("client.page")} {page} / {totalPages}</span>
                   <div className="flex gap-2">
-                    <Button variant="secondary" size="sm" disabled={!usersQuery.data?.previous || page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Précédent</Button>
-                    <Button variant="secondary" size="sm" disabled={!usersQuery.data?.next || page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Suivant</Button>
+                    <Button variant="secondary" size="sm" disabled={!usersQuery.data?.previous || page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>{t("client.precedent_alt")}</Button>
+                    <Button variant="secondary" size="sm" disabled={!usersQuery.data?.next || page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>{t("client.suivant")}</Button>
                   </div>
                 </div>
               ) : null}
@@ -425,24 +431,24 @@ export default function ManagerUsersPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 id="manager-user-panel-title" className="text-xl font-semibold text-[#0F172A]">
-                  {activePanel === 'info' ? 'Informations utilisateur' : 'Documents utilisateur'}
+                  {activePanel === 'info' ? t("professional.informations_utilisateur") : t("professional.documents_utilisateur")}
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">{fullName(selectedUser)}</p>
               </div>
-              <Button variant="secondary" size="sm" onClick={closePanel}>Fermer</Button>
+              <Button variant="secondary" size="sm" onClick={closePanel}>{t("client.fermer")}</Button>
             </div>
           }>
             {activePanel === 'info' ? (
-              selectedUserQuery.isLoading ? <LoadingSpinner aria-label="Chargement des informations" /> : null
-            ) : documentsQuery.isLoading ? <LoadingSpinner aria-label="Chargement des documents" /> : null}
+              selectedUserQuery.isLoading ? <LoadingSpinner aria-label={t("professional.chargement_des_informations")} /> : null
+            ) : documentsQuery.isLoading ? <LoadingSpinner aria-label={t("client.chargement_des_documents")} /> : null}
             {activePanel === 'info' && selectedUserQuery.isError ? (
-              <Alert variant="danger" title="Informations indisponibles" message={errorMessage(selectedUserQuery.error)} />
+              <Alert variant="danger" title={t("professional.informations_indisponibles")} message={errorMessage(selectedUserQuery.error)} />
             ) : null}
             {activePanel === 'documents' && documentsQuery.isError ? (
-              <Alert variant="danger" title="Documents indisponibles" message={errorMessage(documentsQuery.error)} />
+              <Alert variant="danger" title={t("professional.documents_indisponibles")} message={errorMessage(documentsQuery.error)} />
             ) : null}
             {activePanel === 'documents' && previewError ? (
-              <Alert variant="danger" title="Consultation impossible" message={previewError} />
+              <Alert variant="danger" title={t("professional.consultation_impossible")} message={professionalDisplay(t, previewError)} />
             ) : null}
             {activePanel === 'info' && selectedUserQuery.data ? <UserInfo user={selectedUserQuery.data} /> : null}
             {activePanel === 'documents' && documentsQuery.data ? (
@@ -453,7 +459,7 @@ export default function ManagerUsersPage() {
                 <div className="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-2xl bg-white p-4 shadow-xl">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <h3 className="font-semibold text-[#0F172A]">{preview.label}</h3>
-                    <Button variant="secondary" size="sm" onClick={() => setPreview(null)}>Fermer l’aperçu</Button>
+                    <Button variant="secondary" size="sm" onClick={() => setPreview(null)}>{t("professional.fermer_l_apercu")}</Button>
                   </div>
                   {preview.kind === 'image' ? (
                     <img src={preview.url} alt={preview.label} className="max-h-[78vh] w-full object-contain" />

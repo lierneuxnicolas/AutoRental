@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import type { LucideIcon } from 'lucide-react'
 import { ArrowLeft } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -19,6 +20,7 @@ export default function FeaturePlaceholderPage({
   backLink,
   backLabel,
 }: FeaturePlaceholderPageProps) {
+  const { t } = useTranslation()
   return (
     <section className="space-y-6">
       <header className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
@@ -34,7 +36,7 @@ export default function FeaturePlaceholderPage({
             </div>
             <div>
               <h2 className="text-lg font-semibold text-[#0F172A]">{title}</h2>
-              <p className="mt-2 text-sm text-slate-600">Cette fonctionnalité sera disponible prochainement.</p>
+              <p className="mt-2 text-sm text-slate-600">{t("professional.cette_fonctionnalite_sera_disponible_prochainement")}</p>
             </div>
           </div>
 

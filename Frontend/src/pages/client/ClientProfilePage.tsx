@@ -1,3 +1,5 @@
+import { clientDisplay } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import axios from 'axios'
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
@@ -173,6 +175,7 @@ function extractApiErrorMessage(error: unknown): string {
 }
 
 export default function ClientProfilePage() {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [formError, setFormError] = useState<string | null>(null)
@@ -311,9 +314,9 @@ export default function ClientProfilePage() {
   const progressCircleStyle = { '--progress': completion } as CSSProperties
   const profileStatus = progressQuery.data?.profile_status
   const profileStatusLabel = profileStatus === 'VALIDE'
-    ? 'Profil complet'
+    ? t('client.profil_complet')
     : profileStatus === 'EN_ATTENTE' || profileStatus === 'EN_ATTENTE_VALIDATION'
-      ? 'En attente de validation'
+      ? t('client.en_attente_de_validation')
       : 'Profil incomplet'
   const profileStatusClass = profileStatus === 'VALIDE'
     ? 'border-[#BBF7D0] bg-[#DCFCE7] text-[#166534]'
@@ -348,7 +351,7 @@ export default function ClientProfilePage() {
   if (isLoading) {
     return (
       <section className="mx-auto flex min-h-[60vh] max-w-6xl items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
-        <LoadingSpinner size="lg" aria-label="Chargement du profil" />
+        <LoadingSpinner size="lg" aria-label={t('client.chargement_du_profil')} />
       </section>
     )
   }
@@ -356,11 +359,11 @@ export default function ClientProfilePage() {
   return (
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       {profileQuery.error || progressQuery.error ? (
-        <Alert variant="danger" title="Chargement impossible" message="Les informations de profil n’ont pas pu être récupérées. Veuillez réessayer." />
+        <Alert variant="danger" title={t('client.chargement_impossible')} message={t('client.les_informations_de_profil_nont_pas_pu_etre_recuperees_veuillez_reessayer')} />
       ) : null}
 
       <div className="mb-4 mt-2 border-b border-[#E5E7EB]">
-        <div className="flex w-full flex-nowrap gap-3 overflow-x-auto pb-2" role="tablist" aria-label="Sections du profil client">
+        <div className="flex w-full flex-nowrap gap-3 overflow-x-auto pb-2" role="tablist" aria-label={t('client.sections_du_profil_client')}>
           <button
             type="button"
             role="tab"
@@ -372,7 +375,7 @@ export default function ClientProfilePage() {
               activeTab === 'personal' ? 'bg-[#2563EB] text-white shadow-sm' : 'bg-[#F3F4F6] text-[#374151] hover:bg-[#E5E7EB]'
             }`}
           >
-            Informations personnelles
+            {t('client.informations_personnelles')}
           </button>
           <button
             type="button"
@@ -385,7 +388,7 @@ export default function ClientProfilePage() {
               activeTab === 'documents' ? 'bg-[#2563EB] text-white shadow-sm' : 'bg-[#F3F4F6] text-[#374151] hover:bg-[#E5E7EB]'
             }`}
           >
-            Documents
+            {t('client.documents')}
           </button>
         </div>
       </div>
@@ -395,66 +398,66 @@ export default function ClientProfilePage() {
           <Card
             className="flex h-full flex-col"
             contentClassName="flex flex-1 flex-col"
-            header={<h2 className="text-xl font-semibold text-[#1F2937]">Informations personnelles</h2>}
+            header={<h2 className="text-xl font-semibold text-[#1F2937]">{t('client.informations_personnelles')}</h2>}
           >
             <form id="personal-information-form" className="flex flex-1 flex-col gap-6" onSubmit={handleSubmit(onSubmit)} noValidate>
-              {formError ? <Alert variant="danger" title="Sauvegarde impossible" message={formError} /> : null}
-              {successMessage ? <p role="status" className="text-sm font-medium text-green-700">{successMessage}</p> : null}
+              {formError ? <Alert variant="danger" title={t('client.sauvegarde_impossible')} message={clientDisplay(t, formError)} /> : null}
+              {successMessage ? <p role="status" className="text-sm font-medium text-green-700">{clientDisplay(t, successMessage)}</p> : null}
 
               <Input
-                label="Adresse e-mail"
+                label={t('client.adresse_e_mail')}
                 value={profileQuery.data?.email ?? ''}
                 readOnly
-                helperText="La modification de l’adresse e-mail sécurisée sera disponible ultérieurement."
+                helperText={t('client.la_modification_de_ladresse_e_mail_securisee_sera_disponible_ulterieurement')}
               />
               <div className="grid gap-5 md:grid-cols-2">
                 <Input
-                  label="Prénom"
+                  label={t('client.prenom')}
                   readOnly={profileQuery.data?.identity_locked}
-                  error={errors.first_name?.message}
+                  error={(errors.first_name?.message) ? clientDisplay(t, errors.first_name?.message ?? '') : undefined}
                   {...register('first_name', { validate: (value) => validatePersonName(value, 'prénom') })}
                 />
                 <Input
-                  label="Nom"
+                  label={t('client.nom')}
                   readOnly={profileQuery.data?.identity_locked}
-                  error={errors.last_name?.message}
+                  error={(errors.last_name?.message) ? clientDisplay(t, errors.last_name?.message ?? '') : undefined}
                   {...register('last_name', { validate: (value) => validatePersonName(value, 'nom') })}
                 />
                 <Input
-                  label="Téléphone"
+                  label={t('client.telephone')}
                   type="tel"
                   inputMode="numeric"
                   maxLength={10}
-                  error={errors.phone?.message}
+                  error={(errors.phone?.message) ? clientDisplay(t, errors.phone?.message ?? '') : undefined}
                   {...register('phone', { validate: validatePhoneNumber })}
                 />
                 <div>
                   <Input
-                    label="Date de naissance"
+                    label={t('client.date_de_naissance')}
                     type="date"
                     readOnly={profileQuery.data?.identity_locked}
                     min={dateInputValue(subtractYears(new Date(), MAXIMUM_AGE))}
                     max={dateInputValue(new Date())}
-                    error={errors.date_of_birth?.message}
+                    error={(errors.date_of_birth?.message) ? clientDisplay(t, errors.date_of_birth?.message ?? '') : undefined}
                     {...register('date_of_birth', {
                       validate: (value) => profileQuery.data?.identity_locked || validateDateOfBirth(value),
                     })}
                   />
                   <p className={`mt-1 text-sm ${isUnderMinimumAge ? 'text-red-600' : 'text-slate-500'}`}>
-                    Vous devez avoir au moins 21 ans pour louer un véhicule.
+                    {t('client.vous_devez_avoir_au_moins_21_ans_pour_louer_un_vehicule')}
                   </p>
                 </div>
               </div>
-              <Input label="Adresse du domicile" error={errors.address?.message} {...register('address')} />
+              <Input label={t('client.adresse_du_domicile')} error={(errors.address?.message) ? clientDisplay(t, errors.address?.message ?? '') : undefined} {...register('address')} />
 
               <Button type="submit" variant="violet" size="sm" className="mt-auto w-11/12 self-center bg-[#6038FF]! hover:bg-[#6038FF]! focus-visible:ring-[#6038FF]!" disabled={isSubmitting || updateProfileMutation.isPending}>
                 {isSubmitting || updateProfileMutation.isPending ? (
                   <span className="flex items-center justify-center gap-2">
-                    <LoadingSpinner size="sm" aria-label="Sauvegarde du profil" />
-                    Sauvegarde en cours...
+                    <LoadingSpinner size="sm" aria-label={t('client.sauvegarde_du_profil')} />
+                    {t('client.sauvegarde_en_cours')}
                   </span>
                 ) : (
-                  'Enregistrer les modifications'
+                  t('client.enregistrer_les_modifications')
                 )}
               </Button>
             </form>
@@ -465,9 +468,9 @@ export default function ClientProfilePage() {
             contentClassName="px-4! py-4! sm:px-5!"
             header={
               <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                <h2 className="text-xl font-semibold text-[#1F2937]">Mon profil</h2>
+                <h2 className="text-xl font-semibold text-[#1F2937]">{t('client.mon_profil')}</h2>
                 <span className={`rounded-full border px-4 py-2 text-center text-sm font-semibold ${profileStatusClass}`}>
-                  {profileStatusLabel}
+                  {clientDisplay(t, profileStatusLabel)}
                 </span>
               </div>
             }
@@ -477,12 +480,12 @@ export default function ClientProfilePage() {
                 <div className="relative flex aspect-square w-full max-w-52 items-center justify-center rounded-full bg-[conic-gradient(#4F46E5_0deg,#4F46E5_calc(var(--progress)*3.6deg),#E2E8F0_calc(var(--progress)*3.6deg),#E2E8F0_360deg)] p-3 sm:p-4" style={progressCircleStyle}>
                   <div className="flex h-full w-full flex-col items-center justify-center rounded-full bg-white text-center">
                     <span className="text-[2rem] leading-none font-semibold text-[#0F172A] sm:text-[2.5rem]">{completion}%</span>
-                    <span className="mt-1.5 text-[0.8125rem] font-semibold uppercase tracking-wide text-slate-500 sm:text-sm">Complet</span>
+                    <span className="mt-1.5 text-[0.8125rem] font-semibold uppercase tracking-wide text-slate-500 sm:text-sm">{t('client.complet')}</span>
                   </div>
                 </div>
               </div>
 
-              <ul className="flex flex-col gap-2" aria-label="Critères de complétude du profil">
+              <ul className="flex flex-col gap-2" aria-label={t('client.criteres_de_completude_du_profil')}>
                 {progressItems.map((item) => (
                   <li key={item.key} className="flex items-center gap-2 text-sm font-medium text-[#1F2937] min-[375px]:text-[0.9375rem] sm:text-base">
                     <span
@@ -491,14 +494,14 @@ export default function ClientProfilePage() {
                     >
                       ✓
                     </span>
-                    <span>{item.label}</span>
+                    <span>{clientDisplay(t, item.label)}</span>
                   </li>
                 ))}
               </ul>
 
               {progressQuery.data?.needs_client_action ? (
                 <Button type="button" className="col-span-2 w-full" onClick={completeRequiredInformation}>
-                  Compléter mon profil
+                  {t('client.completer_mon_profil')}
                 </Button>
               ) : null}
             </div>

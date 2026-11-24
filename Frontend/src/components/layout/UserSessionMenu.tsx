@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
@@ -22,48 +23,49 @@ interface UserSessionMenuProps {
 
 const roleConfigs: Record<string, RoleConfig> = {
   CLIENT: {
-    sessionLabel: 'client',
+    sessionLabel: 'navigation.client',
     menuItems: [
-      { label: 'Mon espace', to: '/client' },
-      { label: 'Mes réservations', to: '/client/reservations' },
-      { label: 'Mon profil', to: '/client/profile' },
+      { label: 'navigation.space', to: '/client' },
+      { label: 'navigation.reservations', to: '/client/reservations' },
+      { label: 'navigation.profile', to: '/client/profile' },
     ],
   },
   GESTIONNAIRE_COMPTABLE: {
-    sessionLabel: 'gestionnaire',
+    sessionLabel: 'navigation.manager',
     menuItems: [
-      { label: 'Tableau de bord', to: '/manager' },
-      { label: 'Documents à valider', to: '/manager/documents' },
-      { label: 'Gestion des véhicules', to: '/manager/vehicles' },
-      { label: 'Gestion des réservations', to: '/manager/reservations' },
-      { label: 'Liste des interventions', to: '/manager/interventions' },
-      { label: 'Utilisateurs', to: '/manager/users' },
+      { label: 'navigation.dashboard', to: '/manager' },
+      { label: 'navigation.documents', to: '/manager/documents' },
+      { label: 'navigation.vehicles', to: '/manager/vehicles' },
+      { label: 'navigation.manageReservations', to: '/manager/reservations' },
+      { label: 'navigation.interventionList', to: '/manager/interventions' },
+      { label: 'navigation.users', to: '/manager/users' },
     ],
   },
   ADMINISTRATEUR: {
-    sessionLabel: 'administrateur',
+    sessionLabel: 'navigation.admin',
     menuItems: [
-      { label: 'Tableau de bord', to: '/admin' },
-      { label: 'Utilisateurs', to: '/admin/users' },
-      { label: 'Journaux système', to: '/admin/system-logs' },
-      { label: 'Sauvegardes', to: '/admin/backups' },
+      { label: 'navigation.dashboard', to: '/admin' },
+      { label: 'navigation.users', to: '/admin/users' },
+      { label: 'navigation.logs', to: '/admin/system-logs' },
+      { label: 'navigation.backups', to: '/admin/backups' },
     ],
   },
   MECANICIEN: {
-    sessionLabel: 'mécanicien',
+    sessionLabel: 'navigation.mechanic',
     menuItems: [
-      { label: 'Interventions', to: '/mechanic/interventions' },
+      { label: 'navigation.interventions', to: '/mechanic/interventions' },
     ],
   },
   NETTOYEUR: {
-    sessionLabel: 'nettoyage',
+    sessionLabel: 'navigation.cleaning',
     menuItems: [
-      { label: 'Mes interventions', to: '/cleaning/interventions' },
+      { label: 'navigation.myInterventions', to: '/cleaning/interventions' },
     ],
   },
 }
 
 export default function UserSessionMenu({ isMobile = false, onAction }: UserSessionMenuProps) {
+  const { t } = useTranslation()
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -92,14 +94,14 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
       return trimmed
     }
 
-    return user?.email ?? 'Utilisateur'
-  }, [user?.email, user?.first_name])
+    return user?.email ?? t('navigation.user')
+  }, [t, user?.email, user?.first_name])
 
   const clientMenuItems: MenuItem[] = useMemo(
     () => [
-      { label: 'Tableau de bord', to: '/client' },
-      { label: 'Mes réservations', to: '/client/reservations' },
-      { label: 'Mon profil', to: '/client/profile' },
+      { label: 'navigation.dashboard', to: '/client' },
+      { label: 'navigation.reservations', to: '/client/reservations' },
+      { label: 'navigation.profile', to: '/client/profile' },
     ],
     [],
   )
@@ -171,7 +173,7 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
             onAction?.()
           }}
           className="relative inline-flex items-center justify-center rounded-2xl border border-slate-200 p-2 text-[#1F2937] transition hover:border-[#2563EB] hover:text-[#2563EB]"
-          aria-label={`Voir les notifications (${unreadCount} non lues)`}
+          aria-label={t('navigation.notifications', { count: unreadCount })}
         >
           <Bell className="h-4 w-4" />
           {unreadCount > 0 ? (
@@ -189,23 +191,23 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
         aria-expanded={open}
         aria-haspopup="menu"
       >
-        <span>{`👤 Session ${roleConfig.sessionLabel} : ${firstName}`}</span>
+        <span>{t('navigation.session', { role: t(roleConfig.sessionLabel), name: firstName })}</span>
         <ChevronDown className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open ? (
-        <div className={menuClassName} role="menu" aria-label="Menu de session utilisateur">
+        <div className={menuClassName} role="menu" aria-label={t("navigation.sessionMenu")}>
           {isClient ? (
             <div className="flex flex-col">
               {clientMenuItems.map((item) => (
                 <Link
-                  key={item.label}
+                  key={t(item.label)}
                   to={item.to}
                   role="menuitem"
                   onClick={closeMenu}
                   className="rounded-xl px-3 py-2 text-sm text-[#1F2937] transition hover:bg-slate-100"
                 >
-                  {item.label}
+                  {t(item.label)}
                 </Link>
               ))}
 
@@ -218,20 +220,20 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
                 disabled={isLoggingOut}
                 className="rounded-xl px-3 py-2 text-left text-sm font-medium text-[#DC2626] transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {isLoggingOut ? 'Déconnexion...' : 'Déconnexion'}
+                {t(isLoggingOut ? 'auth.loggingOut' : 'auth.logout')}
               </button>
             </div>
           ) : (
             <div className="flex flex-col">
               {roleConfig.menuItems.map((item) => (
                 <Link
-                  key={item.label}
+                  key={t(item.label)}
                   to={item.to}
                   role="menuitem"
                   onClick={closeMenu}
                   className="rounded-xl px-3 py-2 text-sm text-[#1F2937] transition hover:bg-slate-100"
                 >
-                  {item.label}
+                  {t(item.label)}
                 </Link>
               ))}
 
@@ -242,7 +244,7 @@ export default function UserSessionMenu({ isMobile = false, onAction }: UserSess
                 disabled={isLoggingOut}
                 className="rounded-xl px-3 py-2 text-left text-sm font-medium text-[#DC2626] transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {isLoggingOut ? 'Déconnexion...' : 'Déconnexion'}
+                {t(isLoggingOut ? 'auth.loggingOut' : 'auth.logout')}
               </button>
             </div>
           )}

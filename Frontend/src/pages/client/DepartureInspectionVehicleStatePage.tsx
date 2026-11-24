@@ -1,3 +1,5 @@
+import { clientDisplay } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AxiosError } from 'axios'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -110,6 +112,7 @@ function isCriticalIssue(inspection: { has_critical_issue?: boolean } | null | u
 }
 
 export default function DepartureInspectionVehicleStatePage() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const reservationId = Number(id)
@@ -335,14 +338,14 @@ export default function DepartureInspectionVehicleStatePage() {
   if (!isReservationIdValid) {
     return (
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <Alert variant="danger" title="Reservation invalide" message="L'identifiant de reservation est invalide." />
+        <Alert variant="danger" title={t('client.reservation_invalide')} message={t('client.l_identifiant_de_reservation_est_invalide')} />
       </section>
     )
   }
 
   const anomalyPhotoFields = (
     <div className="space-y-2">
-      <p className="text-sm font-medium text-[#1F2937]">Photos de l'anomalie (optionnel)</p>
+      <p className="text-sm font-medium text-[#1F2937]">{t('client.photos_de_l_anomalie_optionnel')}</p>
       <div className="grid gap-3 sm:grid-cols-2">
         {ANOMALY_PHOTO_SLOTS.map((slot) => {
           const slotState = anomalyPhotoState[slot.key]
@@ -367,14 +370,14 @@ export default function DepartureInspectionVehicleStatePage() {
                     <img src={slotState.previewUrl} alt={slot.label} className="h-44 w-full object-cover" />
                   </div>
                 ) : (
-                  <div className="flex h-44 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-sm text-slate-500">Emplacement vide</div>
+                  <div className="flex h-44 items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-sm text-slate-500">{t('client.emplacement_vide')}</div>
                 )}
-                {slotState.errorMessage ? <Alert variant="danger" message={slotState.errorMessage} /> : null}
+                {slotState.errorMessage ? <Alert variant="danger" message={clientDisplay(t, slotState.errorMessage)} /> : null}
                 <div className="flex flex-col gap-2">
                   <Button className="w-full" disabled={slotState.isUploading} onClick={() => anomalyPhotoInputRefs.current[slot.key]?.click()}>
-                    {slotState.isUploading ? 'Envoi en cours...' : slotState.photoId ? 'Remplacer la photo' : 'Ajouter une photo'}
+                    {slotState.isUploading ? t('client.envoi_en_cours_alt') : slotState.photoId ? t('client.remplacer_la_photo') : t('client.ajouter_une_photo')}
                   </Button>
-                  {slotState.photoId ? <Button variant="secondary" className="w-full" onClick={() => removeAnomalyPhoto(slot.key)}>Supprimer la photo</Button> : null}
+                  {slotState.photoId ? <Button variant="secondary" className="w-full" onClick={() => removeAnomalyPhoto(slot.key)}>{t('client.supprimer_la_photo')}</Button> : null}
                 </div>
               </div>
             </Card>
@@ -390,18 +393,18 @@ export default function DepartureInspectionVehicleStatePage() {
         <ReservationProgressBanner className="mb-6 sm:mb-8" steps={progressSteps} />
       </div>
 
-      {globalError ? <Alert className="mb-4" variant="danger" title="Action impossible" message={globalError} /> : null}
+      {globalError ? <Alert className="mb-4" variant="danger" title={t('client.action_impossible')} message={clientDisplay(t, globalError)} /> : null}
 
       {!inspection ? (
         <Card>
           <Alert
             variant="warning"
-            title="Inspection de depart introuvable"
-            message="Commencez d'abord l'etape Exterieur puis Interieur pour conserver la meme inspection en cours."
+            title={t('client.inspection_de_depart_introuvable')}
+            message={t('client.commencez_d_abord_l_etape_exterieur_puis_interieur_pour_conserver_la')}
           />
           <div className="mt-4">
             <Link to={`/client/reservations/${reservationId}/departure-inspection`}>
-              <Button>Aller a l'etape Exterieur</Button>
+              <Button>{t('client.aller_a_l_etape_exterieur')}</Button>
             </Link>
           </div>
         </Card>
@@ -444,17 +447,17 @@ export default function DepartureInspectionVehicleStatePage() {
               <div className="space-y-4">
                 <Alert
                   variant="danger"
-                  title="Depart bloque"
-                  message="L'anomalie signalée empêche l'utilisation du véhicule."
+                  title={t('client.depart_bloque')}
+                  message={t('client.l_anomalie_signalee_empeche_l_utilisation_du_vehicule')}
                 />
 
-                {cancelError ? <Alert variant="danger" title="Annulation impossible" message={cancelError} /> : null}
+                {cancelError ? <Alert variant="danger" title={t('client.annulation_impossible')} message={clientDisplay(t, cancelError)} /> : null}
 
                 {showCancelConfirmation ? (
                   <Card>
                     <div className="space-y-4">
                       <p className="text-sm font-medium text-[#1F2937]">
-                        Voulez-vous annuler cette réservation et effectuer une nouvelle réservation ?
+                        {t('client.voulez_vous_annuler_cette_reservation_et_effectuer_une_nouvelle_reservation')}
                       </p>
                       <div className="flex flex-wrap gap-3">
                         <Button
@@ -467,8 +470,8 @@ export default function DepartureInspectionVehicleStatePage() {
                         >
                           {cancelForCriticalAnomalyMutation.isPending ? (
                             <span className="flex items-center gap-2">
-                              <LoadingSpinner size="sm" aria-label="Annulation en cours" />
-                              Annulation...
+                              <LoadingSpinner size="sm" aria-label={t('client.annulation_en_cours_alt')} />
+                              {t('client.annulation')}
                             </span>
                           ) : (
                             'Annuler la réservation'
@@ -482,7 +485,7 @@ export default function DepartureInspectionVehicleStatePage() {
                             setCancelError(null)
                           }}
                         >
-                          Retour
+                          {t('public.retour')}
                         </Button>
                       </div>
                     </div>
@@ -490,7 +493,7 @@ export default function DepartureInspectionVehicleStatePage() {
                 ) : (
                   <div className="flex justify-center">
                     <Button variant="danger" onClick={() => setShowCancelConfirmation(true)}>
-                      Annuler la réservation
+                      {t('client.annuler_la_reservation')}
                     </Button>
                   </div>
                 )}
@@ -527,8 +530,8 @@ export default function DepartureInspectionVehicleStatePage() {
               >
                 {saveStateMutation.isPending ? (
                   <span className="flex items-center gap-2">
-                    <LoadingSpinner size="sm" aria-label="Enregistrement en cours" />
-                    Enregistrement...
+                    <LoadingSpinner size="sm" aria-label={t('client.enregistrement_en_cours')} />
+                    {t('client.enregistrement')}
                   </span>
                 ) : (
                   'Enregistrer l\'etat du vehicule'
@@ -542,12 +545,12 @@ export default function DepartureInspectionVehicleStatePage() {
 
       {reservationQuery.isLoading ? (
         <div className="mt-4">
-          <LoadingSpinner aria-label="Chargement reservation" />
+          <LoadingSpinner aria-label={t('client.chargement_reservation')} />
         </div>
       ) : null}
 
       {reservation ? null : reservationQuery.isError ? (
-        <Alert className="mt-4" variant="danger" title="Chargement impossible" message="Impossible de charger la reservation." />
+        <Alert className="mt-4" variant="danger" title={t('client.chargement_impossible')} message={t('client.impossible_de_charger_la_reservation')} />
       ) : null}
     </section>
   )

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useNavigate, Link, useLocation } from 'react-router-dom'
@@ -13,11 +14,12 @@ import type { LoginCredentials } from '../../types/auth'
 import { clearReservationResume, getReservationResume } from '../../utils/reservationResume'
 
 const loginSchema = z.object({
-  email: z.string().trim().email('Une adresse e-mail valide est requise.'),
-  password: z.string().min(1, 'Le mot de passe est obligatoire.'),
+  email: z.string().trim().email('validation.email'),
+  password: z.string().min(1, 'validation.password'),
 })
 
 export default function LoginPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
   const erasureSessionExpired = new URLSearchParams(location.search).get('session') === 'erasure-expired'
@@ -58,20 +60,20 @@ export default function LoginPage() {
         const normalizedMessage = String(serverMessage).toLowerCase()
 
         if (status === 401 || normalizedMessage.includes('invalid') || normalizedMessage.includes('identifiant')) {
-          setServerError('Identifiants invalides.')
+          setServerError('auth.invalidCredentials')
           return
         }
 
         if (error.code === 'ERR_NETWORK') {
-          setServerError('Impossible de joindre le serveur. Vérifiez votre connexion.')
+          setServerError('auth.networkError')
           return
         }
 
-        setServerError('Une erreur est survenue. Veuillez réessayer.')
+        setServerError('auth.retryError')
         return
       }
 
-      setServerError('Une erreur inattendue s’est produite.')
+      setServerError('auth.unexpectedError')
     }
   }
 
@@ -79,53 +81,53 @@ export default function LoginPage() {
     <div className="flex min-h-[70vh] items-center justify-center px-4 py-12">
       <div className="w-full max-w-xl rounded-4xl border border-slate-200 bg-white p-6 shadow-[0_20px_60px_-20px_rgba(37,99,235,0.35)] sm:p-10">
             <div className="mb-8">
-              <h1 className="text-center text-2xl font-semibold text-[#0F172A]">Accédez à votre espace</h1>
+              <h1 className="text-center text-2xl font-semibold text-[#0F172A]">{t('auth.loginTitle')}</h1>
             </div>
 
             {erasureSessionExpired && !serverError ? (
-              <Alert variant="warning" title="Session expirée" message="Reconnectez-vous pour réessayer la suppression de votre compte." className="mb-6" />
+              <Alert variant="warning" title={t("auth.expired")} message={t("auth.erasureLogin")} className="mb-6" />
             ) : null}
             {serverError ? (
-              <Alert variant="danger" title="Connexion impossible" message={serverError} className="mb-6" />
+              <Alert variant="danger" title={t("auth.loginError")} message={t(serverError)} className="mb-6" />
             ) : null}
 
             <form className="space-y-5" onSubmit={handleSubmit(onSubmit)} noValidate>
               <Input
-                label="Adresse e-mail"
+                label={t("auth.email")}
                 type="email"
                 autoComplete="email"
-                placeholder="vous@example.com"
-                error={errors.email?.message}
+                placeholder={t("auth.emailExample")}
+                error={errors.email?.message ? t(errors.email.message) : undefined}
                 {...register('email')}
               />
 
               <Input
-                label="Mot de passe"
+                label={t("auth.password")}
                 type="password"
                 autoComplete="current-password"
                 placeholder="••••••••"
-                error={errors.password?.message}
+                error={errors.password?.message ? t(errors.password.message) : undefined}
                 {...register('password')}
               />
 
               <Button type="submit" variant="violet" className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? (
                   <span className="flex items-center justify-center gap-2">
-                    <LoadingSpinner size="sm" aria-label="Connexion en cours" />
-                    Connexion...
+                    <LoadingSpinner size="sm" aria-label={t("auth.loginLoading")} />
+                    {t('auth.loginPending')}
                   </span>
                 ) : (
-                  'Se connecter'
+                  t('auth.login')
                 )}
               </Button>
             </form>
 
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3 text-center text-xs text-slate-600 sm:text-sm">
               <Link to="/forgot-password" className="font-medium text-[#2563EB] transition hover:text-[#1D4ED8]">
-                Mot de passe oublié ?
+                {t('auth.forgotPassword')}
               </Link>
               <Link to="/register" state={location.state} className="font-medium text-[#2563EB] transition hover:text-[#1D4ED8]">
-                Créer un compte
+                {t('auth.register')}
               </Link>
         </div>
       </div>

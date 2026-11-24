@@ -1,3 +1,6 @@
+import { professionalDisplay } from '../../i18n/professionalDisplay'
+import { clientLocale } from '../../i18n/clientDisplay'
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -71,7 +74,7 @@ function formatDateTime(value: string | null): string {
     return value
   }
 
-  return parsed.toLocaleString('fr-FR', {
+  return parsed.toLocaleString(clientLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
@@ -141,12 +144,13 @@ function DetailField({ label, value }: { label: string; value: string }) {
 }
 
 function DocumentPreview({ document }: { document: ManagerClientDocumentDetail }) {
+  const { t } = useTranslation()
   if (!document.file) {
     return (
       <Alert
         variant="info"
-        title="Apercu indisponible"
-        message="Aucun fichier n'a ete retourne par l'API pour ce document."
+        title={t("professional.apercu_indisponible")}
+        message={t("professional.aucun_fichier_n_a_ete_retourne_par_l_api_pour_ce_document")}
       />
     )
   }
@@ -161,6 +165,7 @@ function DocumentPreview({ document }: { document: ManagerClientDocumentDetail }
 }
 
 export default function ManagerDocumentDetailPage() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
   const [actionError, setActionError] = useState<string | null>(null)
@@ -250,11 +255,11 @@ export default function ManagerDocumentDetailPage() {
       <section className="mx-auto max-w-6xl space-y-5 px-4 py-8 sm:px-6 lg:px-8">
         <Alert
           variant="danger"
-          title="Document invalide"
-          message="L'identifiant de document est invalide."
+          title={t("professional.document_invalide")}
+          message={t("professional.l_identifiant_de_document_est_invalide")}
         />
         <Link to="/manager/documents" className="inline-flex">
-          <Button variant="secondary">Retour a la liste</Button>
+          <Button variant="secondary">{t("professional.retour_a_la_liste")}</Button>
         </Link>
       </section>
     )
@@ -263,7 +268,7 @@ export default function ManagerDocumentDetailPage() {
   if (detailQuery.isLoading) {
     return (
       <section className="mx-auto flex min-h-[60vh] max-w-6xl items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
-        <LoadingSpinner size="lg" aria-label="Chargement du document" />
+        <LoadingSpinner size="lg" aria-label={t("professional.chargement_du_document")} />
       </section>
     )
   }
@@ -273,16 +278,15 @@ export default function ManagerDocumentDetailPage() {
       <section className="mx-auto max-w-6xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
         <Alert
           variant="danger"
-          title="Chargement impossible"
-          message={toErrorMessage(detailQuery.error)}
+          title={t("client.chargement_impossible")}
+          message={professionalDisplay(t, toErrorMessage(detailQuery.error))}
         />
         <div className="flex flex-wrap gap-2">
           <Link to="/manager/documents">
-            <Button variant="secondary">Retour a la liste</Button>
+            <Button variant="secondary">{t("professional.retour_a_la_liste")}</Button>
           </Link>
           <Button variant="secondary" onClick={() => void detailQuery.refetch()}>
-            Reessayer
-          </Button>
+            {t("client.reessayer_alt")}</Button>
         </div>
       </section>
     )
@@ -307,20 +311,20 @@ export default function ManagerDocumentDetailPage() {
   const birthDateState = getBirthDateState(verifiedBirthDate)
   return (
     <section className="mx-auto max-w-6xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
-      {actionError ? <Alert variant="danger" title="Operation impossible" message={actionError} /> : null}
+      {actionError ? <Alert variant="danger" title={t("professional.operation_impossible")} message={professionalDisplay(t, actionError)} /> : null}
 
       <Card
         className="w-full"
         header={
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h1 className="text-lg font-semibold text-[#1F2937]">
-              {isDrivingLicense ? 'Vérification du permis de conduire' : "Vérification de la carte d'identité"}
+              {isDrivingLicense ? t("professional.verification_du_permis_de_conduire") : t("professional.verification_de_la_carte_d_identite")}
             </h1>
             <div className="flex flex-wrap items-center gap-2">
               {document.client_profile_status === 'INCOMPLET' ? (
-                <StatusBadge variant="warning" label="Profil incomplet" />
+                <StatusBadge variant="warning" label={t("professional.profil_incomplet")} />
               ) : null}
-              <StatusBadge variant={status.variant} label={status.label} />
+              <StatusBadge variant={status.variant} label={professionalDisplay(t, status.label)} />
             </div>
           </div>
         }
@@ -328,18 +332,18 @@ export default function ManagerDocumentDetailPage() {
           canAct ? (
             <div className="space-y-4">
               {!showRejectBlock ? (
-                <h2 className="text-lg font-semibold text-[#1F2937]">Vérification des données officielles</h2>
+                <h2 className="text-lg font-semibold text-[#1F2937]">{t("professional.verification_des_donnees_officielles")}</h2>
               ) : null}
               {canReject && showRejectBlock ? (
                 <div className="space-y-3">
                   <label htmlFor="reject-reason" className="block text-sm font-medium text-[#1F2937]">
-                    Motif de refus<span className="ml-1 text-[#EF4444]">*</span>
+                    {t("professional.motif_de_refus")}<span className="ml-1 text-[#EF4444]">*</span>
                   </label>
                   <textarea
                     id="reject-reason"
                     rows={4}
                     className="block w-full rounded-2xl border border-[#E5E7EB] bg-white px-4 py-3 text-sm text-[#1F2937] shadow-sm outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
-                    placeholder="Décrivez le motif de refus"
+                    placeholder={t("professional.decrivez_le_motif_de_refus")}
                     value={rejectReason}
                     onChange={(event) => {
                       setRejectReason(event.target.value)
@@ -351,7 +355,7 @@ export default function ManagerDocumentDetailPage() {
               ) : null}
               {!showRejectBlock && isDrivingLicense ? (
                 <fieldset className="space-y-2">
-                  <legend className="text-sm font-medium text-[#1F2937]">Type de permis vérifié</legend>
+                  <legend className="text-sm font-medium text-[#1F2937]">{t("professional.type_de_permis_verifie")}</legend>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <label className="flex min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
                       <input
@@ -363,8 +367,7 @@ export default function ManagerDocumentDetailPage() {
                         className="shrink-0 accent-violet-600"
                         onChange={() => setLicenseTransmissionSelection({ documentId, value: 'MANUAL_AND_AUTOMATIC' })}
                       />
-                      Permis manuel
-                    </label>
+                      {t("professional.permis_manuel")}</label>
                     <label className="flex min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
                       <input
                         type="radio"
@@ -375,8 +378,7 @@ export default function ManagerDocumentDetailPage() {
                         className="shrink-0 accent-violet-600"
                         onChange={() => setLicenseTransmissionSelection({ documentId, value: 'AUTOMATIC_ONLY' })}
                       />
-                      Permis automatique
-                    </label>
+                      {t("professional.permis_automatique")}</label>
                   </div>
                 </fieldset>
               ) : null}
@@ -384,16 +386,16 @@ export default function ManagerDocumentDetailPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   {!isDrivingLicense ? (
                     <>
-                      <Input label="Nom" required disabled={isPendingAction} value={lastName} onChange={(event) => setField('lastName', event.target.value)} />
-                      <Input label="Prénom" required disabled={isPendingAction} value={firstName} onChange={(event) => setField('firstName', event.target.value)} />
+                      <Input label={t("client.nom")} required disabled={isPendingAction} value={lastName} onChange={(event) => setField('lastName', event.target.value)} />
+                      <Input label={t("client.prenom")} required disabled={isPendingAction} value={firstName} onChange={(event) => setField('firstName', event.target.value)} />
                       <div>
-                        <Input label="Date de naissance vérifiée" type="date" required max={birthDateState.today} disabled={isPendingAction} value={verifiedBirthDate} onChange={(event) => setBirthDateSelection({ documentId, value: event.target.value })} />
-                        {birthDateState.underage ? <p className="mt-1 text-sm text-red-600">Client non éligible à la location : âge minimum de 21 ans.</p> : null}
+                        <Input label={t("professional.date_de_naissance_verifiee")} type="date" required max={birthDateState.today} disabled={isPendingAction} value={verifiedBirthDate} onChange={(event) => setBirthDateSelection({ documentId, value: event.target.value })} />
+                        {birthDateState.underage ? <p className="mt-1 text-sm text-red-600">{t("professional.client_non_eligible_a_la_location_age_minimum_de_21_ans")}</p> : null}
                       </div>
                     </>
                   ) : null}
-                  <Input label={isDrivingLicense ? 'Numéro de permis' : "Numéro de carte d'identité"} required disabled={isPendingAction} value={documentNumber} onChange={(event) => setField('documentNumber', event.target.value)} />
-                  <Input label="Date d’expiration" type="date" required disabled={isPendingAction} value={expirationDate} onChange={(event) => setField('expirationDate', event.target.value)} />
+                  <Input label={isDrivingLicense ? t("professional.numero_de_permis") : t("client.numero_de_carte_didentite")} required disabled={isPendingAction} value={documentNumber} onChange={(event) => setField('documentNumber', event.target.value)} />
+                  <Input label={t("client.date_dexpiration")} type="date" required disabled={isPendingAction} value={expirationDate} onChange={(event) => setField('expirationDate', event.target.value)} />
                 </div>
               ) : null}
 
@@ -414,7 +416,7 @@ export default function ManagerDocumentDetailPage() {
                         void rejectMutation.mutateAsync()
                       }}
                     >
-                      {rejectMutation.isPending ? 'Refus en cours...' : 'Confirmer le refus'}
+                      {rejectMutation.isPending ? t("professional.refus_en_cours") : t("professional.confirmer_le_refus")}
                     </Button>
                     <Button
                       variant="secondary"
@@ -426,8 +428,7 @@ export default function ManagerDocumentDetailPage() {
                         setRejectReasonError(null)
                       }}
                     >
-                      Annuler
-                    </Button>
+                      {t("client.annuler")}</Button>
                   </>
                 ) : (
                   <>
@@ -450,12 +451,11 @@ export default function ManagerDocumentDetailPage() {
                     >
                       {validateMutation.isPending ? (
                         <span className="flex items-center gap-2">
-                          <LoadingSpinner size="sm" aria-label="Validation en cours" />
-                          Validation en cours...
-                        </span>
+                          <LoadingSpinner size="sm" aria-label={t("client.validation_en_cours")} />
+                          {t("professional.validation_en_cours")}</span>
                       ) : isValidated
-                        ? hasChanges ? 'Enregistrer les modifications' : isDrivingLicense ? '✓ Permis de conduire validé' : "✓ Carte d'identité validée"
-                        : isDrivingLicense ? 'Valider le permis de conduire' : "Valider la carte d'identité"}
+                        ? hasChanges ? t("client.enregistrer_les_modifications") : isDrivingLicense ? t("professional.permis_de_conduire_valide") : t("professional.carte_d_identite_validee")
+                        : isDrivingLicense ? t("professional.valider_le_permis_de_conduire") : t("professional.valider_la_carte_d_identite")}
                     </Button>
 
                     {canReject ? (
@@ -468,7 +468,7 @@ export default function ManagerDocumentDetailPage() {
                           setShowRejectBlock(true)
                         }}
                       >
-                        {isDrivingLicense ? 'Refuser le permis de conduire' : "Refuser la carte d'identité"}
+                        {isDrivingLicense ? t("professional.refuser_le_permis_de_conduire") : t("professional.refuser_la_carte_d_identite")}
                       </Button>
                     ) : null}
                   </>
@@ -480,7 +480,7 @@ export default function ManagerDocumentDetailPage() {
       >
         <div className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <DetailField label="Date d’envoi" value={formatDateTime(document.uploaded_at)} />
+            <DetailField label={t("professional.date_d_envoi")} value={formatDateTime(document.uploaded_at)} />
             <div className="max-w-full">
               <DocumentPreview document={document} />
             </div>
@@ -488,9 +488,9 @@ export default function ManagerDocumentDetailPage() {
 
           {!canAct ? (
             <div className="space-y-3 border-t border-slate-100 pt-4">
-              <DetailField label="Date de décision" value={formatDateTime(document.validated_at)} />
+              <DetailField label={t("professional.date_de_decision")} value={formatDateTime(document.validated_at)} />
               {document.status === 'REFUSE' ? (
-                <DetailField label="Motif de refus" value={document.rejection_reason || 'Aucun motif indiqué'} />
+                <DetailField label={t("professional.motif_de_refus")} value={document.rejection_reason || 'Aucun motif indiqué'} />
               ) : null}
             </div>
           ) : null}
@@ -498,7 +498,7 @@ export default function ManagerDocumentDetailPage() {
       </Card>
       <div className="flex w-full justify-end">
         <Link to="/manager/documents">
-          <Button variant="secondary">Retour à la liste</Button>
+          <Button variant="secondary">{t("professional.retour_a_la_liste")}</Button>
         </Link>
       </div>
     </section>

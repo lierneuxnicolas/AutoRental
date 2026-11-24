@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import { clientDisplay, clientLocale } from '../../i18n/clientDisplay'
 import axios from 'axios'
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -44,7 +46,7 @@ function formatDate(value: string | null | undefined): string {
   if (Number.isNaN(parsed.getTime())) {
     return value.slice(0, 10)
   }
-  return parsed.toLocaleDateString('fr-FR')
+  return parsed.toLocaleDateString(clientLocale())
 }
 
 function formatUploadDate(value: string | undefined): string {
@@ -54,7 +56,7 @@ function formatUploadDate(value: string | undefined): string {
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime())
     ? formatDate(value)
-    : parsed.toLocaleDateString('fr-FR')
+    : parsed.toLocaleDateString(clientLocale())
 }
 
 function extractApiErrorMessage(error: unknown): string {
@@ -79,11 +81,12 @@ function ClientDocumentCard({
   documentType: ClientDocument['document_type']
   title: string
 }) {
+  const { t } = useTranslation()
   const status = getStatusDetails(document?.status ?? null)
   const transmissionLabel = documentType === 'PERMIS_CONDUIRE' && document?.status === 'VALIDE'
     ? formatTransmission(document.driving_license_transmission)
     : null
-  const displayTitle = transmissionLabel ? `${title} — ${transmissionLabel}` : title
+  const displayTitle = transmissionLabel ? `${clientDisplay(t, title)} — ${clientDisplay(t, transmissionLabel)}` : clientDisplay(t, title)
   return (
     <Card
       className="h-full border border-slate-100"
@@ -91,27 +94,27 @@ function ClientDocumentCard({
       header={
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-[#1F2937]">{displayTitle}</h2>
-          <StatusBadge variant={status.variant} label={status.label} />
+          <StatusBadge variant={status.variant} label={clientDisplay(t, status.label)} />
         </div>
       }
     >
       <div className="flex flex-1 flex-col gap-4">
         <dl className="grid grid-cols-2 gap-3 rounded-2xl bg-slate-50 p-4 text-sm">
           <div className="min-w-0 sm:col-span-2">
-            <dt className="font-medium text-slate-500">Numéro du document</dt>
+            <dt className="font-medium text-slate-500">{t('client.numero_du_document')}</dt>
             <dd className="mt-1 text-[#1F2937]">{document?.document_number || '—'}</dd>
           </div>
           <div className="min-w-0">
-            <dt className="font-medium text-slate-500">Date d’expiration</dt>
+            <dt className="font-medium text-slate-500">{t('client.date_dexpiration')}</dt>
             <dd className="mt-1 text-[#1F2937]">{formatDate(document?.expiration_date)}</dd>
           </div>
           <div className="min-w-0">
-            <dt className="font-medium text-slate-500">Date d’envoi</dt>
+            <dt className="font-medium text-slate-500">{t('client.date_denvoi')}</dt>
             <dd className="mt-1 text-[#1F2937]">{formatUploadDate(document?.uploaded_at)}</dd>
           </div>
           {document?.status === 'REFUSE' && document.rejection_reason ? (
             <div className="sm:col-span-2">
-              <dt className="font-medium text-slate-500">Motif du refus</dt>
+              <dt className="font-medium text-slate-500">{t('client.motif_du_refus')}</dt>
               <dd className="mt-1 text-red-700">{document.rejection_reason}</dd>
             </div>
           ) : null}
@@ -130,7 +133,7 @@ function ClientDocumentCard({
               disabled
               className="h-11 rounded-2xl bg-slate-100 px-4 text-sm font-medium text-slate-400"
             >
-              Document indisponible
+              {t('client.document_indisponible')}
             </button>
           )}
           <DocumentUpload documentType={documentType} existingDocument={document} />
@@ -141,6 +144,7 @@ function ClientDocumentCard({
 }
 
 export default function ProfileDocumentsTab() {
+  const { t } = useTranslation()
   const documentsQuery = useQuery({
     queryKey: ['client-documents'],
     queryFn: getClientDocuments,
@@ -156,7 +160,7 @@ export default function ProfileDocumentsTab() {
   if (documentsQuery.isLoading) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center py-8">
-        <LoadingSpinner size="lg" aria-label="Chargement des documents" />
+        <LoadingSpinner size="lg" aria-label={t('client.chargement_des_documents')} />
       </div>
     )
   }
@@ -165,7 +169,7 @@ export default function ProfileDocumentsTab() {
     <div className="space-y-6">
       {documentsQuery.error ? (
         <div className="space-y-3">
-          <Alert variant="danger" title="Chargement impossible" message={extractApiErrorMessage(documentsQuery.error)} />
+          <Alert variant="danger" title={t('client.chargement_impossible')} message={clientDisplay(t, extractApiErrorMessage(documentsQuery.error))} />
           <Button
             variant="secondary"
             disabled={documentsQuery.isFetching}
@@ -181,12 +185,12 @@ export default function ProfileDocumentsTab() {
           <ClientDocumentCard
             document={identityDocument}
             documentType="CARTE_IDENTITE"
-            title="Carte d’identité"
+            title={t('client.carte_didentite')}
           />
           <ClientDocumentCard
             document={drivingLicenseDocument}
             documentType="PERMIS_CONDUIRE"
-            title="Permis de conduire"
+            title={t('client.permis_de_conduire')}
           />
         </div>
       ) : null}

@@ -1,3 +1,4 @@
+import { Trans } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
 export default function RentalTermsCheckbox({ checked, onChange }: {
@@ -14,10 +15,10 @@ export default function RentalTermsCheckbox({ checked, onChange }: {
         className="mt-1 size-4 shrink-0 accent-[#6038FF]"
       />
       <span>
-        J'ai lu et j'accepte les{' '}
-        <Link to="/terms#conditions-location" target="_blank" rel="noopener noreferrer" className="font-medium text-[#6038FF] underline">
-          Conditions générales de location
-        </Link>{' '}de GetaCar.
+        <Trans
+          i18nKey="public.j_ai_lu_et_j_accepte_les_terms_conditions_generales_de"
+          components={{ terms: <Link to="/terms#conditions-location" target="_blank" rel="noopener noreferrer" className="font-medium text-[#6038FF] underline" /> }}
+        />
       </span>
     </label>
   )
